@@ -4,7 +4,7 @@
 // omp-config-update — apply the omp-config repo snapshot to an OMP agent dir.
 //
 // TWO ENTRY POINTS, ONE APPLY.
-//   auto   Run by extensions/omp-config-autoupdate.ts at OMP start when the
+//   auto   Run by extensions/omp-config-autoupdate/ at OMP start when the
 //          machine's switch is on (`/omp-config-autoupdate on`; off by default).
 //          Refreshes the updater-owned clone (~/.omp/omp-config-src) from
 //          origin, and applies only when the fetch succeeds and its commit
@@ -27,7 +27,8 @@
 //     DELETIONS); they stay ahead of the repo's entries;
 //   - keys a structured file has only on the host;
 //   - files not in the managed set (extra extensions, agents, templates,
-//     doc-polish.json, runtime state);
+//     HOST_OWNED files such as extensions/doc-polish/doc-polish.json,
+//     runtime state);
 //   - app-managed files (`// @orca-managed-pi-extension` first line, or the
 //     Otty marker anywhere; see OTTY_MARKER), checked before every overwrite
 //     and delete;
@@ -41,11 +42,27 @@
 // list had and the new one does not. Without the old commit (first run,
 // gc'd object) nothing is deleted.
 //
+// RELOCATIONS. Both modes, planned like every other op. Earlier layouts kept
+// extensions flat (extensions/<name>.ts) and their files at the agent root.
+//   - A flat module SUPERSEDED by a module the source ships is deleted: two
+//     modules with one extension id would both load. An app-managed one is
+//     reported as an error instead.
+//   - A structured file with a `legacyRel` is merged from the old host copy
+//     when the new one is absent, then the old copy is deleted; the previous
+//     commit's keys are read from either path, so dropped keys still go.
+//   - DATA_MOVES carry agent-root data into its extension directory: a
+//     host-owned file is renamed there when the new path is free (else left,
+//     with a note); a repo template (shipped now, or by the previous commit)
+//     is deleted, as the source writes or dropped it. Symlinks are never
+//     moved, only noted.
+//   - Retired config.yml list entries (RETIRED_LIST_ENTRIES) are dropped.
+// Manual apply deletes nothing else.
+//
 // SAFETY. Every structured source must parse to a mapping before any write;
 // one invalid source aborts the whole apply. A host structured file that does
 // not parse is left untouched and reported as an error. Writes go to a temp file in the
-// target's directory and are renamed over it. Order: plain files, JSON,
-// config.yml, deletions. Any error leaves the applied marker unchanged, so
+// target's directory and are renamed over it. Order: moves, plain files,
+// JSON, config.yml, deletions. Any error leaves the applied marker unchanged, so
 // the next start retries. A lock dir (~/.omp/omp-config-update.lock) keeps
 // concurrent OMP starts and /update-omp from refreshing or applying at once;
 // the loser skips. The lock records its holder's pid: a dead holder's lock is
@@ -62,9 +79,9 @@ import {
 	existsSync,
 	lstatSync,
 	mkdirSync,
-	readlinkSync,
-	readFileSync,
 	readdirSync,
+	readFileSync,
+	readlinkSync,
 	realpathSync,
 	renameSync,
 	rmSync,
@@ -108,10 +125,70 @@ export const LOCAL_CONFIG_FIELDS: readonly string[] = [
  */
 export const MACHINE_LIST_FIELDS: readonly string[] = ["extensions"];
 
+/**
+ * Entries earlier repo versions put in a MACHINE_LIST_FIELDS list and later
+ * replaced. Manual apply has no previous commit to tell a dropped repo entry
+ * from a machine one, so these are named explicitly and dropped in both modes.
+ */
+const RETIRED_LIST_ENTRIES: Readonly<Record<string, readonly string[]>> = {
+	extensions: ["~/.omp/agent/extensions-last/system-prompt-replace.ts"],
+};
+
+/** Flat modules of earlier layouts (agent-dir relative) and the module that replaced each. */
+const SUPERSEDED: readonly { readonly from: string; readonly by: string }[] = [
+	...[
+		"append-system-model",
+		"bro",
+		"commandcode-model-spec",
+		"ctx-tasklog",
+		"ctx-tool",
+		"doc-polish",
+		"fork-task",
+		"input-polish",
+		"isolation-nudge",
+		"lang-nag",
+		"omp-config-autoupdate",
+		"repo-rules",
+		"subagent-todo",
+		"task-completion-judge",
+		"task-split-check",
+		"tool-policy-nag",
+		"turn-judge",
+		"user-prompt-inject",
+		"watchdog-agent",
+		"wt-tool",
+	].map((name) => ({ from: `extensions/${name}.ts`, by: `extensions/${name}/index.ts` })),
+	{ from: "extensions/ctx-post-compact-hint.ts", by: "extensions/ctx-tool/index.ts" },
+	{ from: "extensions-last/system-prompt-replace.ts", by: "extensions-last/system-prompt-replace/index.ts" },
+];
+
+/**
+ * Agent-root data that now lives in its extension directory (agent-dir
+ * relative). `host` files are the machine's; `template` files are the repo's
+ * when the source ships the new path or the previous commit shipped the old
+ * one, and the machine's otherwise. A `pattern` matches names at the agent root.
+ */
+type DataMove =
+	| { readonly kind: "file"; readonly owner: "host"; readonly from: string; readonly to: string }
+	| { readonly kind: "pattern"; readonly owner: "host" | "template"; readonly pattern: RegExp; readonly toDir: string };
+
+const DATA_MOVES: readonly DataMove[] = [
+	{ kind: "file", owner: "host", from: "extensions/doc-polish.json", to: "extensions/doc-polish/doc-polish.json" },
+	{ kind: "file", owner: "host", from: "APPEND_SYSTEM_MODEL.md", to: "extensions/append-system-model/APPEND_SYSTEM_MODEL.md" },
+	{ kind: "file", owner: "host", from: "bro-prompt.md", to: "extensions/bro/bro-prompt.md" },
+	{ kind: "file", owner: "host", from: "bro-settings.json", to: "extensions/bro/bro-settings.json" },
+	{ kind: "file", owner: "host", from: "omp-config-autoupdate.json", to: "extensions/omp-config-autoupdate/omp-config-autoupdate.json" },
+	{ kind: "pattern", owner: "template", pattern: /^PROMPT-INJECT-.+\.md$/i, toDir: "extensions/user-prompt-inject" },
+	{ kind: "pattern", owner: "template", pattern: /^TURN-JUDGE-.+\.md$/i, toDir: "extensions/turn-judge" },
+	{ kind: "pattern", owner: "host", pattern: /^WATCHDOG-.+\.md$/i, toDir: "extensions/watchdog-agent" },
+];
+
 type Format = "json" | "yaml";
 
 interface StructuredItem {
 	readonly rel: string;
+	/** Where earlier layouts kept this file; see RELOCATIONS. */
+	readonly legacyRel?: string;
 	readonly format: Format;
 	readonly localFields: readonly string[];
 	readonly machineLists: readonly string[];
@@ -120,23 +197,40 @@ interface StructuredItem {
 /** Structured files, in apply order: config.yml last (it is live-reloaded). */
 const STRUCTURED: readonly StructuredItem[] = [
 	{ rel: "agent/thinking-translator.json", format: "json", localFields: [], machineLists: [] },
-	{ rel: "agent/system-prompt-replace.json", format: "json", localFields: [], machineLists: [] },
-	{ rel: "agent/extensions/lang-nag.json", format: "json", localFields: [], machineLists: [] },
-	{ rel: "agent/extensions/input-polish.json", format: "json", localFields: [], machineLists: [] },
-	{ rel: "agent/extensions/tool-policy-nag.json", format: "json", localFields: [], machineLists: [] },
+	{
+		rel: "agent/extensions-last/system-prompt-replace/system-prompt-replace.json",
+		legacyRel: "agent/system-prompt-replace.json",
+		format: "json",
+		localFields: [],
+		machineLists: [],
+	},
+	...["lang-nag", "input-polish", "tool-policy-nag"].map(
+		(name): StructuredItem => ({
+			rel: `agent/extensions/${name}/${name}.json`,
+			legacyRel: `agent/extensions/${name}.json`,
+			format: "json",
+			localFields: [],
+			machineLists: [],
+		}),
+	),
 	{ rel: "pi/agent/pi-bansos-relay-state.json", format: "json", localFields: [], machineLists: [] },
 	{ rel: "agent/config.yml", format: "yaml", localFields: LOCAL_CONFIG_FIELDS, machineLists: MACHINE_LIST_FIELDS },
 ];
 
-/** Repo files copied verbatim. `rel` uses `/` separators. */
+/**
+ * Repo files copied verbatim. `rel` uses `/` separators. Inside an extension
+ * directory only modules and shipped templates are the repo's; any other file
+ * there (settings, switches, the machine's own templates) is the host's.
+ */
 function managedPlain(rel: string): boolean {
-	if (rel.split("/").some(part => part.startsWith("."))) return false;
+	if (rel.split("/").some((part) => part.startsWith("."))) return false;
 	return (
-		/^agent\/(APPEND_SYSTEM|APPEND_SYSTEM_MODEL|APPEND_SYSTEM_LIGHT)\.md$/.test(rel) ||
-		/^agent\/(PROMPT-INJECT|TURN-JUDGE)-[^/]+\.md$/.test(rel) ||
+		/^agent\/(APPEND_SYSTEM|APPEND_SYSTEM_LIGHT)\.md$/.test(rel) ||
 		/^agent\/(config-light\.yml|omp-light\.ts|omp-config-update\.ts)$/.test(rel) ||
 		/^agent\/agents\/.+$/.test(rel) ||
-		/^agent\/(extensions|extensions-last)\/[^/]+\.ts$/.test(rel)
+		/^agent\/(extensions|extensions-last)\/[^/]+\/[^/]+\.ts$/.test(rel) ||
+		/^agent\/extensions\/user-prompt-inject\/PROMPT-INJECT-[^/]+\.md$/.test(rel) ||
+		/^agent\/extensions\/turn-judge\/TURN-JUDGE-[^/]+\.md$/.test(rel)
 	);
 }
 
@@ -155,6 +249,8 @@ export interface ApplyOptions {
 
 export interface ApplyReport {
 	readonly written: string[];
+	/** RELOCATIONS: host files moved to their new path. */
+	readonly moved: { from: string; to: string }[];
 	readonly deleted: string[];
 	readonly skipped: { path: string; reason: string }[];
 	readonly errors: string[];
@@ -265,7 +361,7 @@ function atomicWrite(target: string, content: string | Uint8Array, mode?: number
 
 function pathIsLocal(path: readonly string[], localFields: readonly string[]): boolean {
 	const joined = path.join(".");
-	return localFields.some(field => joined === field || joined.startsWith(`${field}.`));
+	return localFields.some((field) => joined === field || joined.startsWith(`${field}.`));
 }
 
 type MergeRules = Pick<StructuredItem, "localFields" | "machineLists">;
@@ -283,12 +379,12 @@ function overlay(host: unknown, repo: Mapping, rules: MergeRules, path: readonly
 		}
 		// A non-map would wipe a local field nested under this key; the host's map stays.
 		const prefix = `${keyPath.join(".")}.`;
-		if (isMapping(result[key]) && rules.localFields.some(field => field.startsWith(prefix))) continue;
+		if (isMapping(result[key]) && rules.localFields.some((field) => field.startsWith(prefix))) continue;
 		const current = result[key];
 		// Entries the repo's list lacks stay on the host, ahead of the repo's entries.
 		result[key] =
 			Array.isArray(value) && Array.isArray(current) && rules.machineLists.includes(keyPath.join("."))
-				? [...current.filter(entry => !value.some(own => Bun.deepEquals(own, entry))), ...structuredClone(value)]
+				? [...current.filter((entry) => !value.some((own) => Bun.deepEquals(own, entry))), ...structuredClone(value)]
 				: structuredClone(value);
 	}
 	return result;
@@ -303,7 +399,10 @@ function removeDropped(host: Mapping, oldRepo: Mapping, newRepo: Mapping, rules:
 		if (Array.isArray(oldValue) && Array.isArray(current) && rules.machineLists.includes(keyPath.join("."))) {
 			// The repo's dropped entries go; entries the repo never listed are the machine's.
 			const next = newRepo[key];
-			const kept = current.filter(entry => !oldValue.some(old => Bun.deepEquals(old, entry)) || (Array.isArray(next) && next.some(own => Bun.deepEquals(own, entry))));
+			const kept = current.filter(
+				(entry) =>
+					!oldValue.some((old) => Bun.deepEquals(old, entry)) || (Array.isArray(next) && next.some((own) => Bun.deepEquals(own, entry))),
+			);
 			if (kept.length === 0 && !(key in newRepo)) delete host[key];
 			else host[key] = kept;
 			continue;
@@ -328,6 +427,7 @@ function removeDropped(host: Mapping, oldRepo: Mapping, newRepo: Mapping, rules:
 
 type Op =
 	| { readonly kind: "write"; readonly rel: string; readonly target: string; readonly content: string | Uint8Array }
+	| { readonly kind: "move"; readonly rel: string; readonly from: string; readonly target: string }
 	| { readonly kind: "delete"; readonly rel: string; readonly target: string };
 
 function listSourceFiles(source: string): string[] {
@@ -337,7 +437,10 @@ function listSourceFiles(source: string): string[] {
 	for (const entry of entries) {
 		if (!entry.isFile()) continue;
 		const abs = join(entry.parentPath, entry.name);
-		const rel = `agent/${abs.slice(root.length + 1).split("\\").join("/")}`;
+		const rel = `agent/${abs
+			.slice(root.length + 1)
+			.split("\\")
+			.join("/")}`;
 		if (managedPlain(rel)) files.push(rel);
 	}
 	return files.sort();
@@ -366,9 +469,11 @@ function planPlain(opts: ApplyOptions, report: ApplyReport): Op[] {
 	return ops;
 }
 
-function planStructured(opts: ApplyOptions, report: ApplyReport): Op[] {
-	// Parse every source first: one invalid source aborts the whole apply.
-	const sources: { item: StructuredItem; text: string; repo: Mapping }[] = [];
+type StructuredSource = { readonly item: StructuredItem; readonly text: string; readonly repo: Mapping };
+
+/** Parse every structured source before anything is written: one invalid source aborts the whole apply. */
+function parseSources(opts: ApplyOptions, report: ApplyReport): StructuredSource[] {
+	const sources: StructuredSource[] = [];
 	for (const item of STRUCTURED) {
 		const sourcePath = join(opts.source, item.rel);
 		if (!existsSync(sourcePath)) {
@@ -390,26 +495,34 @@ function planStructured(opts: ApplyOptions, report: ApplyReport): Op[] {
 			throw new Error(`agent/config-light.yml: invalid yaml (${errorText(error)}); nothing applied`);
 		}
 	}
+	return sources;
+}
 
+function planStructured(opts: ApplyOptions, report: ApplyReport, sources: readonly StructuredSource[]): Op[] {
 	const ops: Op[] = [];
 	for (const { item, text, repo } of sources) {
 		const target = targetOf(item.rel, opts.agentDir);
+		const legacy = item.legacyRel === undefined ? undefined : targetOf(item.legacyRel, opts.agentDir);
+		const legacyPresent = legacy !== undefined && lexists(legacy);
+		// The host copy: the current path, else the one an earlier layout left behind.
+		const hostPath = existsSync(target) ? target : legacyPresent ? legacy : undefined;
+		if (legacyPresent && hostPath === target) report.notes.push(`${legacy} left in place: ${target} already exists`);
 		let host: Mapping | undefined;
-		if (existsSync(target)) {
-			if (isAppManaged(target)) {
-				report.skipped.push({ path: target, reason: "app-managed" });
+		if (hostPath !== undefined) {
+			if (isAppManaged(hostPath)) {
+				report.skipped.push({ path: hostPath, reason: "app-managed" });
 				continue;
 			}
 			try {
-				host = parseStructured(readFileSync(target, "utf8"), item.format);
+				host = parseStructured(readFileSync(hostPath, "utf8"), item.format);
 			} catch (error) {
 				// Replacing it would drop the host's local fields; leave it and retry next start.
-				report.errors.push(`${target}: host copy unparsable (${errorText(error)}); left untouched`);
+				report.errors.push(`${hostPath}: host copy unparsable (${errorText(error)}); left untouched`);
 				continue;
 			}
 		}
 		const merged = overlay(host, repo, item, []);
-		const oldText = oldRepoText(opts, item.rel);
+		const oldText = oldRepoText(opts, item.rel) ?? (item.legacyRel === undefined ? undefined : oldRepoText(opts, item.legacyRel));
 		if (oldText !== undefined) {
 			try {
 				removeDropped(merged, parseStructured(oldText, item.format), repo, item, []);
@@ -417,10 +530,102 @@ function planStructured(opts: ApplyOptions, report: ApplyReport): Op[] {
 				report.notes.push(`${item.rel}: previous version unparsable, no keys removed`);
 			}
 		}
-		if (host !== undefined && Bun.deepEquals(host, merged)) continue;
+		dropRetiredEntries(merged, item.machineLists);
+		const fromLegacy = hostPath !== undefined && hostPath !== target;
+		if (!fromLegacy && host !== undefined && Bun.deepEquals(host, merged)) continue;
 		// Keep the repo's own formatting whenever the result is exactly the repo file.
 		const content = Bun.deepEquals(merged, repo) ? text : serialize(merged, item.format);
 		ops.push({ kind: "write", rel: item.rel, target, content });
+		if (fromLegacy && item.legacyRel !== undefined) ops.push({ kind: "delete", rel: item.legacyRel, target: hostPath });
+	}
+	return ops;
+}
+
+/** Remove RETIRED_LIST_ENTRIES from the merged machine lists. */
+function dropRetiredEntries(merged: Mapping, machineLists: readonly string[]): void {
+	for (const field of machineLists) {
+		const retired = RETIRED_LIST_ENTRIES[field];
+		if (retired === undefined) continue;
+		const keys = field.split(".");
+		const last = keys.pop();
+		let parent: unknown = merged;
+		for (const key of keys) parent = isMapping(parent) ? parent[key] : undefined;
+		if (last === undefined || !isMapping(parent)) continue;
+		const list = parent[last];
+		if (Array.isArray(list)) parent[last] = list.filter((entry) => !retired.includes(entry));
+	}
+}
+
+function lexists(path: string): boolean {
+	try {
+		lstatSync(path);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/** True when the previous applied commit had `rel`; always false in manual apply. */
+function previouslyShipped(opts: ApplyOptions, rel: string): boolean {
+	return opts.previousCommit !== undefined && git(opts.source, ["cat-file", "-e", `${opts.previousCommit}:${rel}`]).ok;
+}
+
+/** SUPERSEDED and DATA_MOVES as ops (see RELOCATIONS in the header). */
+function planRelocations(opts: ApplyOptions, report: ApplyReport): Op[] {
+	const ops: Op[] = [];
+	for (const { from, by } of SUPERSEDED) {
+		const target = join(opts.agentDir, from);
+		if (!lexists(target) || !existsSync(join(opts.source, "agent", by))) continue;
+		if (isAppManaged(target)) {
+			report.errors.push(`${target} is app-managed and would load beside ${join(opts.agentDir, by)}; remove one of them`);
+			continue;
+		}
+		ops.push({ kind: "delete", rel: `agent/${from}`, target });
+	}
+	const moves: { from: string; to: string; owner: "host" | "template" }[] = [];
+	for (const entry of DATA_MOVES) {
+		switch (entry.kind) {
+			case "file":
+				moves.push({ from: entry.from, to: entry.to, owner: entry.owner });
+				break;
+			case "pattern": {
+				let names: string[];
+				try {
+					names = readdirSync(opts.agentDir);
+				} catch {
+					// No agent dir yet: nothing to move.
+					continue;
+				}
+				for (const name of names.sort()) {
+					if (entry.pattern.test(name)) moves.push({ from: name, to: `${entry.toDir}/${name}`, owner: entry.owner });
+				}
+				break;
+			}
+			default: {
+				const unreachable: never = entry;
+				throw new Error(`unknown data move ${JSON.stringify(unreachable)}`);
+			}
+		}
+	}
+	for (const { from, to, owner } of moves) {
+		const source = join(opts.agentDir, from);
+		const target = join(opts.agentDir, to);
+		if (!lexists(source)) continue;
+		if (isAppManaged(source)) {
+			report.skipped.push({ path: source, reason: "app-managed" });
+			continue;
+		}
+		const repoOwned = owner === "template" && (existsSync(join(opts.source, "agent", to)) || previouslyShipped(opts, `agent/${from}`));
+		if (repoOwned) {
+			// The source writes the new copy, or dropped the template: the old copy has no owner left.
+			ops.push({ kind: "delete", rel: `agent/${from}`, target: source });
+		} else if (lstatSync(source).isSymbolicLink()) {
+			report.notes.push(`${source} is a symlink and was not moved; point it at ${target} yourself`);
+		} else if (lexists(target)) {
+			report.notes.push(`${source} left in place: ${target} already exists`);
+		} else {
+			ops.push({ kind: "move", rel: `agent/${to}`, from: source, target });
+		}
 	}
 	return ops;
 }
@@ -428,7 +633,17 @@ function planStructured(opts: ApplyOptions, report: ApplyReport): Op[] {
 function planDeletions(opts: ApplyOptions, report: ApplyReport): Op[] {
 	if (opts.previousCommit === undefined) return [];
 	// -z: NUL-separated, unquoted paths (non-ASCII names are C-quoted otherwise).
-	const diff = git(opts.source, ["diff", "-z", "--no-renames", "--name-only", "--diff-filter=D", opts.previousCommit, "HEAD", "--", "agent"]);
+	const diff = git(opts.source, [
+		"diff",
+		"-z",
+		"--no-renames",
+		"--name-only",
+		"--diff-filter=D",
+		opts.previousCommit,
+		"HEAD",
+		"--",
+		"agent",
+	]);
 	if (!diff.ok) {
 		report.notes.push(`deletions skipped: ${diff.err}`);
 		return [];
@@ -543,7 +758,7 @@ function npmName(spec: string): string {
 
 function syncPlugins(opts: ApplyOptions, report: ApplyReport): void {
 	const installed = installedPluginSpecs();
-	const missing = declaredPlugins(opts.source).filter(spec =>
+	const missing = declaredPlugins(opts.source).filter((spec) =>
 		spec.includes("://") ? !installed.values.has(spec.split("#", 1)[0]!) : !installed.names.has(npmName(spec)),
 	);
 	if (missing.length === 0) return;
@@ -572,28 +787,57 @@ function syncPlugins(opts: ApplyOptions, report: ApplyReport): void {
 // --- apply ------------------------------------------------------------------
 
 export async function applySnapshot(opts: ApplyOptions): Promise<ApplyReport> {
-	const report: ApplyReport = { written: [], deleted: [], skipped: [], errors: [], notes: [], pluginsInstalled: [], pluginsMissing: [], restartNeeded: false };
+	const report: ApplyReport = {
+		written: [],
+		moved: [],
+		deleted: [],
+		skipped: [],
+		errors: [],
+		notes: [],
+		pluginsInstalled: [],
+		pluginsMissing: [],
+		restartNeeded: false,
+	};
 	let ops: Op[];
 	try {
-		ops = [...planPlain(opts, report), ...planStructured(opts, report), ...planDeletions(opts, report)];
+		const sources = parseSources(opts, report);
+		const planned = [
+			...planRelocations(opts, report),
+			...planPlain(opts, report),
+			...planStructured(opts, report, sources),
+			...planDeletions(opts, report),
+		];
+		// Moves first, so writes land beside moved host files; deletions last, so a failure never leaves a module missing.
+		const rank: Record<Op["kind"], number> = { move: 0, write: 1, delete: 2 };
+		ops = planned.toSorted((a, b) => rank[a.kind] - rank[b.kind]);
 	} catch (error) {
 		report.errors.push(errorText(error));
 		return report;
 	}
 	for (const op of ops) {
 		if (RESTART_SCOPED.test(op.rel)) report.restartNeeded = true;
-		if (opts.check) {
-			(op.kind === "write" ? report.written : report.deleted).push(op.target);
-			continue;
-		}
 		try {
-			if (op.kind === "write") {
-				atomicWrite(op.target, op.content);
-				report.written.push(op.target);
-			} else {
-				// Remove the managed entry itself; a symlink's backing file is not ours.
-				unlinkSync(op.target);
-				report.deleted.push(op.target);
+			switch (op.kind) {
+				case "move":
+					if (!opts.check) {
+						mkdirSync(dirname(op.target), { recursive: true });
+						renameSync(op.from, op.target);
+					}
+					report.moved.push({ from: op.from, to: op.target });
+					break;
+				case "write":
+					if (!opts.check) atomicWrite(op.target, op.content);
+					report.written.push(op.target);
+					break;
+				case "delete":
+					// Remove the managed entry itself; a symlink's backing file is not ours.
+					if (!opts.check) unlinkSync(op.target);
+					report.deleted.push(op.target);
+					break;
+				default: {
+					const unreachable: never = op;
+					throw new Error(`unknown op ${JSON.stringify(unreachable)}`);
+				}
 			}
 		} catch (error) {
 			report.errors.push(`${op.target}: ${errorText(error)}`);
@@ -700,9 +944,11 @@ export async function runAuto(agentDir: string, branch: string): Promise<AutoRes
 		// Apply with the fetched commit's own rules. Dynamic import is required:
 		// the module is the just-fetched clone's copy, chosen at runtime, not this file.
 		const fetchedUpdater = join(CLONE_DIR, "agent", "omp-config-update.ts");
-		if (!existsSync(fetchedUpdater)) return { kind: "failed", error: `${branch} at ${commit.slice(0, 7)} has no agent/omp-config-update.ts; nothing applied` };
+		if (!existsSync(fetchedUpdater))
+			return { kind: "failed", error: `${branch} at ${commit.slice(0, 7)} has no agent/omp-config-update.ts; nothing applied` };
 		const fetched: { applySnapshot?: typeof applySnapshot } = await import(pathToFileURL(fetchedUpdater).href);
-		if (typeof fetched.applySnapshot !== "function") return { kind: "failed", error: "fetched omp-config-update.ts exports no applySnapshot" };
+		if (typeof fetched.applySnapshot !== "function")
+			return { kind: "failed", error: "fetched omp-config-update.ts exports no applySnapshot" };
 		const report = await fetched.applySnapshot({ source: CLONE_DIR, agentDir, previousCommit, check: false, plugins: true });
 		if (applied && previousCommit === undefined) report.notes.push(`previous commit ${applied} unavailable, no deletions`);
 		if (report.errors.length === 0) atomicWrite(markerPath, `${commit}\n`);
@@ -720,13 +966,14 @@ function formatReport(report: ApplyReport, check: boolean): string {
 	const lines: string[] = [];
 	const verb = check ? "would write" : "wrote";
 	for (const path of report.written) lines.push(`${verb}: ${path}`);
+	for (const { from, to } of report.moved) lines.push(`${check ? "would move" : "moved"}: ${from} -> ${to}`);
 	for (const path of report.deleted) lines.push(`${check ? "would delete" : "deleted"}: ${path}`);
 	for (const { path, reason } of report.skipped) lines.push(`skipped (${reason}): ${path}`);
 	for (const spec of report.pluginsInstalled) lines.push(`plugin installed: ${spec}`);
 	for (const spec of report.pluginsMissing) lines.push(`plugin missing: ${spec}`);
 	for (const note of report.notes) lines.push(`note: ${note}`);
 	for (const error of report.errors) lines.push(`error: ${error}`);
-	if (report.written.length + report.deleted.length === 0) lines.push("no file changes");
+	if (report.written.length + report.moved.length + report.deleted.length === 0) lines.push("no file changes");
 	if (report.restartNeeded) lines.push("restart OMP: APPEND_SYSTEM.md, extensions or plugins changed");
 	return lines.join("\n");
 }
@@ -761,7 +1008,10 @@ async function main(argv: readonly string[]): Promise<number> {
 		const result = await runAuto(agentDir, branch);
 		if (json) process.stdout.write(`${JSON.stringify(result)}\n`);
 		else if (result.kind === "applied") process.stdout.write(`applied ${result.commit}\n${formatReport(result.report, false)}\n`);
-		else process.stdout.write(`${result.kind}${"commit" in result ? ` ${result.commit}` : ""}${"error" in result ? `: ${result.error}` : ""}\n`);
+		else
+			process.stdout.write(
+				`${result.kind}${"commit" in result ? ` ${result.commit}` : ""}${"error" in result ? `: ${result.error}` : ""}\n`,
+			);
 		return result.kind === "failed" || (result.kind === "applied" && result.report.errors.length > 0) ? 1 : 0;
 	}
 	if (mode === "apply") {

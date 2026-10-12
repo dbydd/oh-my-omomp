@@ -14,6 +14,8 @@ agent/blobs/
 agent/cache/
 plugins/node_modules/
 plugins/.cache/
+node_modules/
+bun.lock
 
 
 # Credential-bearing and generated files

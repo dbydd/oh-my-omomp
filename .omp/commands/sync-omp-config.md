@@ -8,7 +8,13 @@ description: 把本机 ~/.omp/agent 配置和 pi-bansos 状态同步进本仓库
 
 ## 同步范围
 
-本机 `~/.omp/agent` 与仓库 `agent/` 按同名一一对应：`config.yml`、`APPEND_SYSTEM.md`、`APPEND_SYSTEM_MODEL.md`、`thinking-translator.json`、`system-prompt-replace.json`、`PROMPT-INJECT-*.md`、`TURN-JUDGE-*.md`、`config-light.yml`、`APPEND_SYSTEM_LIGHT.md`、`omp-light.ts`、`omp-config-update.ts`、`agents/`、`extensions/*.ts`、`extensions-last/*.ts`、`extensions/lang-nag.json`、`extensions/input-polish.json`、`extensions/tool-policy-nag.json`。这个范围与 `agent/omp-config-update.ts` 的 `managedPlain` 和 `STRUCTURED` 一致，改一边就要改另一边。本机 `settings.json` 不在范围内：`config.yml` 存在时 OMP 不再把它的 `extensions` 当扩展包根目录，但其中的 TS/JS 扩展模块条目照样加载，属于本机。
+本机 `~/.omp/agent` 与仓库 `agent/` 按同名一一对应，范围与 `agent/omp-config-update.ts` 的 `managedPlain` 和 `STRUCTURED` 一致，改一边就要改另一边：
+
+- 根目录：`config.yml`、`APPEND_SYSTEM.md`、`thinking-translator.json`、`config-light.yml`、`APPEND_SYSTEM_LIGHT.md`、`omp-light.ts`、`omp-config-update.ts`，以及 `agents/` 整个目录。
+- 扩展目录里只有这些属于仓库：`extensions/<名字>/*.ts`（含 `extensions/_shared/*.ts`）、`extensions-last/<名字>/*.ts`、`extensions/user-prompt-inject/PROMPT-INJECT-*.md`、`extensions/turn-judge/TURN-JUDGE-*.md`，以及结构化配置 `extensions/lang-nag/lang-nag.json`、`extensions/input-polish/input-polish.json`、`extensions/tool-policy-nag/tool-policy-nag.json`、`extensions-last/system-prompt-replace/system-prompt-replace.json`。
+- 扩展目录里的其他文件属于本机，不收回：`extensions/doc-polish/doc-polish.json`、`extensions/bro/bro-settings.json` 和 `bro-prompt.md`、`extensions/omp-config-autoupdate/omp-config-autoupdate.json`、`extensions/append-system-model/APPEND_SYSTEM_MODEL.md`、`extensions/watchdog-agent/WATCHDOG-*.md`，以及仓库没有的同名模式模板。
+
+本机 `settings.json` 不在范围内：`config.yml` 存在时 OMP 不再把它的 `extensions` 当扩展包根目录，但其中的 TS/JS 扩展模块条目照样加载，属于本机。
 
 另有一项不在 `~/.omp/agent` 下：`pi-bansos` 插件的状态文件 `~/.pi/agent/pi-bansos-relay-state.json` 对应仓库 `pi/agent/pi-bansos-relay-state.json`。它由 `/bansos` 命令写入，保存 relay 开关、当前 relay、已存 relay 列表和状态栏显示（`statusBar`），不含凭据。本机没有这个文件时（从未执行过 `/bansos` 的改动类子命令）不算“本机已删除”，仓库保持原样并在报告里说明。
 
@@ -21,12 +27,13 @@ description: 把本机 ~/.omp/agent 配置和 pi-bansos 状态同步进本仓库
 
 ## 步骤
 
-1. 逐文件比对，列出仓库缺失、内容不同、本机已删除三类差异；`agents/`、`extensions/`、`extensions-last/` 用 `diff -rq`。`extensions-last/README.md` 只存在于仓库，不算本机已删除。同时比对第 3 步的插件列表。文件和插件列表都没有差异时，报告已同步并结束。
+0. 本机还是平铺布局时停止：`~/.omp/agent/extensions/` 下直接有本仓库扩展同名的 `.ts`（不含应用托管文件），或 `~/.omp/agent/extensions-last/system-prompt-replace.ts` 存在。报告这些文件，要求先执行 `/update-omp` 迁移本机，不比对、不写仓库：拿平铺布局和仓库比对会把仓库的整套目录误判为本机已删除。
+1. 按上面的范围逐文件比对，列出仓库缺失、内容不同、本机已删除三类差异；扩展目录按范围里的文件类型逐个比对，不用整目录 `diff -rq`。`extensions-last/README.md` 只存在于仓库，不算本机已删除。同时比对第 3 步的插件列表。文件和插件列表都没有差异时，报告已同步并结束。
 2. 把差异写入仓库。结构化配置（`config.yml`、各 JSON）先 `read` 两边、比出有差异的字段，再用 `edit` 只改这些行，不整文件覆盖、不重新序列化；`config.yml` 的本机字段和本机列表条目不写。
 3. `~/.omp/plugins/package.json` 的依赖与 `install-plugins.sh` 的列表不一致时，重写列表：URL/Git 依赖原样保留，npm 依赖去掉版本号。列表里注释掉的条目是可选插件，本机装了也保持注释、不改成有效条目，也不算差异。
 4. 校验：
    - 普通文件与本机 `cmp` 一致；结构化配置除 `config.yml` 的本机字段和本机列表条目外，与本机逐字段一致。
-   - `config.yml`、`config-light.yml` 能用 `Bun.YAML.parse` 解析，`thinking-translator.json`、`system-prompt-replace.json`、`lang-nag.json`、`input-polish.json`、`tool-policy-nag.json`、`pi-bansos-relay-state.json` 能用 `JSON.parse` 解析。
+   - `config.yml`、`config-light.yml` 能用 `Bun.YAML.parse` 解析，`thinking-translator.json`、`system-prompt-replace.json`、`lang-nag.json`、`input-polish.json`、`tool-policy-nag.json`、`pi-bansos-relay-state.json` 能用 `JSON.parse` 解析；`bun run check` 通过（收回的扩展代码要能过格式、lint 和类型检查）。
    - 仓库里没有明文凭据：`sk-`、`ghp_`、超长的 `apiKey:` 值。
    - `git status --short` 里没有运行时文件、插件运行时文件或已安装入口。
 5. 提交并推送，commit message 用 `chore: sync snapshot with local omp config`，正文列出本机实际变化。

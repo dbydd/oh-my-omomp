@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
-import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
 import { accessSync, constants, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -41,7 +41,7 @@ function machineExtensionArgs(agentDir: string): string[] {
 	if (!Array.isArray(entries)) return [];
 	return entries
 		.filter((entry): entry is string => typeof entry === "string" && !entry.replaceAll("\\", "/").includes("/extensions-last/"))
-		.flatMap(entry => ["-e", entry.startsWith("~/") ? join(homedir(), entry.slice(2)) : entry]);
+		.flatMap((entry) => ["-e", entry.startsWith("~/") ? join(homedir(), entry.slice(2)) : entry]);
 }
 
 function childExitCode(code: number | null, signal: ChildSignal | null): number {
@@ -111,14 +111,7 @@ async function main(): Promise<number> {
 	}
 
 	const ompPath = resolve(discoveredOmp);
-	const args = [
-		"--config",
-		configPath,
-		"--append-system-prompt",
-		promptPath,
-		...machineExtensionArgs(agentDir),
-		...process.argv.slice(2),
-	];
+	const args = ["--config", configPath, "--append-system-prompt", promptPath, ...machineExtensionArgs(agentDir), ...process.argv.slice(2)];
 	return await runOmp(ompPath, args);
 }
 

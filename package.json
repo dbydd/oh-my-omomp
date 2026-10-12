@@ -1,0 +1,20 @@
+{
+	"name": "omp-config",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"check": "biome check . && tsc --noEmit -p tsconfig.json",
+		"format": "biome check --write ."
+	},
+	"devDependencies": {
+		"@biomejs/biome": "latest",
+		"@oh-my-pi/pi-agent-core": "latest",
+		"@oh-my-pi/pi-ai": "latest",
+		"@oh-my-pi/pi-coding-agent": "latest",
+		"@oh-my-pi/pi-natives": "latest",
+		"@oh-my-pi/pi-tui": "latest",
+		"@oh-my-pi/pi-utils": "latest",
+		"@types/bun": "latest",
+		"typescript": "latest"
+	}
+}

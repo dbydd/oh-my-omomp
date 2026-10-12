@@ -1,5 +1,5 @@
 extensions:
-  - ~/.omp/agent/extensions-last/system-prompt-replace.ts
+  - ~/.omp/agent/extensions-last/system-prompt-replace/index.ts
 setupVersion: 2
 dev:
   autoqaConsent: denied
