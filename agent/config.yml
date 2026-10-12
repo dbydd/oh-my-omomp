@@ -9,6 +9,8 @@ github:
   enabled: true
 astGrep:
   enabled: true
+todo:
+  enabled: false
 task:
   eager: preferred
   maxRuntimeMs: 0

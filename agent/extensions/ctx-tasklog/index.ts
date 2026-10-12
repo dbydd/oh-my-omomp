@@ -1,6 +1,6 @@
 /**
  * Records successful todo/goal mutations from tool_result for main and sub sessions.
- * Appends timestamped lines to local://task-log/<agent-id>.md, with a todo-goal
+ * Appends timestamped lines to local://task-log/<agent-id>.md, with a todo-more
  * set line after each todo mutation carrying a valid goal. Reads that file's
  * metadata to add its heading once. Read-only operations are not logged.
  * Writes are serialized and failures are warned without failing the host hook.
@@ -13,7 +13,7 @@ import { AgentRegistry, MAIN_AGENT_ID } from "@oh-my-pi/pi-coding-agent/registry
 import { isRecord } from "@oh-my-pi/pi-utils";
 import { errorText } from "../_shared/errors.ts";
 import { type GoalOperation, goalOperation, type TodoOperation, taskLogPath, todoOperation } from "../_shared/task-log.ts";
-import { todoGoalSchema } from "../_shared/todo-goal.ts";
+import { todoGoalSchema } from "../_shared/todo-more.ts";
 
 interface TodoPhaseDetails {
 	name: string;
@@ -149,6 +149,8 @@ function formatTodoDetail(op: TodoOperation, input: Record<string, unknown>, det
 			if (phase !== undefined) return `phase ${quote(phase)}`;
 			return "all tasks";
 		}
+		case "explain":
+			return quote(stringValue(input.task));
 		case "view":
 			return undefined;
 		default: {
@@ -254,7 +256,7 @@ export default function ctxTaskLog(pi: ExtensionAPI): void {
 			let line = `- ${timestamp} ${event.toolName} ${operation}: ${detail}`;
 			if (event.toolName === "todo") {
 				const goal = todoGoalSchema.safeParse(input.goal);
-				if (goal.success) line += `\n- ${timestamp} todo-goal set: ${JSON.stringify(goal.data)}`;
+				if (goal.success) line += `\n- ${timestamp} todo-more set: ${JSON.stringify(goal.data)}`;
 			}
 			await queueTaskLog(pi, target.path, target.agentId, line);
 		} catch (error) {

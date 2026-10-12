@@ -13,7 +13,7 @@
  *
  * Per subagent session: the first terminal yield judged NOT done is blocked
  * and the reason goes back to the subagent, which keeps working. A terminal
- * yield judged DONE while the session's own todo list (see `todo-goal/index.ts`)
+ * yield judged DONE while the session's own todo list (see `todo-more/index.ts`)
  * still has pending or in-progress items is blocked once, asking the subagent
  * to bring the todo list up to date before yielding. Each bounce happens at
  * most once, so one session can see a NOT done bounce and later a todo
@@ -28,7 +28,7 @@
  * is converted to `data: { result: <that text>, completion_judge }`.
  *
  * Registers `tool_call` and `session_shutdown`; it reads the host-managed session
- * branch (including the `todo-goal` entries) and agent registry, writes only
+ * branch (including the `todo-more` entries) and agent registry, writes only
  * in-memory round state, and has no private configuration files. Only the
  * named task subagents are judged; main sessions pass.
  * Every failure (agent not identified, model missing, provider error,
@@ -41,10 +41,9 @@ import { completeSimple } from "@oh-my-pi/pi-ai";
 import { THINKING_EFFORTS } from "@oh-my-pi/pi-catalog";
 import { type ExtensionAPI, type ExtensionContext, z } from "@oh-my-pi/pi-coding-agent";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
-import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { errorText } from "../_shared/errors.ts";
 import { textOf } from "../_shared/messages.ts";
-import { currentTodoGoal, explanationOf, goalLines, type TodoGoalState } from "../_shared/todo-goal.ts";
+import { actionableItems, explanationText, goalLines, readTodoMore, type TodoMoreState } from "../_shared/todo-more.ts";
 
 const MODEL = "openai-codex/gpt-6-sol";
 const EFFORT = THINKING_EFFORTS.find((effort) => effort === "low");
@@ -256,7 +255,7 @@ const renderPrompt = (ctx: ExtensionContext, transcript: Transcript, yieldCallId
 			"</call>",
 		].join("\n");
 	});
-	const goal = currentTodoGoal(ctx.sessionManager.getBranch());
+	const todo = readTodoMore(ctx.sessionManager.getBranch());
 	return [
 		"<assignment>",
 		transcript.assignment.trim() || "(missing)",
@@ -264,9 +263,9 @@ const renderPrompt = (ctx: ExtensionContext, transcript: Transcript, yieldCallId
 		"<shared-context>",
 		sharedContextOf(ctx) || "(none)",
 		"</shared-context>",
-		"<todo-goal>",
-		goal.kind === "set" ? goalLines(goal.goal).join("\n") : "(none)",
-		"</todo-goal>",
+		"<worker-goal>",
+		todo.kind === "list" && todo.goal.kind === "set" ? goalLines(todo.goal.goal).join("\n") : "(none)",
+		"</worker-goal>",
 		`<tool-calls shown="${window.length}" total="${prior.length}">`,
 		...renderedCalls,
 		"</tool-calls>",
@@ -311,15 +310,8 @@ const judge = async (ctx: ExtensionContext, prompt: string, signal: AbortSignal)
 };
 
 /** Pending or in-progress items of the session's own todo list, with their explanations. */
-const openTodoItems = (session: AgentSession | null, goal: TodoGoalState): string[] =>
-	(session?.getTodoPhases() ?? []).flatMap((phase) =>
-		phase.tasks
-			.filter((task) => task.status === "pending" || task.status === "in_progress")
-			.map((task) => {
-				const explanation = explanationOf(goal, task.content);
-				return `${phase.name}: ${task.content}${explanation === undefined ? "" : ` — ${explanation}`}`;
-			}),
-	);
+const openTodoItems = (todo: TodoMoreState): string[] =>
+	actionableItems(todo).map(({ phase, item }) => `${phase}: ${item.title} — ${explanationText(item)}`);
 
 export default function taskCompletionJudge(pi: ExtensionAPI): void {
 	const rounds = new Map<string, Round>();
@@ -410,8 +402,7 @@ export default function taskCompletionJudge(pi: ExtensionAPI): void {
 				throw new Error(`Unexpected completion verdict: ${unexpected}`);
 			}
 		}
-		const openItems =
-			verdict.kind === "done" && !round.todoPrompted ? openTodoItems(ref.session, currentTodoGoal(ctx.sessionManager.getBranch())) : [];
+		const openItems = verdict.kind === "done" && !round.todoPrompted ? openTodoItems(readTodoMore(ctx.sessionManager.getBranch())) : [];
 		if (openItems.length > 0) {
 			rounds.set(sessionFile, { ...round, todoPrompted: true });
 			const reason = [

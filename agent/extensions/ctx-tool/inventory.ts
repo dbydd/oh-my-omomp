@@ -8,7 +8,7 @@ import type { GlobMatch, GrepMatch } from "@oh-my-pi/pi-natives";
 import { FileType, GrepOutputMode, glob, grep } from "@oh-my-pi/pi-natives";
 import { isRecord } from "@oh-my-pi/pi-utils";
 import { parseTaskLogEvent, taskLogPath } from "../_shared/task-log.ts";
-import { goalLines, type TodoGoal, todoGoalSchema } from "../_shared/todo-goal.ts";
+import { goalLines, type TodoGoal, todoGoalSchema } from "../_shared/todo-more.ts";
 
 const COLLAPSE_THRESHOLD = 8;
 const SUMMARY_LIMIT = 120;
@@ -926,7 +926,7 @@ function taskLogGoal(content: string): TodoGoal | undefined {
 	const lines = content.split(/\r?\n/);
 	for (let index = lines.length - 1; index >= 0; index--) {
 		const event = parseTaskLogEvent(lines[index]!);
-		if (event?.tool !== "todo-goal") continue;
+		if (event?.tool !== "todo-more") continue;
 		const parsed = todoGoalSchema.safeParse(parseJsonValue(event.detail));
 		if (parsed.success) return parsed.data;
 	}
@@ -1037,6 +1037,7 @@ function taskLogCounts(content: string): TaskCounts {
 				break;
 			}
 			case "view":
+			case "explain":
 				break;
 			default: {
 				const unreachable: never = event;
@@ -1080,6 +1081,7 @@ function taskLogTimeline(content: string): TaskTimeline {
 				break;
 			case "append":
 			case "view":
+			case "explain":
 				break;
 			case "start":
 			case "unblock": {

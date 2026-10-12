@@ -60,9 +60,9 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 
 **用 hashline edit 约束副作用。** hashline edit 要求先读取当前文件，再明确指定编辑范围；写操作因此绑定到已经观察过的快照，而不是依赖模型确信自己的一次性命令不会出错。这能降低并发修改后的误写和覆盖风险。具体规范见 `agent/APPEND_SYSTEM.md` 的 `# Tool Call`。
 
-**在完整模式中，把 todo 与 ctx 作为一套联合工具。** todo 负责维护任务生命周期；OMP 的原生机制会在普通结束路径上发现 todo 尚未完成时要求 agent 继续，因此不必靠 loop 反复注入 prompt。它也会减少因小挫折而过早询问用户：最后一条回复是在问用户问题时，原生机制不催；其余情况下，还有 pending / in_progress 项就继续由 agent 处理。等待外部回复时显式标 blocked，是本仓库 prompt 的要求，不是 OMP 的判断条件。自动继续存在误判风险，但这里选择承担这项风险，而不是频繁中断操作员。
+**在完整模式中，把 todo 与 ctx 作为一套联合工具。** todo 负责维护任务生命周期；模型在普通结束路径上停下而 todo 尚未完成时，todo 会要求 agent 继续（原生 TodoTracker 的提醒，现由 [todo-more](#todo-more) 照原生逻辑实现），因此不必靠 loop 反复注入 prompt。它也会减少因小挫折而过早询问用户：最后一条回复是在问用户问题时，提醒不催；其余情况下，还有 pending / in_progress 项就继续由 agent 处理。等待外部回复时显式标 blocked，是本仓库 prompt 的要求，不是提醒的判断条件。自动继续存在误判风险，但这里选择承担这项风险，而不是频繁中断操作员。
 
-每次成功的 todo 修改都会被 `ctx-tasklog` 捕获；`ctx` 按这些事件重放任务的最终状态，形成不依赖模型自行总结的简短行事记录。主会话发生 compact 后，`ctx-tool` 会把这份记录连同 context 树注入新 context。这里的 `todo` 是 [todo-goal](#todo-goal) 的包装：每个列表带一个 goal（这件事是什么、用什么方法衡量结果、要做到什么程度），每一项分成标题和解释。OMP 原生只给启用了 prewalk 的 subagent 留 `todo`，todo-goal 为其余 `task:*` worker 装上同一个包装，使从 todo、task log 到 ctx 的同一条链路覆盖 subagent；worker 定义同时要求每个切片都维护自己的 todo。
+每次成功的 todo 修改都会被 `ctx-tasklog` 捕获；`ctx` 按这些事件重放任务的最终状态，形成不依赖模型自行总结的简短行事记录。主会话发生 compact 后，`ctx-tool` 会把这份记录连同 context 树注入新 context。这里的 `todo` 不是 OMP 原生的：`config.yml` 关掉了原生 todo（`todo.enabled: false`），由 [todo-more](#todo-more) 在原生代码的基础上重新实现。每个列表带一个 goal（这件事是什么、用什么方法衡量结果、要做到什么程度），每一项分成标题和解释，提醒里也带着它们。OMP 原生只给启用了 prewalk 的 subagent 留 `todo`，todo-more 为其余 `task:*` worker 装上同一个工具，使从 todo、task log 到 ctx 的同一条链路覆盖 subagent；worker 定义同时要求每个切片都维护自己的 todo。
 
 **把非法工具调用当作整体偏离的信号。** [tool-policy-nag](#tool-policy-nag) 检测模型是否绕开内置工具，只提醒，不拦截命令。默认用命令解析器计数，超过阈值后发一句通用提醒；打开 Jev 检测后，每次调用由 Jev 逐类判定，把这次调用的全部违规逐条列出来。目标不是追求形式上完美的“古典”工具调用，而是在偏离扩散到其他规则之前及时校正。
 
@@ -254,7 +254,7 @@ git status --short
 
 - 用 `APPEND_SYSTEM_LIGHT.md` 代替完整的追加提示词。
 - 按 `config-light.yml` 禁用 13 个行为扩展：`ctx-tasklog`、`ctx-tool`、`doc-polish`、`fork-task`、`isolation-nudge`、`lang-nag`、`task-completion-judge`、`task-split-check`、`tool-policy-nag`、`turn-judge`、`user-prompt-inject`、`watchdog-agent`、`wt-tool`。
-- 其余 7 个扩展照常加载：`append-system-model`、`bro`、`input-polish`、`repo-rules`、[todo-goal](#todo-goal)、[omp-config-autoupdate](#omp-config-autoupdate)，以及兼容性修复 `commandcode-model-spec`。`APPEND_SYSTEM_MODEL.md` 因此在轻量模式下照样注入；自动更新开着时，用 `omp-light` 启动也会更新。
+- 其余 7 个扩展照常加载：`append-system-model`、`bro`、`input-polish`、`repo-rules`、[todo-more](#todo-more)、[omp-config-autoupdate](#omp-config-autoupdate)，以及兼容性修复 `commandcode-model-spec`。`APPEND_SYSTEM_MODEL.md` 因此在轻量模式下照样注入；自动更新开着时，用 `omp-light` 启动也会更新。原生 todo 在轻量模式下同样关着，`todo` 由 todo-more 提供。
 - `config-light.yml` 把 `extensions` 覆盖成空列表，去掉 `config.yml` 末项的 [system-prompt-replace](#system-prompt-replace)。`disabledExtensions` 按模块名过滤，但管不到在 `extensions` 或 `-e` 里直接写成文件路径的扩展（写成目录的，目录里发现的模块仍按名字过滤），所以只能这样排除。覆盖会连带去掉本机条目（如 `~/.claude`），所以 `omp-light` 读本机 `config.yml`，把 `extensions` 里路径不含 `/extensions-last/` 的条目逐个用 `-e` 传给 `omp`；`-e` 是另一条加载通道，不受这个覆盖影响。`extensions-last/` 下的扩展因此只属于完整模式（按路径字符串判断，相对路径或目录写法不会被认出来）。
 - 插件、rules、skills、上下文文件，以及 model、thinking、profile、auth、session 设置都不变。被禁用扩展注册的工具（`ctx`、`polish_doc`、`fork_task`、`wt`、`wt_remove`）在轻量模式下不存在。
 - `omp-light` 从 agent 目录读 `config-light.yml` 和 `APPEND_SYSTEM_LIGHT.md`：设置了 `PI_CODING_AGENT_DIR` 时用它，否则用 `~/.omp/agent`。缺任何一个就直接退出，不回退到别的目录。
@@ -314,7 +314,7 @@ harness 会把 `APPEND_SYSTEM.md` 和每个 agent 的 `description` 都注入主
 每个 `task:*` worker 的定义还要求：
 
 - 动手前先读实际代码、写出计划，交给自己的 `mentor:default` 过一遍；处在递归上限、没有 `task` 工具时跳过这一步。
-- 每个切片都用 todo（工具由 [todo-goal](#todo-goal) 提供）：改动前用计划的全部步骤 `init`，每项写标题和解释，goal 照派工单写、不能比派工单窄；状态一变就更新；还有未完成项时不 `yield`；只有等待外部回复才算 block，不许用 `drop` / `rm` 缩小范围。
+- 每个切片都用 todo（工具由 [todo-more](#todo-more) 提供）：改动前用计划的全部步骤 `init`，每项写标题和解释，goal 照派工单写、不能比派工单窄；状态一变就更新；还有未完成项时不 `yield`；只有等待外部回复才算 block，不许用 `drop` / `rm` 缩小范围。
 
 ### 并行写入的隔离
 
@@ -348,7 +348,7 @@ harness 会把 `APPEND_SYSTEM.md` 和每个 agent 的 `description` 都注入主
 |[fork-task](#fork-task)|注册 `fork_task`：带着当前对话副本派 subagent|否|
 |[isolation-nudge](#isolation-nudge)|多个写入者共用目录时拦一次|否|
 |[task-split-check](#task-split-check)|拦下多主题派发和限制汇报长度的派发|否|
-|[todo-goal](#todo-goal)|用带 goal 和“标题 + 解释”的包装取代原生 `todo`，并装给 `task:*` worker，接入 todo / ctx 联合链路|是|
+|[todo-more](#todo-more)|关掉原生 todo 后的替代实现：带 goal、“标题 + 解释”的 `todo` 工具及其全部提醒，并装给 `task:*` worker，接入 todo / ctx 联合链路|是|
 |[task-completion-judge](#task-completion-judge)|worker 交付前审一次完成度|否|
 |[ctx-tool](#ctx-tool)|注册只读 `ctx` 工具，汇总上下文树并重放 todo 行事记录；compact 后强制注入 `ctx` 概览和当前任务记录|否|
 |[ctx-tasklog](#ctx-tasklog)|捕获成功的 todo / goal 修改，形成 `ctx` 的派生记录|否|
@@ -384,7 +384,7 @@ omp 从 `~/.omp/agent/extensions/` 往下只找一层：直接放的 `*.ts`、`<
 |`judge.ts`|`openNativeJudge`：按 judgment API 找到 Jev 这类模型并带上本会话的凭据|
 |`spec-files.ts`|`discoverSpecFiles`、`parseFrontmatter`、`unquote`：查找和解析 `*-<标签>.md`（扩展目录，再从 cwd 往上到 git root 及各层 `.omp/`）|
 |`task-log.ts`|task log 的路径和格式，`ctx-tool` 与 `ctx-tasklog` 共用|
-|`todo-goal.ts`|`currentTodoGoal`、`explanationOf`、`goalLines`：从会话分支读出 todo 的 goal 和各项解释，`todo-goal` 与 `task-completion-judge` 共用|
+|`todo-more.ts`|todo-more 的领域类型和分支读取函数 `readTodoMore`，以及 `hostPhases`、`actionableItems`、`unexplainedItems`、`goalLines`、`explanationText`；`todo-more`、`task-completion-judge`、`ctx-tasklog`、`ctx-tool` 共用|
 
 `_shared` 只提供机制。重试、超时、节流、用户看到的措辞、失败时返回什么，都留在调用方。
 
@@ -712,7 +712,7 @@ model: "(gpt-5|o3)"
 - 规则按文件顺序依次作用于每个 system prompt 块，后一条看到的是前一条替换后的结果。
 - 仓库里的规则（改的都是 OMP 内置 prompt 或插件工具说明里的句子）：
   - `task` 工具那句换成 “Always set \`agent\` explicitly; never rely on the default.”，和 `APPEND_SYSTEM.md` 要求写明 agent 一致。默认 agent 名用正则匹配，所以 `spawns` 不同、默认 agent 不同的 subagent 也能命中。
-  - `todo` 的 “Before work, init for 3+ steps, …” 换成：动手前就 `init`，任何多步工作都要；改动按 context 记录、经 `ctx` 读回；列表跟随当前范围而不是最初的计划，工作一变（新的或修改的指令、计划变化、发现要增删步骤）就立即 `append`、`rm`/`drop` 或重新 `init`。`todo` 的说明现在由 [todo-goal](#todo-goal) 提供，它原样保留了这句原生文字，所以这条规则照常命中。
+  - `todo` 的 “Before work, init for 3+ steps, …” 换成：动手前就 `init`，任何多步工作都要；改动按 context 记录、经 `ctx` 读回；列表跟随当前范围而不是最初的计划，工作一变（新的或修改的指令、计划变化、发现要增删步骤）就立即 `append`、`rm`/`drop` 或重新 `init`。`todo` 的说明现在由 [todo-more](#todo-more) 提供，它原样保留了这句原生文字，所以这条规则照常命中。
   - Engineering 的 “NEVER rerun checks to confirm them.” 换成 “NEVER rerun checks to doubt them. Reproducing to locate the cause and confirming the fix still apply.”：用户报的问题不用复跑去怀疑，但为定位原因复现、修完确认仍要做，和 Workflow 的 “reproduce before; confirm after” 不再冲突。
   - “Compiled code: NEVER avoidable allocation, …” 补上谓语 `add`。
   - `eval` 工具说明末尾 “On error, retry only the failed step; …” 之后追加一段：拒绝用 `eval` 调查文件。读内容（`open`、`Path.read_text`、`Bun.file`、`readFileSync`、prelude 的 `read()`）、列目录或找文件（`os.listdir`、`os.walk`、`glob.glob`、`readdirSync`）、搜文本（对文件内容跑正则、`subprocess` 调 `cat`/`ls`/`find`/`grep`/`rg`）都归 `read`、`glob`、`grep`；随手看一眼、批量处理多个文件、少调几次工具都不算例外。`eval` 只用于对已拿到的数据做计算、转换、结构化解析和库调用。`APPEND_SYSTEM.md` 的 Tool Call 一节有同类规则，但 subagent 收不到附录，工具说明里这段对所有带 `eval` 的会话生效。
@@ -751,7 +751,7 @@ model: "(gpt-5|o3)"
 
 **实现**：
 
-1. 把调用方会话 fork 到 `$TMPDIR/omp-fork-task/<uuid>/`：清零继承的费用，给未返回的工具调用补上中止结果，清空 todo（[todo-goal](#todo-goal) 的 goal 随之清空），追加一条 `<system-notice cause="fork_task">`，说明这段对话只是背景。
+1. 把调用方会话 fork 到 `$TMPDIR/omp-fork-task/<uuid>/`：清零继承的费用，给未返回的工具调用补上中止结果，清空 todo（[todo-more](#todo-more) 的 goal 随之清空），追加一条 `<system-notice cause="fork_task">`，说明这段对话只是背景。
 2. 删掉父会话的运行时条目（`session_init`、`model_change`、`thinking_level_change`、`service_tier_change`、shake 辅助会话的 `session_exit`），其子条目挂到上一级。
 3. 共享子代理保留父会话的 cwd；隔离子代理的 cwd 置空，由执行器绑定到 worktree。shake 的 artifact 写进父会话的 artifact 目录，子代理共用。
 4. `task` 异步派发时先分配 id，再触发 `before_subagent_spawn`；扩展在这里把副本移到 `<父会话文件去掉 .jsonl>/<子代理 id>.jsonl`，执行器打开的就是它。没派出去的副本在出错或会话结束时清理。
@@ -783,29 +783,61 @@ model: "(gpt-5|o3)"
 - **失败处理**：模型不可用、请求失败或超时，这次请求里的检查都放行；某个回答解析不了，只放行那一项检查。
 - 做了判定的调用写一条 `task-split-check verdicts` info 日志。
 
-#### todo-goal
+#### todo-more
 
-`todo-goal/` 用一个包装取代 OMP 原生的 `todo`，主会话和 `task:*` subagent 用的都是它。包装加了两样东西：
+`todo-more/` 是原生 todo 的替代实现。`config.yml` 把原生 todo 关掉（`todo.enabled: false`），这个扩展在原生代码的基础上把 todo 整套重新实现：`todo` 工具（`tool.ts`）、原生 `TodoTracker` 的各种提醒（`reminders.ts`）和工具卡片渲染（`render.ts`）。主会话和 `task:*` subagent 用的都是它。和原生相比多了两样东西：
 
-- **goal**：`{objective, measure, doneWhen}`，即这件事是什么、用什么方法衡量结果、要做到什么程度才算完成。`init` 必须带；列表还没有 goal 时（例如人用 `/todo` 建的列表），任何修改操作都必须带；其他修改操作可以带一个新的 goal 替换旧的；`view` 不能带。
-- **标题和解释**：每一项是 `{title, explanation}`，两项都不能为空。`title` 是之后 `start`、`done` 等操作用 `task` 指名的名字；`explanation` 说明这一项包括什么、怎样算做完。
+- **goal**：`{objective, measure, doneWhen}`，即这件事是什么、用什么方法衡量结果、要做到什么程度才算完成。`init` 必须带；列表还没有 goal 时（例如人用 `/todo` 建的列表），任何修改操作都必须带；其他修改操作可以带一个新的 goal 替换旧的；`view` 不能带。列表清空（没有任何项）时 goal 一起清掉。
+- **标题和解释**：每一项是 `{title, explanation}`，两项都不能为空。`title` 是之后 `start`、`done` 等操作用 `task` 指名的名字；`explanation` 说明这一项包括什么、怎样算做完。新增的操作 `explain {task, explanation}` 给一项补上或改写解释。
 
-其余参数和原生一致：九个操作，以及 `list`、`items`、`task`、`phase`、`reason`；省略 `op` 时按原生规则推断。工具说明在原生说明的基础上补了这两样，其余句子保持原文，[system-prompt-replace](#system-prompt-replace) 的 todo 规则照常命中。
+其余参数和原生一致：九个原生操作，以及 `list`、`items`、`task`、`phase`、`reason`；省略 `op` 时按原生规则推断；一次调用里只要有错误，整次作废。工具说明在原生说明的基础上补了这两样，其余句子保持原文，[system-prompt-replace](#system-prompt-replace) 的 todo 规则照常命中。
 
-- **做法**：工具名仍是 `todo`，由扩展注册覆盖原生工具。每次调用先检查上面的规则，再在调用方自己的会话上运行原生 `TodoTool`（通过 agent registry 找到 `AgentSession`）。标题、状态、blocker 因此仍由该会话的 `TodoTracker` 维护，原生的完成度提醒、中途提醒、HUD、分支恢复照常工作。修改成功、goal 或解释有变化时，追加一条会话 custom entry `mouriya.omp.todo-goal`，内容是 goal 和当前列表上各标题的解释，每条都是完整快照。工具结果的 details 是原生的，另带一份当时 goal 状态的副本，只给渲染用；结果文字在原生摘要前加上 goal，后面列出未完成项的解释。
-- **goal 和解释的来源**：当前分支上最后一条 `mouriya.omp.todo-goal`，读取函数在 `_shared/todo-goal.ts`。不用工具结果记录，是因为同一条 assistant 消息里的多个 `todo` 调用执行时，前一个调用的工具结果还没写进分支，custom entry 则立即写入。分支上更晚出现清空整个列表的 `user_todo_edit`（`/todo` 清空、`fork_task` 和 `/tan` 的新会话）时，goal 随之清空。人用 `/todo` 编辑、导入或新增的项没有解释：解释按标题对应，标题没变的保留，新标题没有。eval 里的 `tool.todo(...)` 同样经过包装。
-- **显示**：扩展覆盖的工具不算内置工具，TUI 不用原生 todo 的渲染器，由扩展自己渲染：折叠时显示 goal 的 objective 和各项状态，展开时显示完整的 goal 和未完成项的解释。同一原因，`/vibe` 不会把它放进 vibe 模式的基础工具集。
-- **subagent**：OMP 在两处给没有启用 prewalk 的 subagent 去掉 `todo`：带 `yield` 的会话在创建工具时就不生成原生 `todo`（`tools/index.ts` 的 `isToolAllowed`）；执行器派发时从启用列表里过滤掉它，并过滤扩展发起的工具切换（`task/executor.ts` 的 `isParentOwnedTool`）。`task:high`、`task:mid`、`task:low`、`task:free` 每次 `before_agent_start`（执行器过滤之后），扩展直接在本会话上重新启用已注册的 `todo`；工具受限的会话（如 plan mode 下派出的）不注册任何扩展工具，扩展就把包装作为宿主工具装上。每个 `AgentSession` 有自己的 `TodoTracker`，subagent 的 todo 不会碰到父会话的列表。`task:*` 以外的 subagent 不处理。
-- **和 ctx 的关系**：`TodoTracker` 仍是所在会话当前 todo 状态的源头，`mouriya.omp.todo-goal` 是 goal 和解释的源头；在完整模式中，每次成功修改由 `ctx-tasklog` 追加为派生事件记录（带 goal 的调用另记一行 goal），`ctx-tool` 再按事件重放任务数量、最终时间线和最新的 goal。记录来自成功的工具结果，而不是 worker 自述。主会话 compact 后，`ctx-tool` 会尝试把主会话的时间线注入；其他 subagent 的时间线通过 `ctx show <id>` 读取。
-- **和 `yield` 的关系**：原生的完成度提醒只在纯文字结束时把 agent 打回；终结性的 `yield` 会直接结束运行，不经过它。完整模式下，`task:low` / `task:mid` / `task:free` 调用 `yield` 时由 [task-completion-judge](#task-completion-judge) 对照派工单和 worker 的 goal 判断是否做完，带着 pending / in_progress 的 todo 时还会要求先维护 todo；`task:high` 和轻量模式没有这道检查。
-- **限制**：`todo.enabled` 关掉时原生 todo 不再生成，但这个扩展注册的 `todo` 仍在。分支停在 `mouriya.omp.todo-goal` 条目和它所属的工具结果之间时，goal 和解释比列表新一步。
+**状态**：权威是当前会话分支，读取规则在 `_shared/todo-more.ts` 的 `readTodoMore`，不做缓存。
+
+- 每次成功的修改追加一条会话 custom entry `mouriya.omp.todo-more`，内容是整份列表（goal、各项的标题、解释、状态、blocker）。它立即写入分支，所以同一条 assistant 消息里的下一个 `todo` 调用能读到；那时前一个调用的工具结果还没写进分支。
+- OMP 自己还会绕过工具改列表：`/todo` 命令（关掉原生 todo 后仍然可用，扩展拦不住）和 subagent 完成后自动打勾，它们写的是原生格式的 `user_todo_edit`。旧会话里则是原生的 `todo` 工具结果。读取时，这类记录按标题和它之前最近的一份 `mouriya.omp.todo-more` 对齐：同名的项保留解释，goal 沿用，新标题记为“缺解释”。中间遇到清空的记录（`/todo` 删光、`fork_task` 和 `/tan` 的新会话）就不再往前找。
+- “缺解释”的项在工具结果、渲染和提醒里单独列出，并要求模型用 `explain` 补上。
+- 每次修改同时把原生格式的列表（标题作为 content、状态、blocker）写进会话的 `TodoTracker`，工具结果的 details 也带同一份原生格式列表，所以 OMP 的 HUD、底栏、`/todo`、分支恢复、eval 里的 `tool.todo(...)`、prewalk 门槛照常工作。
+
+**提醒**：原生 todo 关掉后，`TodoTracker` 的提醒全部停止，`reminders.ts` 按原生逻辑重做，读 `todo.reminders`、`todo.remindersMax`、`todo.eager` 设置：
+
+- **停下时的提醒**：还有 pending / in_progress 项、模型以纯文字结束时，提醒继续。原生文字之外加上 goal 和每项的解释，以及缺解释的项。跳过的情况与原生相同：plan mode、上一条提醒之后还没调用过任何工具、超过次数上限、最后一条回复在问用户、还有后台任务。主会话用 `session_stop` 续上，次数按一次连续的续写链计；subagent 没有这个钩子，在 `agent_end` 后补一条提醒并唤醒，次数按最近一条用户消息之后已发的提醒计，属于近似实现。
+- **中途提醒**：连续 12 次成功的修改类工具调用（bash、eval、edit、write、ast_edit）之间没有调用 `todo` 时，在下一个 step 边界提醒一次，每轮最多 2 次，附 goal 的 objective。
+- **开局提醒**：`todo.eager` 为 `preferred` / `always` 时，首个合适的 prompt 前要求先建 todo；`always` 还会强制这一步调用 `todo`。本仓库没有打开（默认 `default`）。自动 compact 之后列表为空时再提醒一次。
+- **goal 模式**：OMP 原生 goal 模式开着时，把当前列表（含 goal 和解释）附进 goal 模式的上下文。
+- 失败的 `todo` 调用之后的修复提醒、`init` 之后的标题刷新仍由 OMP 自己发出，不重复实现。
+
+**显示**：扩展注册的工具不算内置工具，TUI 不用原生 todo 的渲染器，`render.ts` 照原生的布局重写：罗马数字阶段标题、各阶段完成数、按状态的标记和颜色、blocker、只展开有变化的阶段、折叠时的滑动窗口、完成时的划线动画。折叠时显示 goal 的 objective，展开时显示完整的 goal 和未完成项的解释；缺解释的项另有标记。提醒消息另有渲染器。
+
+**subagent**：OMP 在两处给没有启用 prewalk 的 subagent 去掉 `todo`：带 `yield` 的会话在创建工具时就不生成原生 `todo`（`tools/index.ts` 的 `isToolAllowed`）；执行器派发时从启用列表里过滤掉它，并过滤扩展发起的工具切换（`task/executor.ts` 的 `isParentOwnedTool`）。`task:high`、`task:mid`、`task:low`、`task:free` 每次 `before_agent_start`（执行器过滤之后），扩展直接在本会话上重新启用已注册的 `todo`；工具受限的会话不注册任何扩展工具，扩展就把工具作为宿主工具装上。每个会话有自己的列表。`task:*` 以外的 subagent 不处理。
+
+**照抄的代码**：从 OMP 源码照抄的部分用注释标出来源，以便 OMP 升级后对照：
+
+```ts
+// @upstream verbatim @oh-my-pi/pi-coding-agent@18.10.1 src/session/todo-tracker.ts#isQuestionPromptLine
+…
+// @upstream-end
+```
+
+`verbatim` 表示与上游逐字相同，`adapted` 表示改过（改成带 goal 和解释的列表、适配本仓库的严格类型检查等）；`#*` 表示整个提示词文件。目前只做标注，没有程序检查。升级 OMP 后，按标注里的路径和符号对照新版源码，同步上游的改动并更新版本号。
+
+**与原生的差别**：
+
+- 原生在用户强制指定工具的那一轮不发停下提醒；这个标记在扩展拿到之前已被关闭的原生 tracker 消费掉，所以这一轮仍会提醒。
+- print 模式（`omp -p`）下原生不发停下提醒，这里照发。
+- 不发出 OMP 的 `todo_reminder` 会话事件（没有发出接口），ACP 和 RPC 的订阅方收不到。
+- 续写走的是 OMP 的隐藏下一轮消息通道，不是原生的同一轮调度；别的扩展的 `session_stop` 续写先占用时，这条提醒不发，次数退回。
+- 中途提醒在 `turn_end` 计算，不是在 step 边界懒计算；compact 之后的开局提醒在下一次 prompt 开始时发，而不只在 OMP 的自动续写里；goal 模式的上下文每次请求重新附加，不固化进 goal 消息。
+- RPC 的 `set_todos` 只改内存，读取规则看不到它；collab 不同步会话 custom entry，所以 goal 和解释不会同步给客人。
+- `/vibe` 只把内置工具放进 vibe 模式的基础工具集，这个 `todo` 不在其中。
+- 工具名 `todo` 在 OMP 里写死为只读工具；以后在它上面做的 git 扩展若有副作用，不能放进 `todo` 本身。
 - 失败只记 warning。
 
 #### task-completion-judge
 
 `task-completion-judge/` 在 `task:low`、`task:mid`、`task:free` 的会话里拦截交付用的 `yield`，先让模型判断这个切片是否真的做完了。`task:high` 和主 agent 不受影响。
 
-- **依据**：派工单，即当前分支最后一条 `session_init` 里的 `task` prompt（`task` 和 `fork_task` 都一样）；system prompt 里的共享背景；worker 自己 todo 的 goal（见 [todo-goal](#todo-goal)，没有时注明为空）；最后一条 `session_init` 之后该 worker 自己最近 50 次工具调用及结果；这次提交的内容（`yield` 的 `data`；没有 `data` 时取同一条 assistant 消息里的文字）。OMP 在运行中 system prompt 变化时会追加新的 `session_init`，所以看到的工具调用可能只是这次运行的后一段。`fork_task` 子代理开头继承的父对话只是背景，其中的用户消息和工具调用都不算。每次调用的参数和结果各保留原文最多 800 个字符，提交内容最多 6000 个字符，超长时按六成头、四成尾保留，中间另插一行省略标记。
+- **依据**：派工单，即当前分支最后一条 `session_init` 里的 `task` prompt（`task` 和 `fork_task` 都一样）；system prompt 里的共享背景；worker 自己 todo 的 goal（见 [todo-more](#todo-more)，没有时注明为空）；最后一条 `session_init` 之后该 worker 自己最近 50 次工具调用及结果；这次提交的内容（`yield` 的 `data`；没有 `data` 时取同一条 assistant 消息里的文字）。OMP 在运行中 system prompt 变化时会追加新的 `session_init`，所以看到的工具调用可能只是这次运行的后一段。`fork_task` 子代理开头继承的父对话只是背景，其中的用户消息和工具调用都不算。每次调用的参数和结果各保留原文最多 800 个字符，提交内容最多 6000 个字符，超长时按六成头、四成尾保留，中间另插一行省略标记。
 - **goal 的用法**：派工单仍是标准，goal 只是 worker 自己的复述，用来多做几项检查：goal 缩小了派工单的范围、goal 写的衡量方法在工具调用里没做过、没达到 goal 写的完成程度，都判 `NOT_DONE`。
 - **判定**：`openai-codex/gpt-6-sol`（推理强度 low），25 秒超时，回答 `DONE` 或 `NOT_DONE`。如实报告了 blocker 也算 `NOT_DONE`。
 - **退回**：判为 `NOT_DONE` 时拦下这次 `yield`，要求继续做完并验证；判为 `DONE` 但 worker 自己的 todo 还有 pending / in_progress 项时，也拦下，逐项列出（附各项的解释），要求先把 todo 更新到真实进度（blocked 项不触发这道检查）。两种退回各最多一次，可以先后各发生一次；一旦放行，同一会话不再判定。
@@ -815,7 +847,7 @@ model: "(gpt-5|o3)"
 
 ### Context 恢复
 
-完整模式下，`todo-goal`、`ctx-tasklog` 和 `ctx-tool` 组成一条联合链路，不是互不相关的功能：todo 维护权威任务状态，task log 记录成功的修改调用，`ctx` 将记录重放成简短时间线，compact 后再把主会话的 `ctx list` 和 `ctx show` 结果注入。task log 的路径和格式由两边共用的 `_shared/task-log.ts` 定义。task log 是从 todo 派生的行事记录，不取代各会话自己的 `TodoTracker` 和 goal 条目，重放结果是近似值，见 [ctx-tool](#ctx-tool) 的限制。
+完整模式下，`todo-more`、`ctx-tasklog` 和 `ctx-tool` 组成一条联合链路，不是互不相关的功能：todo 维护权威任务状态，task log 记录成功的修改调用，`ctx` 将记录重放成简短时间线，compact 后再把主会话的 `ctx list` 和 `ctx show` 结果注入。task log 的路径和格式由两边共用的 `_shared/task-log.ts` 定义。task log 是从 todo 派生的行事记录，不取代会话分支上的 todo 记录，重放结果是近似值，见 [ctx-tool](#ctx-tool) 的限制。
 
 #### ctx-tool
 
@@ -834,7 +866,7 @@ model: "(gpt-5|o3)"
 
 #### ctx-tasklog
 
-`ctx-tasklog/` 在每次成功的 `todo` / `goal` 修改操作后，把本地时间、工具名、操作和详情追加到 local root 下的 `task-log/<agent-id>.md`。这里的 `goal` 是 OMP 原生的 goal 模式工具，和 todo 的 goal 无关。`ctx` 只重放其中的 `todo` 事件和 todo goal 行，`goal` 事件记下来但不进计数和时间线。`todo view` 和 `goal get` 不改变状态，因此不记；失败的工具调用也不记，成功但没改变状态的调用（如重复 `done`）照样记。详情随操作而定：`init` 记阶段和任务数，`append` 记阶段和新增项数，`start` / `done` / `block` 等记一个目标（指名的任务或 phase；不指名时记第一个完成的任务或 `all tasks`，`block` 附原因），`goal` 记目标。带 goal 的成功 `todo` 调用紧跟着再记一行 `todo-goal set: <goal 的 JSON>`，时间相同。这使行事记录绑定到实际成功的工具调用，而不是模型声称做过什么。写失败只记 warning。
+`ctx-tasklog/` 在每次成功的 `todo` / `goal` 修改操作后，把本地时间、工具名、操作和详情追加到 local root 下的 `task-log/<agent-id>.md`。这里的 `goal` 是 OMP 原生的 goal 模式工具，和 todo 的 goal 无关。`ctx` 只重放其中的 `todo` 事件和 todo goal 行，`goal` 事件记下来但不进计数和时间线。`todo view` 和 `goal get` 不改变状态，因此不记；失败的工具调用也不记，成功但没改变状态的调用（如重复 `done`）照样记。详情随操作而定：`init` 记阶段和任务数，`append` 记阶段和新增项数，`start` / `done` / `block` / `explain` 等记一个目标（指名的任务或 phase；不指名时记第一个完成的任务或 `all tasks`，`block` 附原因），`goal` 记目标。带 goal 的成功 `todo` 调用紧跟着再记一行 `todo-more set: <goal 的 JSON>`，时间相同。这使行事记录绑定到实际成功的工具调用，而不是模型声称做过什么。写失败只记 warning。
 
 #### compact 后注入
 
@@ -992,7 +1024,7 @@ overlay 里上下键或滚轮滚动，解释完整生成后 `C` 复制到系统�
 - **写扩展代码**：先 `bun install`，交付前 `bun run check`，规范见[目录结构与开发规范](#目录结构与开发规范)。新引入的 `@oh-my-pi/*` 子路径要在没有 `node_modules` 的目录里真实加载一次。
 - **不要在 `omp-config-update.ts` 里写出 Otty 标记的字面量**：标记检查是“文件任意位置含有”，这个文件自己也是托管文件，写出来就会被当成应用托管文件，从此跳过更新。
 - **扩展建的辅助会话必须传 `taskDepth: 1`。** 一次性的模型调用统一走 `_shared/helper-session.ts` 的 `runHelperPrompt`，它已经传了（`bro`、`doc-polish`、`input-polish`、`lang-nag`、`watchdog-agent` 的聊天 reviewer 都用它）；自己建会话的只有 `fork-task` 的 shake，也传了。不传的话 SDK 把它当主会话，`dispose()` 时会销毁全局 `AgentLifecycleManager`，所有空闲 subagent 变成 `Unknown agent`，无法再续聊。`lang-nag` 几乎每轮都建辅助会话，漏传会让 subagent 很快失联。只调用 `completeSimple` 的扩展（`task-split-check`、`task-completion-judge`）不建会话，不涉及这条。
-- **升级 OMP 后**，在真实 TUI 里重新验证 [fork-task](#fork-task)、[todo-goal](#todo-goal)、[user-prompt-inject](#user-prompt-inject)、[turn-judge](#turn-judge)、[task-completion-judge](#task-completion-judge)、[ctx-tool](#ctx-tool)（含 compact 后注入）、[ctx-tasklog](#ctx-tasklog)、[bro](#bro) 和 [wt-tool](#wt-tool)，它们依赖 OMP 内部实现（`AgentRegistry`、`ctx.agent`、子会话文件路径、会话条目类型、local root、钩子顺序、`context` 事件的调用时机、扩展工具覆盖内置工具、宿主工具注入、`TodoTool` 读写的会话接口、同一批工具调用的结果何时写进分支、compaction 事件、bro 用到的文档转换、剪贴板和抓取内部模块、InteractiveMode 的原型与公开成员、`executeBuiltinSlashCommand`、`/wt` 和 `/move` 的 TUI 处理、`planWorktreeExit` 的指纹、VCS 的 `worktreeRemove`）。
+- **升级 OMP 后**，在真实 TUI 里重新验证 [fork-task](#fork-task)、[todo-more](#todo-more)、[user-prompt-inject](#user-prompt-inject)、[turn-judge](#turn-judge)、[task-completion-judge](#task-completion-judge)、[ctx-tool](#ctx-tool)（含 compact 后注入）、[ctx-tasklog](#ctx-tasklog)、[bro](#bro) 和 [wt-tool](#wt-tool)，它们依赖 OMP 内部实现（`AgentRegistry`、`ctx.agent`、子会话文件路径、会话条目类型、local root、钩子顺序、`context` 事件的调用时机、扩展工具覆盖内置工具、宿主工具注入、`TodoTracker` 的公开接口、`session_stop` 与 `agent_end` 的时机、同一批工具调用的结果何时写进分支、compaction 事件、bro 用到的文档转换、剪贴板和抓取内部模块、InteractiveMode 的原型与公开成员、`executeBuiltinSlashCommand`、`/wt` 和 `/move` 的 TUI 处理、`planWorktreeExit` 的指纹、VCS 的 `worktreeRemove`）。todo-more 里标了 `@upstream` 的代码要对照新版 OMP 源码同步。
 - **升级 OMP 后**，主会话开始模型回合时（`before_agent_start`）如果弹出 `system-prompt-replace: … found no target` 警告，就按新的模板文字改 `system-prompt-replace.json`；上游删掉了规则要改写的那句话时，删掉这条规则。同时确认 [system-prompt-replace](#system-prompt-replace) 依赖的扩展加载顺序没变。
 - **扩展注入用户消息时写 `attribution: "agent"`。** 不写就默认 `user`，[user-prompt-inject](#user-prompt-inject) 会把它当成用户原话注入 mentor 和 discussant。
 - **改 agent 定义前**读 `agent/agents/README.txt`；目录里的笔记用 `.txt`，不要用 `.md`。

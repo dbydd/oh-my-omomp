@@ -1,38 +1,43 @@
 /**
- * Replaces OMP's native `todo` with a wrapper that adds a goal and per-item
- * explanations, and gives `task:*` subagents that same `todo`.
+ * todo-more: this repo's replacement for OMP's native todo, which `config.yml`
+ * switches off (`todo.enabled: false`). Built on the native implementation:
+ * the tool, its reminders and its rendering are copies of OMP code, adapted to
+ * a list that carries a goal ({objective, measure, doneWhen}) and items that
+ * carry a title and an explanation. Copied code is marked
+ * `// @upstream <verbatim|adapted> …` … `// @upstream-end` (see
+ * `_shared/todo-more.ts`).
  *
- * Registers the tool `todo` (overriding the native one) and hooks
- * `before_agent_start`. Parameters are the native ones, except that items
- * are `{title, explanation}` and `goal` is `{objective, measure, doneWhen}`;
- * `task` targets a title. Each call checks the wrapper's rules, runs a native
- * `TodoTool` bound to the calling session — so the host's TodoTracker stays
- * the source of titles, statuses and blockers, and its reminders, HUD and
- * branch rehydration work unchanged — then appends a `mouriya.omp.todo-goal`
- * session entry with the goal and the explanations of the titles on the list
- * whenever they changed (`_shared/todo-goal.ts` reads it back). The result's
- * details are the native ones plus a display copy of the goal state; its text
- * adds the goal and the explanations of open items. Its own renderer draws
- * the list with the goal (render.ts): an extension override is not a built-in,
- * so the TUI never picks the native todo renderer for it.
+ * Registers the tool `todo` (tool.ts, rendered by render.ts) and the hooks of
+ * reminders.ts (stop reminder, mid-run nudge, eager prelude, goal-mode
+ * context), plus `before_agent_start` to give `task:*` subagents the tool.
+ *
+ * State: the session branch is the authority (`_shared/todo-more.ts`,
+ * `readTodoMore`): each successful mutation appends a full snapshot entry
+ * `mouriya.omp.todo-more`; host writers that bypass the tool (`/todo`,
+ * finished-subagent auto-complete) append `user_todo_edit`, which the reader
+ * joins by title, marking new titles as lacking an explanation. Every mutation
+ * also pushes the host projection (title as content, status, blocker) into the
+ * session's TodoTracker, and the result details carry the same projection, so
+ * the host HUD, `/todo`, branch rehydration and eval persistence keep working.
  *
  * OMP drops `todo` from subagents that are not prewalk-armed: the executor
- * strips it from the active set at spawn and filters it out of
- * extension-driven active-tool changes (`task/executor.ts`,
- * `isParentOwnedTool`). At every `before_agent_start` of a `task:*` subagent
- * the hook puts the wrapper back on that session: it re-activates the
- * registered `todo`, or, in a tool-restricted session whose registry holds no
- * extension tools, installs the wrapper as a host tool. The todo state is per
- * session, so a subagent owns its own list.
+ * strips it at spawn and filters it out of extension-driven active-tool
+ * changes (`task/executor.ts`, `isParentOwnedTool`). At every
+ * `before_agent_start` of a `task:*` subagent the hook puts the tool back on
+ * that session: it re-activates the registered `todo`, or, in a
+ * tool-restricted session whose registry holds no extension tools, installs it
+ * as a host tool. Each session owns its own list.
  *
- * Reads the agent registry and the session branch; writes session entries
- * only. No config files. Hook failures are logged and never reach omp.
+ * Reads the agent registry and the session branch; writes session entries and
+ * the TodoTracker projection. No config files. Hook failures are logged and
+ * never reach omp.
  */
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { errorText } from "../_shared/errors.ts";
+import { registerReminders } from "./reminders.ts";
 import { renderTodoCall, renderTodoResult } from "./render.ts";
 import { DESCRIPTION, parametersSchema, runTodo } from "./tool.ts";
 
@@ -56,7 +61,7 @@ const TOOL_FIELDS = {
 	loadMode: "discoverable" as const,
 	strict: true,
 	// Read off the definition by the host (extensibility/tool-proxy.ts): calls run one at a time,
-	// and a call without `op` reaches execute raw so the wrapper can infer it as native todo does.
+	// and a call without `op` reaches execute raw so the tool can infer it as native todo does.
 	concurrency: "exclusive" as const,
 	lenientArgValidation: true,
 };
@@ -70,7 +75,7 @@ const isTaskAgent = (ctx: ExtensionContext): boolean => {
 	return ref !== undefined && Object.hasOwn(TODO_AGENTS, ref.displayName);
 };
 
-/** `task:*` subagent: put the wrapper back after the executor stripped `todo`. */
+/** `task:*` subagent: put the tool back after the executor stripped `todo`. */
 async function installForTask(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
 	if (!isTaskAgent(ctx)) return;
 	const session = ownSession(ctx);
@@ -83,21 +88,18 @@ async function installForTask(pi: ExtensionAPI, ctx: ExtensionContext): Promise<
 		return;
 	}
 	// A tool-restricted session registers no extension tools; the RPC host-tool slot still takes one.
-	const hostTool = {
-		...TOOL_FIELDS,
-		execute: (toolCallId: string, params: unknown, signal?: AbortSignal) => runTodo(pi, session, toolCallId, params, signal),
-	};
-	// The host registry erases each tool's parameter schema; the wrapper validates its input itself.
+	const hostTool = { ...TOOL_FIELDS, execute: async (_toolCallId: string, params: unknown) => runTodo(pi, session, params) };
+	// The host registry erases each tool's parameter schema; the tool validates its input itself.
 	await session.refreshRpcHostTools([hostTool as unknown as AgentTool]);
 }
 
-export default function todoGoal(pi: ExtensionAPI): void {
+export default function todoMore(pi: ExtensionAPI): void {
 	pi.registerTool({
 		...TOOL_FIELDS,
-		execute: async (toolCallId, params, signal, _onUpdate, ctx) => {
+		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
 			const session = ownSession(ctx);
 			if (session === undefined) throw new Error(`todo: no session registered for agent ${ctx.agent.id}`);
-			return runTodo(pi, session, toolCallId, params, signal);
+			return runTodo(pi, session, params);
 		},
 		renderCall: renderTodoCall,
 		renderResult: renderTodoResult,
@@ -107,7 +109,9 @@ export default function todoGoal(pi: ExtensionAPI): void {
 		try {
 			await installForTask(pi, ctx);
 		} catch (error) {
-			pi.logger.warn("todo-goal could not install todo", { error: errorText(error) });
+			pi.logger.warn("todo-more could not install todo", { error: errorText(error) });
 		}
 	});
+
+	registerReminders(pi);
 }

@@ -1,17 +1,17 @@
 import { resolve } from "node:path";
 
 /** Stable on-disk operation names shared by the logger and context reader. */
-export type TodoOperation = "init" | "start" | "done" | "rm" | "drop" | "block" | "unblock" | "append" | "view";
+export type TodoOperation = "init" | "start" | "done" | "rm" | "drop" | "block" | "unblock" | "append" | "view" | "explain";
 export type GoalOperation = "create" | "get" | "complete" | "resume" | "drop";
 
 /**
- * `todo-goal set` lines carry the goal a successful `todo` call set, as the JSON
- * of a `TodoGoal` (`_shared/todo-goal.ts`); they follow that call's `todo` line.
+ * `todo-more set` lines carry the goal a successful `todo` call set, as the JSON
+ * of a `TodoGoal` (`_shared/todo-more.ts`); they follow that call's `todo` line.
  */
 export type TaskLogEvent =
 	| { tool: "todo"; op: TodoOperation; detail: string; atMs: number }
 	| { tool: "goal"; op: GoalOperation; detail: string; atMs: number }
-	| { tool: "todo-goal"; op: "set"; detail: string; atMs: number };
+	| { tool: "todo-more"; op: "set"; detail: string; atMs: number };
 
 export function taskLogPath(localRoot: string, agentId: string): string {
 	return resolve(localRoot, "task-log", `${agentId}.md`);
@@ -28,6 +28,7 @@ export function todoOperation(value: unknown): TodoOperation | undefined {
 		case "unblock":
 		case "append":
 		case "view":
+		case "explain":
 			return value;
 		default:
 			return undefined;
@@ -49,7 +50,7 @@ export function goalOperation(value: unknown): GoalOperation | undefined {
 
 /** Parse one logger line; timestamps are local wall time, without a zone suffix. */
 export function parseTaskLogEvent(line: string): TaskLogEvent | undefined {
-	const match = /^-\s+(\S+)\s+(\S+)\s+(todo-goal|todo|goal)\s+([a-z]+):\s*(.*)$/i.exec(line.trim());
+	const match = /^-\s+(\S+)\s+(\S+)\s+(todo-more|todo|goal)\s+([a-z]+):\s*(.*)$/i.exec(line.trim());
 	if (!match) return undefined;
 	const [, date, time, toolName, operation, detail = ""] = match;
 	if (date === undefined || time === undefined) return undefined;
@@ -65,7 +66,7 @@ export function parseTaskLogEvent(line: string): TaskLogEvent | undefined {
 		const op = goalOperation(candidate);
 		return op === undefined ? undefined : { tool, op, detail, atMs };
 	}
-	if (tool === "todo-goal") {
+	if (tool === "todo-more") {
 		return candidate === "set" ? { tool, op: candidate, detail, atMs } : undefined;
 	}
 	return undefined;

@@ -165,9 +165,9 @@ const SUPERSEDED: readonly { readonly from: string; readonly by: string }[] = [
 		"wt-tool",
 	].map((name) => ({ from: `extensions/${name}.ts`, by: `extensions/${name}/index.ts` })),
 	{ from: "extensions/ctx-post-compact-hint.ts", by: "extensions/ctx-tool/index.ts" },
-	// subagent-todo installed native `todo` in task subagents; todo-goal now owns `todo` there.
-	{ from: "extensions/subagent-todo.ts", by: "extensions/todo-goal/index.ts" },
-	{ from: "extensions/subagent-todo/index.ts", by: "extensions/todo-goal/index.ts" },
+	// subagent-todo installed native `todo` in task subagents; todo-more now owns `todo` there.
+	{ from: "extensions/subagent-todo.ts", by: "extensions/todo-more/index.ts" },
+	{ from: "extensions/subagent-todo/index.ts", by: "extensions/todo-more/index.ts" },
 	{ from: "extensions-last/system-prompt-replace.ts", by: "extensions-last/system-prompt-replace/index.ts" },
 	{ from: "omp-config-update.ts", by: UPDATER_REL },
 ];
