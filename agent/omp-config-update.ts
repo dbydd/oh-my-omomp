@@ -123,6 +123,7 @@ const STRUCTURED: readonly StructuredItem[] = [
 	{ rel: "agent/system-prompt-replace.json", format: "json", localFields: [], machineLists: [] },
 	{ rel: "agent/extensions/lang-nag.json", format: "json", localFields: [], machineLists: [] },
 	{ rel: "agent/extensions/input-polish.json", format: "json", localFields: [], machineLists: [] },
+	{ rel: "agent/extensions/tool-policy-nag.json", format: "json", localFields: [], machineLists: [] },
 	{ rel: "pi/agent/pi-bansos-relay-state.json", format: "json", localFields: [], machineLists: [] },
 	{ rel: "agent/config.yml", format: "yaml", localFields: LOCAL_CONFIG_FIELDS, machineLists: MACHINE_LIST_FIELDS },
 ];

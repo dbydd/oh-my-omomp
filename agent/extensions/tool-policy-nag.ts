@@ -1,12 +1,29 @@
 import type { ExtensionAPI, ExtensionContext } from '@oh-my-pi/pi-coding-agent';
+import { NativeJudge, isJudgmentApi } from '@oh-my-pi/pi-ai';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 /**
- * Watches for shell commands that reimplement the built-in tools APPEND_SYSTEM.md
- * assigns to the model: list, read, search, edit, write and eval operations.
- * Ignoring the system prompt is one failure: after the first three hits, send at
- * most three generic steer nags per context, then go quiet until a boundary that
- * replaces the context (compaction, /clear, branch summary). Branch or tree
- * navigation rebuilds the target branch's own state; it does not reset it.
+ * Watches main-session shell commands and eval code for operations the built-in
+ * tools APPEND_SYSTEM.md assigns to the model: list, read, search, edit, write
+ * and eval. `tool-policy-nag.json` (cwd copy first, then the one beside this
+ * file) picks the detector, re-read at every watched call:
+ *
+ * - `{"detector": "heuristic"}` (also when no valid config exists): a command
+ *   parser plus regexes. Ignoring the system prompt is one failure: after the
+ *   first three hits, send at most three generic steer nags per context, then
+ *   go quiet until a boundary that replaces the context (compaction, /clear,
+ *   branch summary). Branch or tree navigation rebuilds the target branch's own
+ *   state; it does not reset it.
+ * - `{"detector": "jev", "judge": "<provider>/<model>", "threshold": 0.5}`:
+ *   every watched call goes to a judgment-API model (Jev) as one request with
+ *   one independent yes/no question per policy rule (SHELL_RULES / EVAL_RULES).
+ *   Each call with a rule at or above `threshold` gets its own message listing
+ *   every violated rule and the required tool; no counting, no cap. The verdict
+ *   arrives after the call started, so the nag is an aside (a new turn when the
+ *   session is already idle); a verdict that returns after a session move is
+ *   only shown. A failed judge request warns once per reason and nags nothing;
+ *   the heuristic is never a fallback.
  */
 
 const NAG_TEXT = '你为什么不遵守system prompt。';
@@ -882,19 +899,60 @@ const WRITE_DEVICE_COMMAND_FIELDS: Record<string, 'command' | 'cmd'> = {
     'xd://exec_command': 'cmd',
 };
 
+/** A tool call whose shell command or eval code both detectors examine. */
+type WatchedCall =
+    | {
+          readonly kind: 'shell';
+          /** Tool name, or the write-device path the command was sent through. */
+          readonly tool: string;
+          readonly command: string;
+          /** Only `exec_command` can allocate a PTY; `bash`/`bash_bg` never do. */
+          readonly tty: boolean;
+      }
+    | { readonly kind: 'eval'; readonly language: string; readonly code: string };
+
 /**
- * Extracts a shell command from a write-device payload. Device content is
+ * Extracts the shell command of a write-device payload. Device content is
  * untrusted JSON; malformed or non-shell payloads are intentionally ignored.
  */
-export function detectWriteShellViolations(path: string, content: unknown): ShellViolation[] {
+function deviceShellCall(path: string, content: string): WatchedCall | null {
     const commandField = WRITE_DEVICE_COMMAND_FIELDS[path];
-    if (commandField === undefined || typeof content !== 'string') return [];
+    if (commandField === undefined) return null;
     try {
         const payload: unknown = JSON.parse(content);
         const command = stringField(payload, commandField);
-        return command === null ? [] : detectShellViolations(command);
+        if (command === null) return null;
+        const tty = commandField === 'cmd' && typeof payload === 'object' && payload !== null && (payload as UnknownRecord).tty === true;
+        return { kind: 'shell', tool: path, command, tty };
     } catch {
-        return [];
+        return null;
+    }
+}
+
+function watchedCallOf(toolName: string, input: unknown): WatchedCall | null {
+    switch (toolName) {
+        case 'bash':
+        case 'bash_bg': {
+            const command = stringField(input, 'command');
+            return command === null ? null : { kind: 'shell', tool: toolName, command, tty: false };
+        }
+        case 'exec_command': {
+            const command = stringField(input, 'cmd');
+            const tty = typeof input === 'object' && input !== null && (input as UnknownRecord).tty === true;
+            return command === null ? null : { kind: 'shell', tool: toolName, command, tty };
+        }
+        case 'write': {
+            const path = stringField(input, 'path');
+            const content = stringField(input, 'content');
+            return path === null || content === null ? null : deviceShellCall(path, content);
+        }
+        case 'eval': {
+            const language = stringField(input, 'language');
+            const code = stringField(input, 'code');
+            return language === null || code === null ? null : { kind: 'eval', language, code };
+        }
+        default:
+            return null;
     }
 }
 
@@ -997,9 +1055,280 @@ function rebuildState(ctx: ExtensionContext): NagState {
     return state;
 }
 
+// --- detector config (tool-policy-nag.json) ----------------------------------
+
+const CONFIG_FILE = 'tool-policy-nag.json';
+const JUDGE_TIMEOUT_MS = 90_000;
+
+type JevDetector = {
+    readonly kind: 'jev';
+    readonly judge: { readonly provider: string; readonly modelId: string };
+    /** A rule is violated when Jev's yes-probability reaches this value. */
+    readonly threshold: number;
+};
+type Detector = { readonly kind: 'heuristic' } | JevDetector;
+
+const HEURISTIC: Detector = { kind: 'heuristic' };
+
+type ConfigParse = { readonly kind: 'ok'; readonly detector: Detector } | { readonly kind: 'invalid'; readonly reason: string };
+
+function parseConfig(value: unknown): ConfigParse {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return { kind: 'invalid', reason: 'not a JSON object' };
+    const record = value as UnknownRecord;
+    switch (record.detector) {
+        case 'heuristic':
+            return { kind: 'ok', detector: HEURISTIC };
+        case 'jev': {
+            const judge = typeof record.judge === 'string' ? record.judge.trim() : '';
+            const slash = judge.indexOf('/');
+            if (slash <= 0 || slash === judge.length - 1) return { kind: 'invalid', reason: 'judge must be provider/model' };
+            const threshold = record.threshold;
+            if (typeof threshold !== 'number' || !(threshold > 0 && threshold <= 1)) {
+                return { kind: 'invalid', reason: 'threshold must be a number in (0, 1]' };
+            }
+            return {
+                kind: 'ok',
+                detector: { kind: 'jev', judge: { provider: judge.slice(0, slash), modelId: judge.slice(slash + 1) }, threshold },
+            };
+        }
+        default:
+            return { kind: 'invalid', reason: 'detector must be "heuristic" or "jev"' };
+    }
+}
+
+/**
+ * The caller's cwd copy first, then the one next to this file (lang-nag's
+ * lookup). A missing or malformed candidate falls through to the next; when
+ * neither is valid the heuristic detector runs.
+ */
+function loadDetector(cwd: string): { readonly detector: Detector; readonly warnings: readonly string[] } {
+    const warnings: string[] = [];
+    for (const path of [join(cwd, CONFIG_FILE), join(import.meta.dir, CONFIG_FILE)]) {
+        if (!existsSync(path)) continue;
+        let parsed: ConfigParse;
+        try {
+            parsed = parseConfig(JSON.parse(readFileSync(path, 'utf8')));
+        } catch (error) {
+            parsed = { kind: 'invalid', reason: `unreadable or invalid JSON: ${error instanceof Error ? error.message : String(error)}` };
+        }
+        if (parsed.kind === 'ok') return { detector: parsed.detector, warnings };
+        warnings.push(`tool-policy-nag: 跳过 ${path}：${parsed.reason}`);
+    }
+    return { detector: HEURISTIC, warnings };
+}
+
+// --- Jev detector --------------------------------------------------------------
+
+/** One operation the system prompt assigns to a built-in tool, asked as its own yes/no question. */
+type PolicyRule = {
+    readonly id: string;
+    /** How the nag names the violation. */
+    readonly label: string;
+    /** The built-in tool the system prompt requires instead. */
+    readonly tool: string;
+    readonly question: string;
+    readonly yes: string;
+    readonly no: string;
+};
+
+const POLICY_PREAMBLE = [
+    'The state is one tool call made by an AI coding agent. Its system prompt requires the built-in tools below and forbids reassembling the operations they cover through the shell or the eval kernel:',
+    '`read` (file contents and line ranges, directory listings, archive members, SQLite databases, PDFs and documents, images, web URLs, remote files as `ssh://host/path`), `glob` (find files by name or pattern), `grep` (regex search over files), `edit` (modify an existing file; also renames and moves files), `write` (create or overwrite a file), `eval` (persistent Python/JS kernel for computation, data transforms, structured parsing, library calls), `ast_grep` / `ast_edit` (structural code search and rewrites), `exec_command` (shell commands; `tty: true` gives interactive programs a real terminal).',
+    'The shell stays legitimate for real binaries and short fact pipelines: builds, tests, package managers, git, external CLIs and APIs, counts and checksums (`… | wc -l`, `sha256sum`), and anything run through `sudo` / `doas` / `su`.',
+    'Answer only the question below about this one call; ignore every other aspect of it.',
+].join('\n');
+
+/** Asked about `bash` / `bash_bg` / `exec_command` commands; state `{ tool, command, tty }`. */
+const SHELL_RULES: readonly PolicyRule[] = [
+    {
+        id: 'list',
+        label: '用 shell 列目录 / 找文件',
+        tool: '`read <dir>` / `glob`',
+        question: 'Does this command list a directory or find files by name, path or pattern (`ls`, `find`, `fd`, `tree`, `ls -t | head`), an operation `read <dir>` or `glob` covers? A listing whose output only feeds a counter (`find … | wc -l`) does not count.',
+        yes: 'The command lists directory entries or finds files that `read <dir>` or `glob` could return.',
+        no: 'The command neither lists directories nor finds files, or only counts them.',
+    },
+    {
+        id: 'read',
+        label: '用 shell 读文件 / 归档 / 数据库 / 网页内容',
+        tool: '`read`',
+        question: 'Does this command fetch content `read` delivers: a file or a slice of it (`cat`, `head`, `tail`, `sed -n`, `less`, `bat`, `nl`, `awk \'{print}\'`, `< file`), an archive member (`unzip -p`, `tar -xO`), SQLite rows (`sqlite3 db \'SELECT …\'`), media metadata (`ffprobe`), or a web page or GitHub-hosted file viewed with `curl` / `wget`? Only commands whose purpose is printing that content count. Searching for matches (`grep`, `rg`, `awk \'/re/\'`) and changing files (`sed -i`) are judged by other rules and do not count here; neither do file bytes piped only into a counter or checksum, nor `curl` calls that drive an API, download artifacts or send data.',
+        yes: 'The command prints file, archive, database, media or web content that `read` could return.',
+        no: 'The command prints no such content: it searches, edits, counts or checksums, or uses curl for an API, download or upload.',
+    },
+    {
+        id: 'search',
+        label: '用 shell 搜索文件文本',
+        tool: '`grep`',
+        question: 'Does this command search file contents for text or a regex (`grep`, `rg`, `ag`, `ack`, `git grep` over files or directories; `awk` / `sed` / `perl` pattern matching over files), an operation the `grep` tool covers? Filtering another program\'s output stream (`cmd | grep x`) and counting matches do not count.',
+        yes: 'The command searches the contents of files or directories.',
+        no: 'The command searches no file contents, or only filters another program\'s output, or only counts matches.',
+    },
+    {
+        id: 'edit',
+        label: '用 shell 修改已有文件',
+        tool: '`edit`',
+        question: 'Does this command change an existing file in place (`sed -i`, `perl -pi`, `awk -i inplace`, `ed` / `ex` scripts, `>` / `>>` redirection or `tee` onto a file to alter it), an operation `edit` covers? Formatters, code generators, build tools, package managers and git operations that rewrite files as their own job do not count.',
+        yes: 'The command alters an existing file\'s text itself.',
+        no: 'The command alters no existing file, or a real tool rewrites files as its own job.',
+    },
+    {
+        id: 'write',
+        label: '用 shell 新建 / 覆盖文件',
+        tool: '`write`',
+        question: 'Does this command create or overwrite a file with content the agent itself authors (`echo` / `printf` / `cat <<EOF` redirected to a file, `tee file`, a heredoc into a file), an operation `write` covers? Redirecting a real program\'s output to a file (logs, build or test output, generated artifacts) does not count.',
+        yes: 'The command writes agent-authored content to a file.',
+        no: 'The command writes no agent-authored content to a file.',
+    },
+    {
+        id: 'move',
+        label: '用 shell 重命名 / 移动文件',
+        tool: '`edit` 的 `MV`',
+        question: 'Does this command rename or move a file or directory with `mv` (or `cp` followed by `rm`), an operation the `edit` tool\'s `MV` covers? `git mv` does not count.',
+        yes: 'The command renames or moves a file or directory.',
+        no: 'The command renames or moves nothing, or uses `git mv`.',
+    },
+    {
+        id: 'inlineScript',
+        label: '在 shell 里跑内联 Python / JS 脚本',
+        tool: '`eval`',
+        question: 'Does this command run inline script logic through the shell (`python3 - <<EOF`, `python -c`, `node -e`, `bun -e`, `deno eval`, `ruby -e`, `perl -e`, a heredoc or string piped into an interpreter), work the `eval` kernel covers? Running a script file that exists in the project (`python scripts/x.py`, `bun run build`, `bun test`) does not count.',
+        yes: 'The command runs inline script code through an interpreter.',
+        no: 'The command runs no inline script code.',
+    },
+    {
+        id: 'structural',
+        label: '用文本工具做结构化代码搜索 / 改写',
+        tool: '`ast_grep` / `ast_edit`',
+        question: 'Does this command search or rewrite code by syntax shape with text tools (regexes through `grep` / `sed` / `awk` / `perl` meant to match calls with their arguments, declarations, imports or multi-line constructs, or a codemod applied across files), work `ast_grep` / `ast_edit` cover? Searching for a literal identifier, string or log message does not count.',
+        yes: 'The command matches or rewrites code structure with text patterns.',
+        no: 'The command does no structural code matching or rewriting with text patterns.',
+    },
+    {
+        id: 'pty',
+        label: '交互程序没有走 PTY',
+        tool: '`exec_command` 加 `tty: true`，再用 `write_stdin` 驱动',
+        question: 'Does this command drive an interactive program without a real terminal: with `tty` false, an interactive `ssh` session, a password, passphrase or host-key prompt, `sudo` that will prompt, a REPL or database shell (`python`, `node`, `psql`, `mysql`, `redis-cli`), `docker exec -it` / `kubectl exec -it`, a TUI (`top`, `vim`, `less`), `git rebase -i` / `git add -p`, or an installer that asks questions; or a terminal faked with heredocs, `yes |`, `echo … |`, `expect`, `ssh -tt` or `script -q`? One-shot commands (`ssh host \'cmd\'`, `psql -c \'…\'`, `docker exec` without `-it`) do not count.',
+        yes: 'The command runs an interactive program without a PTY, or fakes one.',
+        no: 'The command runs no interactive program, or runs it with `tty` true, or is a one-shot.',
+    },
+];
+
+/** Asked about `eval` code; state `{ tool, language, code }`. */
+const EVAL_RULES: readonly PolicyRule[] = [
+    {
+        id: 'read',
+        label: '在 eval 里读文件',
+        tool: '`read`',
+        question: 'Does this code read file contents from disk (`open(...).read()`, `Path.read_text` / `read_bytes`, `readlines`, `readFileSync`, `fs.readFile`, `Bun.file(...).text()` / `.json()`, the kernel\'s `read()` helper), content `read` delivers, including JSON through `?q=` jq filters and SQLite through selectors? Writing files and processing data already in memory do not count.',
+        yes: 'The code reads file contents from disk.',
+        no: 'The code reads no file contents.',
+    },
+    {
+        id: 'list',
+        label: '在 eval 里列目录 / 找文件',
+        tool: '`read <dir>` / `glob`',
+        question: 'Does this code list directories or find files (`os.listdir`, `os.scandir`, `os.walk`, `glob.glob`, `Path.glob` / `rglob`, `readdirSync`, `fs.readdir`, `Bun.Glob`), an operation `read <dir>` or `glob` covers?',
+        yes: 'The code lists directories or finds files.',
+        no: 'The code lists no directories and finds no files.',
+    },
+    {
+        id: 'search',
+        label: '在 eval 里搜索文件文本',
+        tool: '`grep`',
+        question: 'Does this code search file contents for text or a regex (reading files and matching patterns or substrings in them), an operation the `grep` tool covers?',
+        yes: 'The code searches the contents of files.',
+        no: 'The code searches no file contents.',
+    },
+    {
+        id: 'edit',
+        label: '在 eval 里改写并保存文件',
+        tool: '`edit` / `write`',
+        question: 'Does this code edit an existing file by reading it, changing the text and saving it back (rewrite-and-save, string replace then write), an operation `edit` covers? Writing new output files the computation produces does not count.',
+        yes: 'The code rewrites an existing file\'s text and saves it.',
+        no: 'The code rewrites no existing file.',
+    },
+    {
+        id: 'subprocess',
+        label: '在 eval 里跑 shell 命令或普通程序',
+        tool: '`exec_command`（或覆盖该操作的内置工具）',
+        question: 'Does this code start an operating-system process (`subprocess.run` / `Popen`, `os.system`, `!cmd`, `Bun.$`, `Bun.spawn`, `child_process`) such as `cat`, `ls`, `grep`, `rg`, `find`, `git`, builds or other programs that `exec_command` or another built-in tool runs directly? Calling the harness\'s own tools through `tool.<name>(…)` or `await tool.<name>(…)` starts no process and does not count.',
+        yes: 'The code starts an operating-system process.',
+        no: 'The code starts no operating-system process; calls to harness tools through `tool.<name>` do not count.',
+    },
+];
+
+type JudgeResult =
+    | { readonly kind: 'ok'; readonly probabilities: Readonly<Record<string, number>> }
+    | { readonly kind: 'failed'; readonly reason: string };
+
+/** One request, one independent yes/no question per rule: Jev answers each separately against the same call. */
+async function judgeCall(ctx: ExtensionContext, detector: JevDetector, call: WatchedCall, rules: readonly PolicyRule[]): Promise<JudgeResult> {
+    const { provider, modelId } = detector.judge;
+    // Match by judgment API, not catalog kind (same lookup as turn-judge / watchdog-agent).
+    const model = ctx.modelRegistry.getAvailable('all').find(candidate => candidate.provider === provider && candidate.id === modelId);
+    if (!model) return { kind: 'failed', reason: `judge ${provider}/${modelId} not found` };
+    if (!isJudgmentApi(model.api)) return { kind: 'failed', reason: `judge ${provider}/${modelId} has no judgment API (${model.api})` };
+    const signal = AbortSignal.timeout(JUDGE_TIMEOUT_MS);
+    try {
+        const sessionId = ctx.sessionManager.getSessionId();
+        const apiKey = await ctx.modelRegistry.getApiKey(model, sessionId, { signal });
+        if (!apiKey) return { kind: 'failed', reason: 'judge credentials unavailable' };
+        const headers = await ctx.modelRegistry.resolveModelHeaders(model, signal);
+        const judge = new NativeJudge({
+            apiKey: ctx.modelRegistry.resolver(model, sessionId),
+            api: model.api,
+            provider: model.provider,
+            model: model.id,
+            baseUrl: model.baseUrl,
+            headers,
+        });
+        const questions: Record<string, { type: 'noul'; instructions: string; criteria: { true: string; false: string } }> = {};
+        for (const rule of rules) {
+            questions[rule.id] = { type: 'noul', instructions: `${POLICY_PREAMBLE}\n\nQuestion: ${rule.question}`, criteria: { true: rule.yes, false: rule.no } };
+        }
+        const state =
+            call.kind === 'shell'
+                ? { tool: call.tool, command: call.command, tty: call.tty }
+                : { tool: 'eval', language: call.language, code: call.code };
+        const result = await judge.judge({ state, questions }, { signal });
+        const probabilities: Record<string, number> = {};
+        for (const rule of rules) probabilities[rule.id] = result.answers[rule.id].noul;
+        return { kind: 'ok', probabilities };
+    } catch (error) {
+        return { kind: 'failed', reason: error instanceof Error ? error.message : String(error) };
+    }
+}
+
+type Flagged = { readonly rule: PolicyRule; readonly probability: number };
+
+/** A code fence longer than any backtick run inside `text`. */
+function fenced(text: string, language: string): string {
+    let longest = 2;
+    for (const run of text.match(/`+/g) ?? []) longest = Math.max(longest, run.length);
+    const marks = '`'.repeat(longest + 1);
+    return `${marks}${language}\n${text}\n${marks}`;
+}
+
+/** Every violation Jev found in the call, one line each, followed by the call itself. */
+function jevNagText(call: WatchedCall, flagged: readonly Flagged[]): string {
+    const tool = call.kind === 'shell' ? call.tool : 'eval';
+    return [
+        `你这次 \`${tool}\` 调用违反了 system prompt 的工具规则，共 ${flagged.length} 项：`,
+        ...flagged.map(({ rule }, index) => `${index + 1}. ${rule.label}：应该用 ${rule.tool}`),
+        '',
+        '这次调用：',
+        call.kind === 'shell' ? fenced(call.command, 'sh') : fenced(call.code, call.language),
+    ].join('\n');
+}
+
 export default function toolPolicyNag(pi: ExtensionAPI): void {
     let state: NagState = WATCHING;
     const nestedDeviceCalls = new Set<string>();
+    /** Bumped by every session move; a Jev verdict from an older epoch is shown, never sent. */
+    let epoch = 0;
+    /** Config and judge failures already reported, so a broken setup warns once per process. */
+    const warned = new Set<string>();
 
     const commit = (next: NagState): void => {
         state = next;
@@ -1013,49 +1342,21 @@ export default function toolPolicyNag(pi: ExtensionAPI): void {
     };
 
     const restore = (reason: string, ctx: ExtensionContext): void => {
+        epoch += 1;
         state = rebuildState(ctx);
         pi.logger.info('Tool-policy nag state restored', { reason, state });
     };
 
-    pi.on('session_start', (_event, ctx) => runForMainSession(ctx, () => restore('session_start', ctx)));
-    pi.on('session_switch', (_event, ctx) => runForMainSession(ctx, () => restore('session_switch', ctx)));
-    pi.on('session_branch', (_event, ctx) => runForMainSession(ctx, () => restore('session_branch', ctx)));
-    pi.on('session_tree', (_event, ctx) => runForMainSession(ctx, () => restore('session_tree', ctx)));
-    pi.on('session_compact', (_event, ctx) => runForMainSession(ctx, () => rearm('session_compact')));
-    pi.on('auto_compaction_end', (event, ctx) =>
-        runForMainSession(ctx, () => {
-            if (event.aborted || event.skipped === true || event.result === undefined) return;
-            rearm(`auto_compaction_end:${event.action}`);
-        }),
-    );
+    const warnOnce = (ctx: ExtensionContext, text: string): void => {
+        if (warned.has(text)) return;
+        warned.add(text);
+        pi.logger.warn(text);
+        if (ctx.hasUI) ctx.ui.notify(text, 'warning');
+    };
 
-    pi.on('tool_call', (event, ctx) => runForMainSession(ctx, () => {
-        if (event.toolName !== 'write' && nestedDeviceCalls.delete(event.toolCallId)) return;
+    const heuristicCheck = (ctx: ExtensionContext, call: WatchedCall): void => {
         if (state.kind === 'exhausted') return;
-
-        let violations: ShellViolation[];
-        if (event.toolName === 'bash' || event.toolName === 'bash_bg') {
-            const command = stringField(event.input, 'command');
-            if (command === null) return;
-            violations = detectShellViolations(command);
-        } else if (event.toolName === 'write') {
-            const path = stringField(event.input, 'path');
-            const content = stringField(event.input, 'content');
-            if (path === null || content === null) return;
-            if (WRITE_DEVICE_COMMAND_FIELDS[path] !== undefined) nestedDeviceCalls.add(event.toolCallId);
-            violations = detectWriteShellViolations(path, content);
-        } else if (event.toolName === 'exec_command') {
-            const command = stringField(event.input, 'cmd');
-            if (command === null) return;
-            violations = detectShellViolations(command);
-        } else if (event.toolName === 'eval') {
-            const language = stringField(event.input, 'language');
-            const code = stringField(event.input, 'code');
-            if (language === null || code === null) return;
-            violations = detectEvalViolations(language, code);
-        } else {
-            return;
-        }
+        const violations = call.kind === 'shell' ? detectShellViolations(call.command) : detectEvalViolations(call.language, call.code);
         if (violations.length === 0) return;
 
         // Every offending command counts, so four `cat`s batched into one bash
@@ -1104,5 +1405,77 @@ export default function toolPolicyNag(pi: ExtensionAPI): void {
             }`,
             'warning',
         );
+    };
+
+    /** Runs beside the tool call; the verdict lands after it, so the nag goes out as an aside. */
+    const jevCheck = async (ctx: ExtensionContext, detector: JevDetector, call: WatchedCall): Promise<void> => {
+        const startedAt = epoch;
+        const rules = call.kind === 'shell' ? SHELL_RULES : EVAL_RULES;
+        const result = await judgeCall(ctx, detector, call, rules);
+        switch (result.kind) {
+            case 'failed':
+                warnOnce(ctx, `tool-policy-nag: Jev 判断失败（${result.reason}）`);
+                return;
+            case 'ok':
+                break;
+            default: {
+                const unreachable: never = result;
+                return unreachable;
+            }
+        }
+        const tool = call.kind === 'shell' ? call.tool : 'eval';
+        const flagged: Flagged[] = [];
+        for (const rule of rules) {
+            const probability = result.probabilities[rule.id] ?? 0;
+            if (probability >= detector.threshold) flagged.push({ rule, probability });
+        }
+        pi.logger.info('Tool-policy Jev verdict', {
+            tool,
+            threshold: detector.threshold,
+            probabilities: result.probabilities,
+            flagged: flagged.map(({ rule }) => rule.id),
+        });
+        if (flagged.length === 0) return;
+        const summary = `tool-policy-nag Jev：${tool} 违规 ${flagged.map(({ rule, probability }) => `${rule.id} ${probability.toFixed(2)}`).join(' · ')}`;
+        if (epoch !== startedAt) {
+            if (ctx.hasUI) ctx.ui.notify(`${summary}；判断返回前会话已切换，未发送提醒`, 'info');
+            return;
+        }
+        pi.sendUserMessage(jevNagText(call, flagged), ctx.isIdle() ? { attribution: 'agent' } : { deliverAs: 'aside', attribution: 'agent' });
+        if (ctx.hasUI) ctx.ui.notify(summary, 'warning');
+    };
+
+    pi.on('session_start', (_event, ctx) => runForMainSession(ctx, () => restore('session_start', ctx)));
+    pi.on('session_switch', (_event, ctx) => runForMainSession(ctx, () => restore('session_switch', ctx)));
+    pi.on('session_branch', (_event, ctx) => runForMainSession(ctx, () => restore('session_branch', ctx)));
+    pi.on('session_tree', (_event, ctx) => runForMainSession(ctx, () => restore('session_tree', ctx)));
+    pi.on('session_compact', (_event, ctx) => runForMainSession(ctx, () => rearm('session_compact')));
+    pi.on('auto_compaction_end', (event, ctx) =>
+        runForMainSession(ctx, () => {
+            if (event.aborted || event.skipped === true || event.result === undefined) return;
+            rearm(`auto_compaction_end:${event.action}`);
+        }),
+    );
+
+    pi.on('tool_call', (event, ctx) => runForMainSession(ctx, () => {
+        if (event.toolName !== 'write' && nestedDeviceCalls.delete(event.toolCallId)) return;
+        const call = watchedCallOf(event.toolName, event.input);
+        if (call === null) return;
+        // The device re-dispatches its payload as a nested tool call with the same id.
+        if (event.toolName === 'write') nestedDeviceCalls.add(event.toolCallId);
+        const { detector, warnings } = loadDetector(ctx.cwd);
+        for (const warning of warnings) warnOnce(ctx, warning);
+        switch (detector.kind) {
+            case 'heuristic':
+                heuristicCheck(ctx, call);
+                return;
+            case 'jev':
+                void jevCheck(ctx, detector, call);
+                return;
+            default: {
+                const unreachable: never = detector;
+                return unreachable;
+            }
+        }
     }));
 }

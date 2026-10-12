@@ -29,4 +29,4 @@ description: 用本仓库工作区更新本机 OMP 配置和 pi-bansos 状态（
 
 ## 生效时机
 
-报告结束时提醒：`APPEND_SYSTEM.md`、扩展、插件在下次启动时加载；`config.yml` 由 OMP 实时重载；`APPEND_SYSTEM_MODEL.md`、`system-prompt-replace.json` 从下一条 prompt 开始生效；`TURN-JUDGE-*.md` 从主会话的下一轮结束时开始生效；`PROMPT-INJECT-*.md` 和 `agents/` 从下一个派出的 subagent 开始生效；`pi-bansos-relay-state.json` 在已运行的会话里要到下次会话启动或下一次 `/bansos` 改动时才生效。
+报告结束时提醒：`APPEND_SYSTEM.md`、扩展、插件在下次启动时加载；`config.yml` 由 OMP 实时重载；`APPEND_SYSTEM_MODEL.md`、`system-prompt-replace.json` 从下一条 prompt 开始生效；`TURN-JUDGE-*.md` 从主会话的下一轮结束时开始生效；`extensions/tool-policy-nag.json` 从主会话的下一次 shell / eval 调用开始生效；`PROMPT-INJECT-*.md` 和 `agents/` 从下一个派出的 subagent 开始生效；`pi-bansos-relay-state.json` 在已运行的会话里要到下次会话启动或下一次 `/bansos` 改动时才生效。

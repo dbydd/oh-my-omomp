@@ -24,7 +24,7 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 |`agent/PROMPT-INJECT-*.md`|[user-prompt-inject](#user-prompt-inject) 的模板：把用户原话注入 mentor 和 discussant|`~/.omp/agent/`|
 |`agent/TURN-JUDGE-*.md`|[turn-judge](#turn-judge) 的判定配置：每轮结束后用 Jev 判断一个问题|`~/.omp/agent/`|
 |`agent/agents/`|subagent 定义；`README.txt` 记录编写陷阱|`~/.omp/agent/agents/`|
-|`agent/extensions/`|本地扩展，以及 `lang-nag.json`、`input-polish.json`、`doc-polish.json` 三个扩展配置。前两个随更新器同步；`doc-polish.json` 属于本机，只作示例，见 [`/update-omp`](#update-omp仓库--本机)|`~/.omp/agent/extensions/`|
+|`agent/extensions/`|本地扩展，以及 `lang-nag.json`、`input-polish.json`、`tool-policy-nag.json`、`doc-polish.json` 四个扩展配置。前三个随更新器同步；`doc-polish.json` 属于本机，只作示例，见 [`/update-omp`](#update-omp仓库--本机)|`~/.omp/agent/extensions/`|
 |`agent/extensions-last/`|要在其他按路径加载的扩展之后执行的扩展，由 `config.yml` 的 `extensions` 末项显式加载；目前只有 [system-prompt-replace](#system-prompt-replace)。`README.md` 只给仓库看，不同步|`~/.omp/agent/extensions-last/`|
 |`agent/system-prompt-replace.json`|[system-prompt-replace](#system-prompt-replace) 的替换规则|`~/.omp/agent/`|
 |`pi/agent/pi-bansos-relay-state.json`|`pi-bansos` 插件状态|`~/.pi/agent/`|
@@ -64,7 +64,7 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 
 每次成功的 todo 修改都会被 `ctx-tasklog` 捕获；`ctx` 按这些事件重放任务的最终状态，形成不依赖模型自行总结的简短行事记录。主会话发生 compact 后，`ctx-post-compact-hint` 会把这份记录连同 context 树注入新 context。OMP 原生只给启用了 prewalk 的 subagent 留 `todo`，[subagent-todo](#subagent-todo) 为其余 `task:*` worker 补上该工具，使从 todo、task log 到 ctx 的同一条链路覆盖 subagent；worker 定义同时要求每个切片都维护自己的 todo。
 
-**把非法工具调用当作整体偏离的信号。** [tool-policy-nag](#tool-policy-nag) 检测模型是否绕开内置工具，只计数和提醒，不拦截命令。目标不是追求形式上完美的“古典”工具调用，而是在偏离扩散到其他规则之前及时校正。
+**把非法工具调用当作整体偏离的信号。** [tool-policy-nag](#tool-policy-nag) 检测模型是否绕开内置工具，只提醒，不拦截命令。默认用命令解析器计数，超过阈值后发一句通用提醒；打开 Jev 检测后，每次调用由 Jev 逐类判定，把这次调用的全部违规逐条列出来。目标不是追求形式上完美的“古典”工具调用，而是在偏离扩散到其他规则之前及时校正。
 
 **用 watchdog 做独立的运行时审阅。** watchdog 作为第三方观察者自动读取 context，并按规则注入提醒；作用类似 Claude 的 `/advisor`，但目标、触发和投放方式更广。判定选项较少时，同一个 watchdog 可以改用 Jev 后端（[watchdog-agent](#watchdog-agent)）。
 
@@ -125,7 +125,7 @@ flowchart LR
 
 ### 两个方向共同的规则
 
-- **结构化配置按字段处理。** `config.yml`、`thinking-translator.json`、`system-prompt-replace.json`、`extensions/lang-nag.json`、`extensions/input-polish.json`、`pi-bansos-relay-state.json` 都按字段比对，只改有差异的字段。`/sync-omp-config` 写仓库时只改这些行，不整文件覆盖，也不重新序列化。仓库 → 本机由更新器写入：合并结果与仓库文件完全一致时原样复制仓库文件，否则重新序列化整个文件（键的顺序不变，格式可能与原文件不同）。两端都必须能解析：YAML 用 `Bun.YAML.parse`，JSON 用 `JSON.parse`。
+- **结构化配置按字段处理。** `config.yml`、`thinking-translator.json`、`system-prompt-replace.json`、`extensions/lang-nag.json`、`extensions/input-polish.json`、`extensions/tool-policy-nag.json`、`pi-bansos-relay-state.json` 都按字段比对，只改有差异的字段。`/sync-omp-config` 写仓库时只改这些行，不整文件覆盖，也不重新序列化。仓库 → 本机由更新器写入：合并结果与仓库文件完全一致时原样复制仓库文件，否则重新序列化整个文件（键的顺序不变，格式可能与原文件不同）。两端都必须能解析：YAML 用 `Bun.YAML.parse`，JSON 用 `JSON.parse`。
 - **`config.yml` 的本机字段两个方向都不动**，例如 `modelRoles`、`theme`、`compaction.thresholdTokens`，完整列表是 `agent/omp-config-update.ts` 的 `LOCAL_CONFIG_FIELDS`。
 - **`config.yml` 的 `extensions` 由仓库和本机共用**（`agent/omp-config-update.ts` 的 `MACHINE_LIST_FIELDS`）：仓库列表里的条目归仓库，仓库列表里没有的条目（如 `~/.claude`）归本机。更新器把本机条目留在仓库条目前面，所以 `extensions-last/` 下的扩展仍是最后一项；`/sync-omp-config` 不把本机条目写回仓库。仓库删掉自己的条目时，自动更新照常删掉它（见下面的“删除”）。
 - **本机的 `settings.json` 不迁移。** OMP 对它的 `extensions` 分两种处理：当作扩展包根目录（从中加载 skills、rules、commands 等）时，本机有 `config.yml` 就不读它；当作 TS/JS 扩展模块时，不管有没有 `config.yml` 都照样加载其中的条目。
@@ -149,11 +149,11 @@ flowchart LR
 - `config.yml` 里仓库没有的键和本机字段，`extensions` 里仓库列表没有、也不是仓库刚删掉的条目，结构化配置里只有本机才有的键。本机字段即使本机没有，也不从仓库补；仓库把本机字段的上级键改成非映射值时，本机的映射保留。例外：仓库把自己的某个键从映射改成标量时以仓库为准，本机在这个映射下加的键随之消失。
 - 托管范围以外的文件：本机多出来的扩展、agent、模板，`extensions/doc-polish.json` 等初始化项，运行时状态。
 - 应用托管的文件：每次覆盖和删除前都检查标记，结构化配置也一样。
-- 本机解析不了的按字段合并的配置（上面列出的六个结构化配置）：不覆盖，记为错误，其余照常写入，下次启动重试。`config-light.yml` 按普通文件整份复制，本机那份坏了会被直接覆盖。
+- 本机解析不了的按字段合并的配置（上面列出的七个结构化配置）：不覆盖，记为错误，其余照常写入，下次启动重试。`config-light.yml` 按普通文件整份复制，本机那份坏了会被直接覆盖。
 
 **并发**：更新器用锁目录 `~/.omp/omp-config-update.lock` 把“拉取 + 应用”串行化，同时启动的其他 OMP 和 `/update-omp` 拿不到锁就跳过。锁里记着持有者的 pid：持有进程已经退出的锁视为残留，可以抢占；进程只释放自己持有的锁。
 
-**生效时机**：更新在当前会话运行期间落地。`config.yml` 实时重载，其中 `extensions` / `disabledExtensions` 的改动会立即停用或恢复本进程已经加载过的扩展；`APPEND_SYSTEM_MODEL.md`、`system-prompt-replace.json`、`TURN-JUDGE-*.md`、`PROMPT-INJECT-*.md`、`agents/` 从下一条 prompt、下一轮或下一次派发开始生效。`APPEND_SYSTEM.md`、扩展代码的改动、新增的扩展和插件要到下次启动；有这类改动且更新没有出错时，通知会提醒重启。也就是说，同一个会话里可能暂时是新数据配旧扩展代码，重启后一致。
+**生效时机**：更新在当前会话运行期间落地。`config.yml` 实时重载，其中 `extensions` / `disabledExtensions` 的改动会立即停用或恢复本进程已经加载过的扩展；`APPEND_SYSTEM_MODEL.md`、`system-prompt-replace.json`、`TURN-JUDGE-*.md`、`extensions/tool-policy-nag.json`、`PROMPT-INJECT-*.md`、`agents/` 从下一条 prompt、下一轮、下一次 shell / eval 调用或下一次派发开始生效。`APPEND_SYSTEM.md`、扩展代码的改动、新增的扩展和插件要到下次启动；有这类改动且更新没有出错时，通知会提醒重启。也就是说，同一个会话里可能暂时是新数据配旧扩展代码，重启后一致。
 
 **通知**：有改动且没有出错时弹一条 info，说明更新到哪个提交、写了几个、删了几个、补装了几个插件，需要时提醒重启；有错误时只弹一条 warning，给出第一条错误，不带重启提醒（部分写入可能已经落地，用 `/omp-config-autoupdate run` 看详细报告）。已是最新、拉取失败、锁被占用这三种情况只写日志。headless 模式不弹通知，只写日志。通知只给汇总；`/omp-config-autoupdate run` 的详细报告只列它自己那次运行的结果：启动时已成功应用的更新，再 `run` 只会报告已是最新；启动时应用出错（不写 `.omp-config-applied`）时，`run` 会重新应用并逐条列出，见 [omp-config-autoupdate](#omp-config-autoupdate)。一直拉取失败时启动不会提醒，用 `run` 看 git 报错。
 
@@ -172,7 +172,7 @@ flowchart LR
 
 只读本机，不写 `~/.omp`、`~/.pi`、`omp` 安装目录、PATH 或 shell 配置，本机文件的 mtime 前后不变。
 
-- **范围**：`config.yml`、`APPEND_SYSTEM.md`、`APPEND_SYSTEM_MODEL.md`、`thinking-translator.json`、`system-prompt-replace.json`、`PROMPT-INJECT-*.md`、`TURN-JUDGE-*.md`、轻量模式三项资产、`omp-config-update.ts`、`agents/`、`extensions/*.ts`、`extensions-last/*.ts`、`extensions/lang-nag.json`、`extensions/input-polish.json`，以及 `~/.pi/agent/pi-bansos-relay-state.json`。与更新器的托管范围一致。`config.yml` 的本机字段和 `extensions` 的本机条目不写回仓库。
+- **范围**：`config.yml`、`APPEND_SYSTEM.md`、`APPEND_SYSTEM_MODEL.md`、`thinking-translator.json`、`system-prompt-replace.json`、`PROMPT-INJECT-*.md`、`TURN-JUDGE-*.md`、轻量模式三项资产、`omp-config-update.ts`、`agents/`、`extensions/*.ts`、`extensions-last/*.ts`、`extensions/lang-nag.json`、`extensions/input-polish.json`、`extensions/tool-policy-nag.json`，以及 `~/.pi/agent/pi-bansos-relay-state.json`。与更新器的托管范围一致。`config.yml` 的本机字段和 `extensions` 的本机条目不写回仓库。
 - **不收回**：安装到 `omp` 旁边的 `omp-light`、`omp-light.ts`、`omp-light.cmd`（轻量模式三项只从 `~/.omp/agent` 取）；`extensions/doc-polish.json`；`.omp-config-applied`；自动更新的开关 `omp-config-autoupdate.json`。
 - 本机没有 `pi-bansos-relay-state.json`（从没用 `/bansos` 改过设置）时，不算“本机已删除”，仓库保持原样。
 - `~/.omp/plugins/package.json` 的依赖和 `install-plugins.sh` 不一致时，重写脚本里的插件列表：URL/Git 依赖原样保留，npm 依赖去掉版本号；注释掉的可选插件保持注释，见[插件](#插件)。
@@ -333,7 +333,7 @@ harness 会把 `APPEND_SYSTEM.md` 和每个 agent 的 `description` 都注入主
 
 |扩展|作用|轻量|
 |---|---|---|
-|[tool-policy-nag](#tool-policy-nag)|发现用 shell/eval 代替内置工具时计数并提醒|否|
+|[tool-policy-nag](#tool-policy-nag)|发现用 shell/eval 代替内置工具时提醒；默认计数后发通用提醒，可改用 Jev 逐类判定并列出全部违规|否|
 |[watchdog-agent](#watchdog-agent)|按目标投放的第三方审查者|否|
 |[user-prompt-inject](#user-prompt-inject)|按模板把用户原话注入指定的 subagent|否|
 |[turn-judge](#turn-judge)|主会话每轮结束后用 Jev 判断这一轮，达到阈值就输入预设 prompt，否则显示判定|否|
@@ -360,9 +360,16 @@ harness 会把 `APPEND_SYSTEM.md` 和每个 agent 的 `description` 都注入主
 
 #### tool-policy-nag
 
-`tool-policy-nag.ts` 只作用于主会话。它在 `tool_call` 阶段检查模型是否用 shell 或 eval 代替内置工具，只计数和提醒，不拦截命令。
+`tool-policy-nag.ts` 只作用于主会话。它在 `tool_call` 阶段检查模型是否用 shell 或 eval 代替内置工具，只提醒，不拦截命令。检测方式有两种，由 `tool-policy-nag.json` 选择。
 
-- **检查的调用**：`bash` / `bash_bg` 的命令；`exec_command` 的命令；经 `write` 写到 `xd://bash`、`xd://bash_bg`、`xd://exec_command` 的命令；`eval` 的 Python / JS 代码。
+- **检查的调用**（两种方式相同）：`bash` / `bash_bg` 的命令；`exec_command` 的命令；经 `write` 写到 `xd://bash`、`xd://bash_bg`、`xd://exec_command` 的命令；`eval` 的 Python / JS 代码。
+- **配置** `tool-policy-nag.json`：
+  - `{"detector": "heuristic"}`：启发式检测，仓库里的值。
+  - `{"detector": "jev", "judge": "commandcode/typesafe/jev", "threshold": 0.5}`：Jev 检测。`judge` 是 judgment API 模型的 `provider/model`，`threshold` 取 (0, 1]，两项必填。
+  - 依次尝试 cwd 下和扩展目录下的文件，第一个存在且有效的生效；缺失或无效时试下一个，两个都不行就用启发式检测。无效的文件每个进程警告一次。每次检查调用时重读，改文件从下一次 shell / eval 调用生效，不用重启。
+
+**启发式检测：**
+
 - **shell 违规分六类**：
   - 列目录：`ls`、带路径的 `find`。
   - 读文件：`cat`、`bat`、`nl`、`head`、`tail`、`less`、`more` 读文件或 `< file`，以及 `sed -n`。
@@ -374,6 +381,17 @@ harness 会把 `APPEND_SYSTEM.md` 和每个 agent 的 `description` 都注入主
 - **按命令结构解析**：识别管道、分号、引号、heredoc、命令替换和重定向；跳过 `sudo`、`doas`、`su`、`ssh`；`/dev/*` 目标只对读、搜索、编辑、写文件豁免，列目录照样计数。管道的有效终点是 `wc` 时（`wc` 之后还可以接不读文件的 `tr`、`sort`、`uniq`、`head`、`tail`、`grep` 等），前面的列目录、读、搜索不算违规。
 - **节奏**：前 3 次违规只记录。之后每次有违规的调用发一条 steer 消息“你为什么不遵守system prompt。”并弹出 UI 警告，每个 context 最多 3 条。发满后停止检测，直到下一次 compaction（手动，或成功的自动 compaction）。
 - **状态**：存在 session custom entry `mouriya.omp.tool-policy-nag.state`。恢复会话、切换分支或跳转会话树时，从当前分支重建：分支上的 `compaction`、`reset_boundary`（`/clear`）、`branch_summary` 边界会清零，之后的状态照常恢复，所以切到一个已经发满的分支仍保持停止检测。
+
+**Jev 检测：**
+
+- **判定**：每个被检查的调用发一次 judge 请求，每类违规是请求里一个独立的是 / 否问题（`noul`），Jev 对每个问题分别给出“是”的概率，达到 `threshold` 就算违反这一类。
+  - shell 命令发 `{ tool, command, tty }`，问 9 类：列目录 / 找文件、读文件 / 归档 / 数据库 / 网页内容、搜索文件文本、修改已有文件、新建 / 覆盖文件、重命名 / 移动文件、在 shell 里跑内联 Python / JS 脚本、用文本工具做结构化代码搜索 / 改写、交互程序没有走 PTY。
+  - eval 代码发 `{ tool: "eval", language, code }`，问 5 类：读文件、列目录 / 找文件、搜索文件文本、改写并保存文件、跑 shell 命令或普通程序。
+  - 每个问题写明这一类该用的内置工具和不算违规的情况（构建、测试、git、外部 CLI、计数和校验和、`sudo` 等；搜索和编辑不算“读文件”；eval 里经 `tool.<name>` 调用 harness 工具不算“跑程序”）。问题原文在扩展的 `SHELL_RULES` / `EVAL_RULES` 里。
+- **提醒**：一次调用只要违反任何一类，就发一条消息，逐条列出这次调用违反的每一类和应改用的工具，再附上这次调用的命令或代码；同时弹 UI 警告，列出各类违规的概率。不计数、不封顶，每个违规调用都提醒，也不读写启发式检测的状态。
+- **时机**：判定与工具调用并行，不阻塞命令，结果通常在调用结束后才到，所以消息以 `aside` 插到下一个 step 边界；会话已经空闲时开启新一轮。判定返回前会话切换、分支切换或树跳转时不发消息，只弹 info。
+- **失败**：模型找不到、不是 judgment API、没有凭据、请求出错或 90 秒超时时不提醒，也不退回启发式检测；同一原因每个进程警告一次，headless 只写日志。
+- **用量**：每个被检查的调用一次 judge 请求，消耗 Jev 额度，不计入会话用量。每次判定写一条 `Tool-policy Jev verdict` info 日志，含各类概率和判为违规的类别。
 
 #### watchdog-agent
 

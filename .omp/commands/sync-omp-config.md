@@ -8,7 +8,7 @@ description: 把本机 ~/.omp/agent 配置和 pi-bansos 状态同步进本仓库
 
 ## 同步范围
 
-本机 `~/.omp/agent` 与仓库 `agent/` 按同名一一对应：`config.yml`、`APPEND_SYSTEM.md`、`APPEND_SYSTEM_MODEL.md`、`thinking-translator.json`、`system-prompt-replace.json`、`PROMPT-INJECT-*.md`、`TURN-JUDGE-*.md`、`config-light.yml`、`APPEND_SYSTEM_LIGHT.md`、`omp-light.ts`、`omp-config-update.ts`、`agents/`、`extensions/*.ts`、`extensions-last/*.ts`、`extensions/lang-nag.json`、`extensions/input-polish.json`。这个范围与 `agent/omp-config-update.ts` 的 `managedPlain` 和 `STRUCTURED` 一致，改一边就要改另一边。本机 `settings.json` 不在范围内：`config.yml` 存在时 OMP 不再把它的 `extensions` 当扩展包根目录，但其中的 TS/JS 扩展模块条目照样加载，属于本机。
+本机 `~/.omp/agent` 与仓库 `agent/` 按同名一一对应：`config.yml`、`APPEND_SYSTEM.md`、`APPEND_SYSTEM_MODEL.md`、`thinking-translator.json`、`system-prompt-replace.json`、`PROMPT-INJECT-*.md`、`TURN-JUDGE-*.md`、`config-light.yml`、`APPEND_SYSTEM_LIGHT.md`、`omp-light.ts`、`omp-config-update.ts`、`agents/`、`extensions/*.ts`、`extensions-last/*.ts`、`extensions/lang-nag.json`、`extensions/input-polish.json`、`extensions/tool-policy-nag.json`。这个范围与 `agent/omp-config-update.ts` 的 `managedPlain` 和 `STRUCTURED` 一致，改一边就要改另一边。本机 `settings.json` 不在范围内：`config.yml` 存在时 OMP 不再把它的 `extensions` 当扩展包根目录，但其中的 TS/JS 扩展模块条目照样加载，属于本机。
 
 另有一项不在 `~/.omp/agent` 下：`pi-bansos` 插件的状态文件 `~/.pi/agent/pi-bansos-relay-state.json` 对应仓库 `pi/agent/pi-bansos-relay-state.json`。它由 `/bansos` 命令写入，保存 relay 开关、当前 relay、已存 relay 列表和状态栏显示（`statusBar`），不含凭据。本机没有这个文件时（从未执行过 `/bansos` 的改动类子命令）不算“本机已删除”，仓库保持原样并在报告里说明。
 
@@ -26,7 +26,7 @@ description: 把本机 ~/.omp/agent 配置和 pi-bansos 状态同步进本仓库
 3. `~/.omp/plugins/package.json` 的依赖与 `install-plugins.sh` 的列表不一致时，重写列表：URL/Git 依赖原样保留，npm 依赖去掉版本号。列表里注释掉的条目是可选插件，本机装了也保持注释、不改成有效条目，也不算差异。
 4. 校验：
    - 普通文件与本机 `cmp` 一致；结构化配置除 `config.yml` 的本机字段和本机列表条目外，与本机逐字段一致。
-   - `config.yml`、`config-light.yml` 能用 `Bun.YAML.parse` 解析，`thinking-translator.json`、`system-prompt-replace.json`、`lang-nag.json`、`input-polish.json`、`pi-bansos-relay-state.json` 能用 `JSON.parse` 解析。
+   - `config.yml`、`config-light.yml` 能用 `Bun.YAML.parse` 解析，`thinking-translator.json`、`system-prompt-replace.json`、`lang-nag.json`、`input-polish.json`、`tool-policy-nag.json`、`pi-bansos-relay-state.json` 能用 `JSON.parse` 解析。
    - 仓库里没有明文凭据：`sk-`、`ghp_`、超长的 `apiKey:` 值。
    - `git status --short` 里没有运行时文件、插件运行时文件或已安装入口。
 5. 提交并推送，commit message 用 `chore: sync snapshot with local omp config`，正文列出本机实际变化。
