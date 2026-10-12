@@ -5,7 +5,7 @@ import {
 	type ExtensionAPI,
 	type ExtensionContext,
 } from "@oh-my-pi/pi-coding-agent";
-import { TypeSafeJudge, isJudgmentApi } from "@oh-my-pi/pi-ai";
+import { NativeJudge, isJudgmentApi } from "@oh-my-pi/pi-ai";
 import { existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -749,7 +749,7 @@ async function runJev(pi: ExtensionAPI, ctx: ExtensionContext, spec: JevWatchdog
 			return null;
 		}
 		const headers = await ctx.modelRegistry.resolveModelHeaders(model, signal);
-		const judge = new TypeSafeJudge({
+		const judge = new NativeJudge({
 			apiKey: ctx.modelRegistry.resolver(model, sessionId),
 			api: model.api,
 			provider: model.provider,

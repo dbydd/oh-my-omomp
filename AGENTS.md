@@ -235,7 +235,7 @@ dispatch (see Testing & QA).
 - **Imports:** type-only `ExtensionAPI`/`ExtensionContext`; runtime imports from
   `@oh-my-pi/pi-coding-agent` (`createAgentSession`, `SessionManager`, `z`,
   `getAgentDir`, ...), `@oh-my-pi/pi-natives` (`glob`/`grep`, and `vcs` in `wt-tool.ts`), `@oh-my-pi/pi-ai`
-  (the `DeveloperMessage` type used by `user-prompt-inject.ts` and the native `TypeSafeJudge`/`isJudgmentApi` used by
+  (the `DeveloperMessage` type used by `user-prompt-inject.ts` and the native `NativeJudge`/`isJudgmentApi` used by
   `watchdog-agent.ts`), `@oh-my-pi/pi-tui`, `@oh-my-pi/pi-utils`. Extensions
   resolve only omp's host packages (`pi-agent-core`, `pi-ai`, `pi-catalog`, `pi-coding-agent`,
   `pi-natives`, `pi-tui`, `pi-utils`); other `@oh-my-pi/*` packages fail to load. Node built-ins (`node:fs`, `node:path`,
