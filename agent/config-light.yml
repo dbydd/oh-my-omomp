@@ -10,6 +10,7 @@ disabledExtensions:
   - extension-module:task-completion-judge
   - extension-module:task-split-check
   - extension-module:tool-policy-nag
+  - extension-module:turn-judge
   - extension-module:user-prompt-inject
   - extension-module:watchdog-agent
   - extension-module:wt-tool

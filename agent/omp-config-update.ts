@@ -132,7 +132,7 @@ function managedPlain(rel: string): boolean {
 	if (rel.split("/").some(part => part.startsWith("."))) return false;
 	return (
 		/^agent\/(APPEND_SYSTEM|APPEND_SYSTEM_MODEL|APPEND_SYSTEM_LIGHT)\.md$/.test(rel) ||
-		/^agent\/PROMPT-INJECT-[^/]+\.md$/.test(rel) ||
+		/^agent\/(PROMPT-INJECT|TURN-JUDGE)-[^/]+\.md$/.test(rel) ||
 		/^agent\/(config-light\.yml|omp-light\.ts|omp-config-update\.ts)$/.test(rel) ||
 		/^agent\/agents\/.+$/.test(rel) ||
 		/^agent\/(extensions|extensions-last)\/[^/]+\.ts$/.test(rel)

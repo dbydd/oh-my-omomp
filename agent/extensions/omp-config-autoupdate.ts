@@ -33,9 +33,9 @@ import { join } from "node:path";
 // session ends first: its writes are atomic and its lock is released by
 // itself.
 //
-// TIMING. Files land while this session runs. Per-prompt and per-spawn
-// files (APPEND_SYSTEM_MODEL.md, system-prompt-replace.json,
-// PROMPT-INJECT-*.md, agents/) and live-reloaded config.yml apply at once;
+// TIMING. Files land while this session runs. Per-prompt, per-turn and
+// per-spawn files (APPEND_SYSTEM_MODEL.md, system-prompt-replace.json,
+// TURN-JUDGE-*.md, PROMPT-INJECT-*.md, agents/) and live-reloaded config.yml apply at once;
 // APPEND_SYSTEM.md, extensions (this one included) and plugins apply on the
 // next start, which the notification says.
 //

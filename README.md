@@ -22,6 +22,7 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 |`agent/omp-config-update.ts`|仓库 → 本机的更新器，[启动时自动更新](#启动时自动更新)和 `/update-omp` 共用|`~/.omp/agent/`|
 |`agent/thinking-translator.json`|`omp-thinking-translator` 插件配置|`~/.omp/agent/`|
 |`agent/PROMPT-INJECT-*.md`|[user-prompt-inject](#user-prompt-inject) 的模板：把用户原话注入 mentor 和 discussant|`~/.omp/agent/`|
+|`agent/TURN-JUDGE-*.md`|[turn-judge](#turn-judge) 的判定配置：每轮结束后用 Jev 判断一个问题|`~/.omp/agent/`|
 |`agent/agents/`|subagent 定义；`README.txt` 记录编写陷阱|`~/.omp/agent/agents/`|
 |`agent/extensions/`|本地扩展，以及 `lang-nag.json`、`input-polish.json`、`doc-polish.json` 三个扩展配置。前两个随更新器同步；`doc-polish.json` 属于本机，只作示例，见 [`/update-omp`](#update-omp仓库--本机)|`~/.omp/agent/extensions/`|
 |`agent/extensions-last/`|要在其他按路径加载的扩展之后执行的扩展，由 `config.yml` 的 `extensions` 末项显式加载；目前只有 [system-prompt-replace](#system-prompt-replace)。`README.md` 只给仓库看，不同步|`~/.omp/agent/extensions-last/`|
@@ -66,6 +67,8 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 **把非法工具调用当作整体偏离的信号。** [tool-policy-nag](#tool-policy-nag) 检测模型是否绕开内置工具，只计数和提醒，不拦截命令。目标不是追求形式上完美的“古典”工具调用，而是在偏离扩散到其他规则之前及时校正。
 
 **用 watchdog 做独立的运行时审阅。** watchdog 作为第三方观察者自动读取 context，并按规则注入提醒；作用类似 Claude 的 `/advisor`，但目标、触发和投放方式更广。判定选项较少时，同一个 watchdog 可以改用 Jev 后端（[watchdog-agent](#watchdog-agent)）。
+
+**逐轮判定并直接纠正。** [turn-judge](#turn-judge) 在主会话每一轮结束后，用 Jev 按配置的问题判断这一轮，例如模型是不是在甩锅；对应选项的置信度达到阈值就直接输入预设的 prompt，否则只显示判定结果。
 
 **让顾问看到用户原话。** mentor 和 discussant 只知道派它的 agent 告诉它的东西，只能顺着对方的转述给意见，成了回声放大器。[user-prompt-inject](#user-prompt-inject) 把根会话里用户自己写的 prompt 按模板注入它们的每次模型调用，让它们拿用户的目标和约束去核对对方的计划，而不是核对对方的转述。
 
@@ -150,7 +153,7 @@ flowchart LR
 
 **并发**：更新器用锁目录 `~/.omp/omp-config-update.lock` 把“拉取 + 应用”串行化，同时启动的其他 OMP 和 `/update-omp` 拿不到锁就跳过。锁里记着持有者的 pid：持有进程已经退出的锁视为残留，可以抢占；进程只释放自己持有的锁。
 
-**生效时机**：更新在当前会话运行期间落地。`config.yml` 实时重载，其中 `extensions` / `disabledExtensions` 的改动会立即停用或恢复本进程已经加载过的扩展；`APPEND_SYSTEM_MODEL.md`、`system-prompt-replace.json`、`PROMPT-INJECT-*.md`、`agents/` 从下一条 prompt 或下一次派发开始生效。`APPEND_SYSTEM.md`、扩展代码的改动、新增的扩展和插件要到下次启动；有这类改动且更新没有出错时，通知会提醒重启。也就是说，同一个会话里可能暂时是新数据配旧扩展代码，重启后一致。
+**生效时机**：更新在当前会话运行期间落地。`config.yml` 实时重载，其中 `extensions` / `disabledExtensions` 的改动会立即停用或恢复本进程已经加载过的扩展；`APPEND_SYSTEM_MODEL.md`、`system-prompt-replace.json`、`TURN-JUDGE-*.md`、`PROMPT-INJECT-*.md`、`agents/` 从下一条 prompt、下一轮或下一次派发开始生效。`APPEND_SYSTEM.md`、扩展代码的改动、新增的扩展和插件要到下次启动；有这类改动且更新没有出错时，通知会提醒重启。也就是说，同一个会话里可能暂时是新数据配旧扩展代码，重启后一致。
 
 **通知**：有改动且没有出错时弹一条 info，说明更新到哪个提交、写了几个、删了几个、补装了几个插件，需要时提醒重启；有错误时只弹一条 warning，给出第一条错误，不带重启提醒（部分写入可能已经落地，用 `/omp-config-autoupdate run` 看详细报告）。已是最新、拉取失败、锁被占用这三种情况只写日志。headless 模式不弹通知，只写日志。通知只给汇总；`/omp-config-autoupdate run` 的详细报告只列它自己那次运行的结果：启动时已成功应用的更新，再 `run` 只会报告已是最新；启动时应用出错（不写 `.omp-config-applied`）时，`run` 会重新应用并逐条列出，见 [omp-config-autoupdate](#omp-config-autoupdate)。一直拉取失败时启动不会提醒，用 `run` 看 git 报错。
 
@@ -169,7 +172,7 @@ flowchart LR
 
 只读本机，不写 `~/.omp`、`~/.pi`、`omp` 安装目录、PATH 或 shell 配置，本机文件的 mtime 前后不变。
 
-- **范围**：`config.yml`、`APPEND_SYSTEM.md`、`APPEND_SYSTEM_MODEL.md`、`thinking-translator.json`、`system-prompt-replace.json`、`PROMPT-INJECT-*.md`、轻量模式三项资产、`omp-config-update.ts`、`agents/`、`extensions/*.ts`、`extensions-last/*.ts`、`extensions/lang-nag.json`、`extensions/input-polish.json`，以及 `~/.pi/agent/pi-bansos-relay-state.json`。与更新器的托管范围一致。`config.yml` 的本机字段和 `extensions` 的本机条目不写回仓库。
+- **范围**：`config.yml`、`APPEND_SYSTEM.md`、`APPEND_SYSTEM_MODEL.md`、`thinking-translator.json`、`system-prompt-replace.json`、`PROMPT-INJECT-*.md`、`TURN-JUDGE-*.md`、轻量模式三项资产、`omp-config-update.ts`、`agents/`、`extensions/*.ts`、`extensions-last/*.ts`、`extensions/lang-nag.json`、`extensions/input-polish.json`，以及 `~/.pi/agent/pi-bansos-relay-state.json`。与更新器的托管范围一致。`config.yml` 的本机字段和 `extensions` 的本机条目不写回仓库。
 - **不收回**：安装到 `omp` 旁边的 `omp-light`、`omp-light.ts`、`omp-light.cmd`（轻量模式三项只从 `~/.omp/agent` 取）；`extensions/doc-polish.json`；`.omp-config-applied`；自动更新的开关 `omp-config-autoupdate.json`。
 - 本机没有 `pi-bansos-relay-state.json`（从没用 `/bansos` 改过设置）时，不算“本机已删除”，仓库保持原样。
 - `~/.omp/plugins/package.json` 的依赖和 `install-plugins.sh` 不一致时，重写脚本里的插件列表：URL/Git 依赖原样保留，npm 依赖去掉版本号；注释掉的可选插件保持注释，见[插件](#插件)。
@@ -208,7 +211,7 @@ GitHub URL 的插件名按 URL 最后一段推断，仓库名和包名不同时�
 ```bash
 mkdir -p "$HOME/.omp/agent"
 cp agent/config.yml agent/APPEND_SYSTEM.md \
-  agent/thinking-translator.json agent/system-prompt-replace.json agent/PROMPT-INJECT-*.md \
+  agent/thinking-translator.json agent/system-prompt-replace.json agent/PROMPT-INJECT-*.md agent/TURN-JUDGE-*.md \
   agent/config-light.yml agent/APPEND_SYSTEM_LIGHT.md agent/omp-light.ts agent/omp-config-update.ts \
   "$HOME/.omp/agent/"
 cp -a agent/agents agent/extensions agent/extensions-last "$HOME/.omp/agent/"
@@ -246,7 +249,7 @@ git status --short
 `omp-light` 启动一个精简的 OMP 进程，适合简单小任务：
 
 - 用 `APPEND_SYSTEM_LIGHT.md` 代替完整的追加提示词。
-- 按 `config-light.yml` 禁用 13 个行为扩展：`ctx-post-compact-hint`、`ctx-tasklog`、`ctx-tool`、`doc-polish`、`fork-task`、`isolation-nudge`、`lang-nag`、`task-completion-judge`、`task-split-check`、`tool-policy-nag`、`user-prompt-inject`、`watchdog-agent`、`wt-tool`。
+- 按 `config-light.yml` 禁用 14 个行为扩展：`ctx-post-compact-hint`、`ctx-tasklog`、`ctx-tool`、`doc-polish`、`fork-task`、`isolation-nudge`、`lang-nag`、`task-completion-judge`、`task-split-check`、`tool-policy-nag`、`turn-judge`、`user-prompt-inject`、`watchdog-agent`、`wt-tool`。
 - 其余 7 个扩展照常加载：`append-system-model`、`bro`、`input-polish`、`repo-rules`、`subagent-todo`、[omp-config-autoupdate](#omp-config-autoupdate)，以及兼容性修复 `commandcode-model-spec`。`APPEND_SYSTEM_MODEL.md` 因此在轻量模式下照样注入；自动更新开着时，用 `omp-light` 启动也会更新。
 - `config-light.yml` 把 `extensions` 覆盖成空列表，去掉 `config.yml` 末项的 [system-prompt-replace](#system-prompt-replace)。`disabledExtensions` 按模块名过滤，但管不到在 `extensions` 或 `-e` 里直接写成文件路径的扩展（写成目录的，目录里发现的模块仍按名字过滤），所以只能这样排除。覆盖会连带去掉本机条目（如 `~/.claude`），所以 `omp-light` 读本机 `config.yml`，把 `extensions` 里路径不含 `/extensions-last/` 的条目逐个用 `-e` 传给 `omp`；`-e` 是另一条加载通道，不受这个覆盖影响。`extensions-last/` 下的扩展因此只属于完整模式（按路径字符串判断，相对路径或目录写法不会被认出来）。
 - 插件、rules、skills、上下文文件，以及 model、thinking、profile、auth、session 设置都不变。被禁用扩展注册的工具（`ctx`、`polish_doc`、`fork_task`、`wt`、`wt_remove`）在轻量模式下不存在。
@@ -333,6 +336,7 @@ harness 会把 `APPEND_SYSTEM.md` 和每个 agent 的 `description` 都注入主
 |[tool-policy-nag](#tool-policy-nag)|发现用 shell/eval 代替内置工具时计数并提醒|否|
 |[watchdog-agent](#watchdog-agent)|按目标投放的第三方审查者|否|
 |[user-prompt-inject](#user-prompt-inject)|按模板把用户原话注入指定的 subagent|否|
+|[turn-judge](#turn-judge)|主会话每轮结束后用 Jev 判断这一轮，达到阈值就输入预设 prompt，否则显示判定|否|
 |[lang-nag](#lang-nag)|回复语言不对时，在下一条输入前加提醒|否|
 |[repo-rules](#repo-rules)|补读 `.claude/rules` 等 repo 级 rule 目录|是|
 |[append-system-model](#append-system-model)|按模型 / 提供商正则追加系统提示词|是|
@@ -514,7 +518,7 @@ option.blocker.delivery: steer
 **用户 prompt 的来源。** 从本 subagent 沿 `ctx.agent.parentId` 在进程的 agent registry 里往上找到主会话（`task:high` 派出的孙代也一样），读它当前分支（`getBranch()`，compact 之前的消息也在）上 `role: "user"`、`attribution: "user"`、非 `synthetic` 的消息，按顺序排列。每条只取文本块（多个文本块用换行拼接），去掉首尾空白；取完是空的消息（比如只有图片）不占位置，所以下标只数有文字的 prompt。
 
 - 输入经过 `input` 钩子和命令展开后才存进会话，所以取到的是提交给模型的文字；例如 [lang-nag](#lang-nag) 加在前面的 `instruction` 也在里面。
-- `attribution` 由发送方决定，扩展用 `sendUserMessage` 不写它时默认是 `user`。本仓库扩展注入的消息因此都标为 `agent`：`watchdog-agent`、`tool-policy-nag`、`ctx-post-compact-hint`、`doc-polish` 的结果回传。新增会注入用户消息的扩展时也要这样写，否则它的消息会被当成用户原话。插件注入的消息不受本仓库控制。
+- `attribution` 由发送方决定，扩展用 `sendUserMessage` 不写它时默认是 `user`。本仓库扩展注入的消息因此都标为 `agent`：`watchdog-agent`、`turn-judge`、`tool-policy-nag`、`ctx-post-compact-hint`、`doc-polish` 的结果回传。新增会注入用户消息的扩展时也要这样写，否则它的消息会被当成用户原话。插件注入的消息不受本仓库控制。
 - 技能调用（`/skill:…`）存成 custom 消息，不算进 `user_prompt`。
 
 **运行方式：**
@@ -524,6 +528,59 @@ option.blocker.delivery: steer
 - 用户 prompt 变了，这条消息就变，subagent 对话的 prompt cache 从这条消息起失效。
 - **失败**：文件格式错误时跳过并记 warning；找不到主会话或主会话已释放时不注入，同一原因只记一次 warning。都不阻塞模型调用。
 - 依赖 OMP 内部实现（`AgentRegistry`、`ctx.agent`、`context` 事件的调用时机），升级 OMP 后要在真实 TUI 里重新验证首次派发和续聊。
+
+#### turn-judge
+
+`turn-judge.ts` 在主会话每一轮结束后，按 `TURN-JUDGE-<标签>.md` 用 judgment API 模型（如 Jev）判断这一轮，每个文件问一个问题。带 prompt 的选项置信度达到阈值时，把这段 prompt 直接作为一条用户消息输入；否则弹 info 显示判定结果。和 [watchdog-agent](#watchdog-agent) 的 Jev 后端相比：它每轮判一次，不按操作数；发给 Jev 的只有用户输入和模型说的话；按选项的置信度阈值触发，不按 Jev 选中哪个选项；没触发时也显示判定结果。
+
+**文件位置**与 [watchdog-agent](#watchdog-agent) 相同：agent 目录下的 `TURN-JUDGE-*.md`，或从 cwd 往上到 git root 每一层的 `<dir>/TURN-JUDGE-*.md`、`<dir>/.omp/TURN-JUDGE-*.md`，文件名不区分大小写。每个文件独立判定，各自一次请求。
+
+**frontmatter 字段**（键不区分大小写，每个值占一行）：
+
+|字段|说明|
+|---|---|
+|`judge`（必填）|`provider/model`，必须是 judgment API 的模型，如 `commandcode/typesafe/jev`|
+|`name`|显示名，缺省取文件名里的标签|
+|`enabled`|默认 `true`；写了的话，只有 `true`、`yes`、`on`、`1`（不区分大小写，可带引号）算开启|
+|`maxChars`|过去的记录的字数上限，正整数，默认 30000|
+|`option.<标签>`|声明一个选项，值是交给 Jev 的判定标准，留空表示标签本身已足够说明。至少两个。标签可以用中文，不能含 `.` 或空白|
+|`option.<标签>.prompt`|该选项触发时输入的 prompt；不写就只显示判定|
+|`option.<标签>.threshold`|写了 prompt 就必填，取 (0, 1]；该选项的概率达到或超过它才输入 prompt|
+
+正文是问题，原样交给 Jev。少于两个选项、只写了 prompt / threshold 却没声明选项、threshold 缺失或越界、`judge` 不是 `provider/model`、正文为空，都会让整个文件被跳过。
+
+仓库的 `agent/TURN-JUDGE-甩锅.md` 问“模型是不是在甩锅？”，选项 `是` / `否`；`是` 的概率达到 0.5 时输入“你这一轮在甩锅：把本该你自己负责、自己做的事推给了用户。不要等我，接着把它做完。”：
+
+```md
+---
+judge: commandcode/typesafe/jev
+option.是:
+option.否:
+option.是.prompt: 你这一轮在甩锅：把本该你自己负责、自己做的事推给了用户。不要等我，接着把它做完。
+option.是.threshold: 0.5
+---
+模型是不是在甩锅？
+```
+
+**一轮**：主会话里模型自己结束（`stopReason: "stop"`）、有文字的 assistant 消息。被中断、出错、以工具调用结束的消息都不算；subagent 不判。
+
+**发给 Jev 的内容**：`{ 过去的记录: [{ 角色: "用户" | "模型", 内容 }], 本轮回复 }`。
+
+- `过去的记录` 是当前分支上本轮之前的内容，按时间顺序：用户自己的输入（`attribution: "user"`、非 `synthetic`，所以扩展注入的消息不算）和每条 assistant 消息的文字。工具调用、工具结果、thinking 都不放。
+- 超过 `maxChars` 时从最早的一条起整条丢掉，不告诉 Jev。默认 30000 是因为离线测试里约 4 万字以上的 state 会被 Jev 返回 HTTP 400。
+- `本轮回复` 是这一轮最后那条消息的文字，不截断。
+
+**结果：**
+
+- 带 prompt 的选项里，概率达到自己阈值的，取概率最高的一个，把它的 prompt 以 `attribution: "agent"` 发出：会话空闲时开启新一轮，还在运行时排到本轮之后（follow-up）。
+- 其余文件弹 info：`turn-judge <name>：<Jev 选中的标签>（<每个选项的概率>）`。同一轮所有文件的 info 等这一轮的判定全部返回后合并成一条弹出，因为连续的 UI 通知会互相覆盖。
+- prompt 引起的那一轮照样会判，没有上限：判定一直达到阈值，就一直输入。
+- 判定返回前用户发了新输入，或会话切换、分支切换、树跳转时，本该输入的 prompt 不再输入，只在 info 里显示判定并注明未发送。
+- 文件每轮结束时重读，改文件从下一轮生效，不用重启。
+
+**失败**：模型找不到、不是 judgment API、没有凭据、请求出错或 90 秒超时，这一轮弹 warning，写明是哪个文件、什么原因。文件格式错误时跳过，同一文件同一原因每个进程只警告一次。headless 只写日志。都不阻塞也不改动这一轮。
+
+**用量**：每轮每个文件一次 judge 请求，各自消耗 Jev 额度，不计入会话用量。
 
 #### lang-nag
 
@@ -859,7 +916,7 @@ overlay 里上下键或滚轮滚动，解释完整生成后 `C` 复制到系统�
 - **增删托管项时同时改三处**：`agent/omp-config-update.ts` 的 `managedPlain` / `STRUCTURED`，`.omp/commands/sync-omp-config.md` 的同步范围，以及本文件。更新器的 `applySnapshot(options)` 接口要保持兼容：已安装的旧更新器会导入新提交里的它。
 - **不要在 `omp-config-update.ts` 里写出 Otty 标记的字面量**：标记检查是“文件任意位置含有”，这个文件自己也是托管文件，写出来就会被当成应用托管文件，从此跳过更新。
 - **扩展建的辅助会话必须传 `taskDepth: 1`。** 目前有六处：`bro`、`doc-polish`、`input-polish`、`lang-nag`、`watchdog-agent` 的聊天 reviewer、`fork-task` 的 shake。不传的话 SDK 把它当主会话，`dispose()` 时会销毁全局 `AgentLifecycleManager`，所有空闲 subagent 变成 `Unknown agent`，无法再续聊。`lang-nag` 几乎每轮都建辅助会话，漏传会让 subagent 很快失联。只调用 `completeSimple` 的扩展（`task-split-check`、`task-completion-judge`）不建会话，不涉及这条。
-- **升级 OMP 后**，在真实 TUI 里重新验证 [fork-task](#fork-task)、[subagent-todo](#subagent-todo)、[user-prompt-inject](#user-prompt-inject)、[task-completion-judge](#task-completion-judge)、[ctx-tool](#ctx-tool)、[ctx-tasklog](#ctx-tasklog)、[ctx-post-compact-hint](#ctx-post-compact-hint)、[bro](#bro) 和 [wt-tool](#wt-tool)，它们依赖 OMP 内部实现（`AgentRegistry`、`ctx.agent`、子会话文件路径、会话条目类型、local root、钩子顺序、`context` 事件的调用时机、宿主工具注入、`TodoTool` 读写的会话接口、compaction 事件、bro 用到的文档转换、剪贴板和抓取内部模块、InteractiveMode 的原型与公开成员、`executeBuiltinSlashCommand`、`/wt` 和 `/move` 的 TUI 处理、`planWorktreeExit` 的指纹、VCS 的 `worktreeRemove`）。
+- **升级 OMP 后**，在真实 TUI 里重新验证 [fork-task](#fork-task)、[subagent-todo](#subagent-todo)、[user-prompt-inject](#user-prompt-inject)、[turn-judge](#turn-judge)、[task-completion-judge](#task-completion-judge)、[ctx-tool](#ctx-tool)、[ctx-tasklog](#ctx-tasklog)、[ctx-post-compact-hint](#ctx-post-compact-hint)、[bro](#bro) 和 [wt-tool](#wt-tool)，它们依赖 OMP 内部实现（`AgentRegistry`、`ctx.agent`、子会话文件路径、会话条目类型、local root、钩子顺序、`context` 事件的调用时机、宿主工具注入、`TodoTool` 读写的会话接口、compaction 事件、bro 用到的文档转换、剪贴板和抓取内部模块、InteractiveMode 的原型与公开成员、`executeBuiltinSlashCommand`、`/wt` 和 `/move` 的 TUI 处理、`planWorktreeExit` 的指纹、VCS 的 `worktreeRemove`）。
 - **升级 OMP 后**，主会话开始模型回合时（`before_agent_start`）如果弹出 `system-prompt-replace: … found no target` 警告，就按新的模板文字改 `system-prompt-replace.json`；上游删掉了规则要改写的那句话时，删掉这条规则。同时确认 [system-prompt-replace](#system-prompt-replace) 依赖的扩展加载顺序没变。
 - **扩展注入用户消息时写 `attribution: "agent"`。** 不写就默认 `user`，[user-prompt-inject](#user-prompt-inject) 会把它当成用户原话注入 mentor 和 discussant。
 - **改 agent 定义前**读 `agent/agents/README.txt`；目录里的笔记用 `.txt`，不要用 `.md`。

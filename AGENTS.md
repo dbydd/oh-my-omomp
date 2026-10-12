@@ -9,6 +9,7 @@ light system prompts, light-mode config and launcher source, custom subagent
 definitions, local TypeScript extensions, the agent-root
 `thinking-translator.json` for `omp-thinking-translator`, the agent-root
 `PROMPT-INJECT-*.md` templates for `user-prompt-inject.ts`, the agent-root
+`TURN-JUDGE-*.md` per-turn judge configs for `turn-judge.ts`, the agent-root
 `APPEND_SYSTEM_MODEL.md` for `append-system-model.ts` (when the machine has one), the agent-root
 `system-prompt-replace.json` for `extensions-last/system-prompt-replace.ts`, the `pi-bansos`
 plugin state (`pi/agent/pi-bansos-relay-state.json`), the plugin install
@@ -41,7 +42,7 @@ flowchart LR
     L3["agent/omp-light.ts"]
     U["agent/omp-config-update.ts"]
     T["agent/thinking-translator.json"]
-    Q["agent/PROMPT-INJECT-*.md"]
+    Q["agent/PROMPT-INJECT-*.md / TURN-JUDGE-*.md"]
     G["agent/agents/*.md"]
     E["agent/extensions/*.ts"]
     EL["agent/extensions-last/*.ts"]
@@ -54,7 +55,7 @@ flowchart LR
     LA["config.yml / APPEND_SYSTEM.md"]
     LM["APPEND_SYSTEM_MODEL.md"]
     LT["thinking-translator.json / system-prompt-replace.json"]
-    LQ["PROMPT-INJECT-*.md"]
+    LQ["PROMPT-INJECT-*.md / TURN-JUDGE-*.md"]
     LG["agents/"]
     LE["extensions/ / extensions-last/"]
     LL["config-light.yml / APPEND_SYSTEM_LIGHT.md / omp-light.ts"]
@@ -105,7 +106,7 @@ flowchart LR
   cannot order extensions.
 - **Two one-way syncs, never one "sync".** `/sync-omp-config` never writes the
   machine; its sync range includes the three light assets, `omp-config-update.ts`, the agent-root
-  `thinking-translator.json`, `system-prompt-replace.json`, `APPEND_SYSTEM_MODEL.md`, `extensions-last/*.ts`, and `PROMPT-INJECT-*.md` templates, and
+  `thinking-translator.json`, `system-prompt-replace.json`, `APPEND_SYSTEM_MODEL.md`, `extensions-last/*.ts`, `PROMPT-INJECT-*.md` templates, `TURN-JUDGE-*.md` judge configs, and
   `~/.pi/agent/pi-bansos-relay-state.json`, but excludes installed PATH launchers
   and `.omp-config-applied`. Repo → machine is the updater
   (`agent/omp-config-update.ts`; its header is the contract): automatically at
@@ -148,12 +149,13 @@ flowchart LR
 | Path | Purpose |
 | --- | --- |
 | `agent/` | Managed harness config. Only listed items are portable; the whole dir is **not**. |
-| `agent/extensions/` | Local TypeScript extensions (the code core). 20 `.ts` (incl. `omp-config-autoupdate.ts`, which, when switched on with `/omp-config-autoupdate on` (off by default), runs `omp-config-update.ts auto` as a child process once per process from the root session's `session_start` and reports the result, `bro.ts`, the built-in-AI rewrite of the former `pi-bro` plugin, `input-polish.ts`, which polishes the input-box draft on the configured chord (default Ctrl+Enter) and shows the result in an overlay over the input box, where Enter sends it and Esc discards it, `watchdog-agent.ts`, `user-prompt-inject.ts`, which renders the root session's user prompts into `PROMPT-INJECT-*.md` templates and prepends them, request-only, to every model call of the targeted subagents (mentor and discussants by default), `append-system-model.ts`, which appends the `APPEND_SYSTEM_MODEL.md` blocks whose `model`/`provider` regexes match the session's model to the system prompt on every `before_agent_start`, `fork-task.ts`, which seeds native `task` children with a copy of the caller's conversation, `task-split-check.ts`, which blocks main-agent `task` items for `task:low`/`task:mid`/`task:free` that cover more than one topic, and any `task`/`fork_task` call that caps a `task:*` worker's report length, `subagent-todo.ts`, which gives each `task:*` worker its own native `todo` tool that OMP strips from subagents, `task-completion-judge.ts`, which bounces a `task:low`/`task:mid`/`task:free` worker's first final `yield` once when a model judges the slice unfinished, and once more when it is finished but the worker's todo list still has open items, and `wt-tool.ts`, which gives the main agent of the interactive TUI two queued session-move tools: `wt` runs the human-only `/wt` through the TUI's own slash-command dispatcher on the live InteractiveMode once the turn has ended and the session is idle (when the session is already in a linked worktree, it first returns that worktree's details and a `confirm` value and creates only on a second call with it), and `wt_remove` first checks (read-only report plus a state-bound `confirm` value) and, when called again with that value, runs the human `/move` to the main checkout and force-removes the linked worktree it left, keeping the branch) + `doc-polish.json`/`input-polish.json`/`lang-nag.json` sidecars (`input-polish.json` and `lang-nag.json` are synced both ways; `doc-polish.json` is machine-local/prompt-overridable — see Important Files). |
+| `agent/extensions/` | Local TypeScript extensions (the code core). 21 `.ts` (incl. `omp-config-autoupdate.ts`, which, when switched on with `/omp-config-autoupdate on` (off by default), runs `omp-config-update.ts auto` as a child process once per process from the root session's `session_start` and reports the result, `bro.ts`, the built-in-AI rewrite of the former `pi-bro` plugin, `input-polish.ts`, which polishes the input-box draft on the configured chord (default Ctrl+Enter) and shows the result in an overlay over the input box, where Enter sends it and Esc discards it, `watchdog-agent.ts`, `user-prompt-inject.ts`, which renders the root session's user prompts into `PROMPT-INJECT-*.md` templates and prepends them, request-only, to every model call of the targeted subagents (mentor and discussants by default), `turn-judge.ts`, which, after every main-session turn the model ended itself (`stopReason: "stop"`), asks a judgment-API model (Jev) each `TURN-JUDGE-*.md` question about that turn (the human's prompts and the model's text only) and either types the option's prompt once its probability reaches the option's threshold or shows the verdict as one info notification per turn, `append-system-model.ts`, which appends the `APPEND_SYSTEM_MODEL.md` blocks whose `model`/`provider` regexes match the session's model to the system prompt on every `before_agent_start`, `fork-task.ts`, which seeds native `task` children with a copy of the caller's conversation, `task-split-check.ts`, which blocks main-agent `task` items for `task:low`/`task:mid`/`task:free` that cover more than one topic, and any `task`/`fork_task` call that caps a `task:*` worker's report length, `subagent-todo.ts`, which gives each `task:*` worker its own native `todo` tool that OMP strips from subagents, `task-completion-judge.ts`, which bounces a `task:low`/`task:mid`/`task:free` worker's first final `yield` once when a model judges the slice unfinished, and once more when it is finished but the worker's todo list still has open items, and `wt-tool.ts`, which gives the main agent of the interactive TUI two queued session-move tools: `wt` runs the human-only `/wt` through the TUI's own slash-command dispatcher on the live InteractiveMode once the turn has ended and the session is idle (when the session is already in a linked worktree, it first returns that worktree's details and a `confirm` value and creates only on a second call with it), and `wt_remove` first checks (read-only report plus a state-bound `confirm` value) and, when called again with that value, runs the human `/move` to the main checkout and force-removes the linked worktree it left, keeping the branch) + `doc-polish.json`/`input-polish.json`/`lang-nag.json` sidecars (`input-polish.json` and `lang-nag.json` are synced both ways; `doc-polish.json` is machine-local/prompt-overridable — see Important Files). |
 | `agent/extensions-last/` | Extensions that must run after every other path-loaded extension, loaded by path as the last `config.yml` `extensions` entry (`~/.omp/agent/extensions-last/system-prompt-replace.ts`); `README.md` there documents load order and is repo-only. Holds `system-prompt-replace.ts`, which applies the `system-prompt-replace.json` rules (`literal` or `regex` + `replace`) to the system prompt on every `before_agent_start`, main session and subagents; it rewrites built-in tool descriptions that conflict with `APPEND_SYSTEM.md`. Excluded in light mode by `config-light.yml`'s empty `extensions` override; `omp-light` passes every other `config.yml` `extensions` entry back with `-e`. `*.ts` there are synced both ways like `extensions/*.ts`. |
 | `agent/system-prompt-replace.json` | Agent-root replacement rules for `system-prompt-replace.ts`. Portable regular item in both directions (field-level diff and edit; validate with `JSON.parse`). Read per prompt, so edits apply without restart; a rule whose target is absent from the main session's system prompt raises a visible warning (UI notification, or stderr when headless) once per rule per process. |
 | `agent/agents/` | Custom subagent definitions (`*.md`) + `README.txt` authoring pitfalls. |
 | `agent/thinking-translator.json` | Agent-root translator config for `omp-thinking-translator`. Portable regular item: `/sync-omp-config` carries machine → repo, the updater carries repo → machine. |
 | `agent/PROMPT-INJECT-*.md` | Agent-root templates for `user-prompt-inject.ts` (frontmatter `target`/`name`/`enabled`, body with `{{user_prompt[i]}}` / `{{user_prompt[a:e]}}`). Portable regular files in both directions, copied whole; the updater never deletes live templates the repo never had. |
+| `agent/TURN-JUDGE-*.md` | Agent-root judge configs for `turn-judge.ts` (frontmatter `judge`/`name`/`enabled`/`maxChars`/`option.<label>[.prompt\|.threshold]`, body = the question). Portable regular files in both directions, copied whole; the updater never deletes live configs the repo never had. Re-read at every turn end, so edits apply to the next turn without restart. |
 | `agent/APPEND_SYSTEM_MODEL.md` | Agent-root per-model system-prompt appendix for `append-system-model.ts` (`---`-fenced YAML headers with `model`/`provider` regexes, each followed by its body). Portable regular file in both directions, copied whole; exists only once the user creates it, and the updater leaves the live copy alone while the repo has never had one. Read per prompt, so edits apply without restart. |
 | `pi/agent/pi-bansos-relay-state.json` | `pi-bansos` plugin state (relay on/off, relay URL, saved relays, `statusBar`), read by the plugin from `~/.pi/agent/`, not `~/.omp/agent`. Written by the plugin's `/bansos` command; no credentials. Portable regular item in both directions. |
 | `.omp/commands/` | Project-level slash-command definitions run from repo root. |
@@ -229,7 +231,7 @@ dispatch (see Testing & QA).
   including IRC wakes of idle/parked subagents; `before_agent_start` does not.
 - **Injected user-role messages carry `attribution: "agent"`:** every
   `pi.sendUserMessage` an extension sends on its own behalf (`watchdog-agent.ts`,
-  `tool-policy-nag.ts`, `ctx-post-compact-hint.ts`, `doc-polish.ts`) passes it.
+  `turn-judge.ts`, `tool-policy-nag.ts`, `ctx-post-compact-hint.ts`, `doc-polish.ts`) passes it.
   The default is `user`, and `user-prompt-inject.ts` treats `user`-attributed
   messages as the human's own prompts.
 - **Imports:** type-only `ExtensionAPI`/`ExtensionContext`; runtime imports from
@@ -302,8 +304,8 @@ dispatch (see Testing & QA).
   `system-prompt-replace.json`, `fork_task`'s in `fork-task.ts` — so subagents see them too;
   this relies on `config.yml` `inlineToolDescriptors: "on"`, which renders every tool
   description into the system prompt.
-- `agent/config-light.yml` — declarative light-mode config overlay: disables thirteen
-  optional behavior extensions (including `task-completion-judge` and
+- `agent/config-light.yml` — declarative light-mode config overlay: disables fourteen
+  optional behavior extensions (including `task-completion-judge`, `turn-judge` and
   `user-prompt-inject`); the other seven (`append-system-model`, `bro`, `input-polish`, `repo-rules`,
   `subagent-todo`, `omp-config-autoupdate`, and the `commandcode-model-spec` compatibility fix) stay loaded,
   as listed in `README.md`, so `omp-light` also auto-updates when the switch is on.
@@ -350,6 +352,10 @@ dispatch (see Testing & QA).
   root user prompt (`{{user_prompt[0:e]}}`), and tells them to judge their
   advisee against those requests rather than its restatement. Templates are read
   at subagent session start, so edits apply on the next spawn without restart.
+- `agent/TURN-JUDGE-甩锅.md` — the shipped `turn-judge` config: asks Jev
+  (`commandcode/typesafe/jev`) “模型是不是在甩锅？” with options `是`/`否`, and types
+  a prompt telling the model to finish the work it pushed onto the user when `是`
+  reaches 0.5; otherwise the verdict shows as info.
 - `pi/agent/pi-bansos-relay-state.json` — state file of the `pi-bansos` plugin
   (`{enabled, url, relays, statusBar}`), which the plugin reads from and writes
   to `~/.pi/agent/pi-bansos-relay-state.json` via `/bansos`. The status bar
@@ -393,7 +399,7 @@ Direct-migration copy set (never copy the whole `agent/`; `README.md`):
 ```bash
 mkdir -p "$HOME/.omp/agent"
 cp agent/config.yml agent/APPEND_SYSTEM.md \
-  agent/thinking-translator.json agent/system-prompt-replace.json agent/PROMPT-INJECT-*.md \
+  agent/thinking-translator.json agent/system-prompt-replace.json agent/PROMPT-INJECT-*.md agent/TURN-JUDGE-*.md \
   agent/config-light.yml agent/APPEND_SYSTEM_LIGHT.md agent/omp-light.ts agent/omp-config-update.ts \
   "$HOME/.omp/agent/"
 cp -a agent/agents agent/extensions agent/extensions-last "$HOME/.omp/agent/"
