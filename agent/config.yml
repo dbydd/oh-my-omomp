@@ -34,6 +34,8 @@ task:
     enabled: true
   enableLsp: false
   enableEffort: false
+  maxConcurrency: 64
+  maxEffort: high
 fetch:
   enabled: true
 browser:
@@ -96,3 +98,4 @@ edit:
   mode: hashline
 readLineNumbers: true
 textVerbosity: high
+expandThinkingBlocks: true
