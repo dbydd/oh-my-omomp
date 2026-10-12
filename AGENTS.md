@@ -262,7 +262,9 @@ exercised in a real omp session.
 - **Files an extension owns sit beside it** and are read via `import.meta.dir`,
   never via `getAgentDir()` or the agent root. Only files whose path is fixed by
   someone else stay where they are (`thinking-translator.json` by its plugin,
-  `commandcode-models.json` by the commandcode plugin, omp's own files).
+  `commandcode-models.json` by the commandcode plugin, the updater
+  `omp-config-update.ts` that `omp-config-autoupdate` spawns from the agent
+  dir, omp's own files).
 - **Format:** Biome only (tabs, double quotes, semicolons, trailing commas,
   width 140). Run `bun run format`; never hand-format.
 - **Types:** strict `tsc` with `noUncheckedIndexedAccess`; no `any`. An `as`

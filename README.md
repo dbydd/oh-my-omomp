@@ -30,7 +30,7 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 |`install-plugins.sh`、`plugin-audit.sh`|插件安装、插件漂移检查|—|
 |`.omp/commands/`|三个维护命令的完整规则|—|
 |`ci/`、`.github/workflows/config-check.yml`|配置检查（CI）：脚本、设计与判据见 `ci/README.md`|—|
-|`package.json`、`biome.json`、`tsconfig.json`|开发工具：`bun run check` 做格式、lint 和类型检查，规范见 `AGENTS.md`|—|
+|`package.json`、`biome.json`、`tsconfig.json`|开发工具：`bun run check` 做格式、lint 和类型检查，规范见[目录结构与开发规范](#目录结构与开发规范)|—|
 
 ## 快速上手
 
@@ -306,7 +306,7 @@ harness 会把 `APPEND_SYSTEM.md` 和每个 agent 的 `description` 都注入主
 - **其余工作切成最小、各有验收标准的单元，一次并行派出。** 单元能并行的条件：各有验收标准、启动不依赖其他单元的输出、文件和状态归属不重叠。只因接口或文件边界没定而不满足的，先定边界再并行。确实拆不开的，主 agent 交给一个 worker，worker 则自己做。
 - **只有 `task:high` 能派 worker**，因为切单元、定验收、划文件归属本身就是契约设计。递归最多两层：`task:high` 派出的孙代只能接可直接执行的叶子任务，也派不出 mentor。
 - **派发必须写明 `agent`。** 省略时会落到 allowlist 的第一项或被禁用的内置 agent 上。
-- **派发不覆盖 `effort`。** 选 tier 就是选它在 `config.yml` 里的模型绑定，不算改模型。原生 `task` 没有 `model` 参数；它的 `effort` 参数由 `task.enableEffort` 控制，本仓库关掉了，所以模型看不到它。`fork_task` 有 `effort`，除非用户明确要求不填。这条写在 `fork-task.ts` 的 `fork_task` 工具说明里，`task:high` 定义里也有同一条，用户的要求要经派工单转达给它。
+- **派发不覆盖 `effort`。** 选 tier 就是选它在 `config.yml` 里的模型绑定，不算改模型。原生 `task` 没有 `model` 参数；它的 `effort` 参数由 `task.enableEffort` 控制，本仓库关掉了，所以模型看不到它。`fork_task` 有 `effort`，除非用户明确要求不填。这条写在 `fork-task/index.ts` 的 `fork_task` 工具说明里，`task:high` 定义里也有同一条，用户的要求要经派工单转达给它。
 - **worker 自测不算验收。** 派发方要检查产物和执行证据，自己做跨切片的集成检查；复杂验收交给没写这部分代码的独立 agent。重要决定同时问两个 discussant。
 
 每个 `task:*` worker 的定义还要求：
@@ -357,6 +357,48 @@ harness 会把 `APPEND_SYSTEM.md` 和每个 agent 的 `description` 都注入主
 |[commandcode-model-spec](#commandcode-model-spec)|修复 `--model` 指定 commandcode 模型时的认证失败|是|
 |[omp-config-autoupdate](#omp-config-autoupdate)|启动时从 GitHub 默认分支自动更新本机配置；默认关闭，`/omp-config-autoupdate on\|off` 开关，`run` 立即更新并显示详细报告|是|
 
+### 目录结构与开发规范
+
+omp 从 `~/.omp/agent/extensions/` 往下只找一层：直接放的 `*.ts`、`<目录>/index.ts`，或 `<目录>/package.json` 里声明的入口。本仓库统一用 `<目录>/index.ts`，目录名就是扩展 id（`config-light.yml` 里的 `extension-module:<名字>`）；同目录的其他 `.ts` 不会被当成扩展加载。
+
+|位置|放什么|
+|---|---|
+|`agent/extensions/<名字>/index.ts`|扩展入口，默认导出注册函数，函数名取目录名的 camelCase（如 `toolPolicyNag`）|
+|`agent/extensions/<名字>/*.ts`|这个扩展自己的模块，只有一层|
+|`agent/extensions/<名字>/` 里的其他文件|这个扩展读写的配置、模板和状态，用 `import.meta.dir` 定位；哪些归仓库、哪些归本机见[两个方向共同的规则](#两个方向共同的规则)|
+|`agent/extensions/_shared/*.ts`|两个以上扩展共用的代码；没有 `index.ts`，omp 不会把它当扩展加载|
+|`agent/extensions-last/<名字>/`|同样的结构，由 `config.yml` 的 `extensions` 按路径加载|
+
+`extensions/` 和 `extensions-last/` 下不直接放 `.ts`。扩展之间不互相 import，共用的代码放进 `_shared/`，用带 `.ts` 后缀的相对路径导入：
+
+|模块|提供|
+|---|---|
+|`errors.ts`|`errorText`：异常转成文字|
+|`messages.ts`|`textOf`、`lastAssistantText`：取消息里的文字块|
+|`config.ts`|`loadJsonConfig(文件名, schema, [ctx.cwd, import.meta.dir])`：cwd 下的副本优先，无效的副本跳过并记进 `skipped`|
+|`models.ts`|`resolveModelChain`、`findModel`、`splitLevel`：解析 `provider/id[:level]` 和逗号分隔的候选链，只查模型列表，不发请求|
+|`helper-session.ts`|`runHelperPrompt`：在内存辅助会话里做一次模型调用，不抛异常，固定传 `taskDepth: 1`|
+|`judge.ts`|`openNativeJudge`：按 judgment API 找到 Jev 这类模型并带上本会话的凭据|
+|`spec-files.ts`|`discoverSpecFiles`、`parseFrontmatter`、`unquote`：查找和解析 `*-<标签>.md`（扩展目录，再从 cwd 往上到 git root 及各层 `.omp/`）|
+|`task-log.ts`|task log 的路径和格式，`ctx-tool` 与 `ctx-tasklog` 共用|
+
+`_shared` 只提供机制。重试、超时、节流、用户看到的措辞、失败时返回什么，都留在调用方。
+
+代码规范，由 `bun run check`（Biome 和 `tsc --noEmit`）强制，CI 的 `code` job 也跑：
+
+- **格式**：只用 Biome（tab、双引号、分号、尾逗号、行宽 140），用 `bun run format` 整理，不手调格式。
+- **类型**：`tsc` strict 加 `noUncheckedIndexedAccess`，不用 `any`。`as` 只用在运行时没法检查的宿主类型上，并写一行原因；外部输入一律不用。
+- **外部输入**：JSON 文件、工具参数、会话条目、`unknown` 的事件数据、子进程输出，在边界用 `@oh-my-pi/pi-coding-agent` 导出的 `z` 或类型守卫解析一次，之后只传有类型的值。
+- **状态**：有多种情形时用以 `kind` 区分的联合类型，`switch` 写全并带 `never` 分支。互相独立的事实保持独立字段；不用几个布尔值组合表示互斥的状态。
+- **错误**：预期内的失败用结果联合类型返回，异常只表示程序错误。hook 和工具不把异常抛给 omp：在入口捕获，用 `pi.logger.warn(…, { error: errorText(error) })` 记下。空的 `catch {}` 要写注释说明预期的是哪种失败。
+- **主会话还是 subagent**：用 `ctx.agent.kind` 判断，不看会话文件名。
+- **文件位置**：扩展自己的文件用 `import.meta.dir` 读，不用 `getAgentDir()`。只有路径由别人定死的文件留在原处：`thinking-translator.json`（插件定）、`commandcode-models.json`（插件生成）、更新器 `omp-config-update.ts`（omp-config-autoupdate 从 agent 目录启动它）、omp 自己的文件。
+- **注入消息**：扩展替自己发的用户消息写 `attribution: "agent"`，见 [user-prompt-inject](#user-prompt-inject)。
+- **结构**：`index.ts` 开头写注释，说明扩展做什么、注册了哪些事件 / 工具 / 命令、读写哪些文件、作用于主会话还是 subagent、失败时怎么办。只有默认导出，除非同一扩展的其他文件要用；不留测试接口。超过约 150 行的函数拆成模块级的具名函数。
+- **import**：只用 omp 宿主包的根路径（`pi-agent-core`、`pi-ai`、`pi-catalog`、`pi-coding-agent`、`pi-natives`、`pi-tui`、`pi-utils`）、node 内置模块和相对路径。宿主包的子路径不一定能在 omp 里加载（`@oh-my-pi/pi-tui/thinking` 就加载不到），只用已经在真实 omp 会话里加载过的。
+
+`bun run check` 用 `node_modules` 里的宿主包做类型检查，证明不了扩展在 omp 里能加载。改了扩展还要在没有 `node_modules` 的目录里真实加载一次，并在真实会话里触发改动的工具、命令或钩子，见[维护须知](#维护须知)。
+
 ### 行为约束
 
 #### tool-policy-nag
@@ -388,7 +430,7 @@ harness 会把 `APPEND_SYSTEM.md` 和每个 agent 的 `description` 都注入主
 - **判定**：每个被检查的调用发一次 judge 请求，每类违规是请求里一个独立的是 / 否问题（`noul`），Jev 对每个问题分别给出“是”的概率，达到 `threshold` 就算违反这一类。
   - shell 命令发 `{ tool, command, tty }`，问 9 类：列目录 / 找文件、读文件 / 归档 / 数据库 / 网页内容、搜索文件文本、修改已有文件、新建 / 覆盖文件、重命名 / 移动文件、在 shell 里跑内联 Python / JS 脚本、用文本工具做结构化代码搜索 / 改写、交互程序没有走 PTY。
   - eval 代码发 `{ tool: "eval", language, code }`，问 5 类：读文件、列目录 / 找文件、搜索文件文本、改写并保存文件、跑 shell 命令或普通程序。
-  - 每个问题写明这一类该用的内置工具和不算违规的情况（构建、测试、git、外部 CLI、计数和校验和、`sudo` 等；搜索和编辑不算“读文件”；eval 里经 `tool.<name>` 调用 harness 工具不算“跑程序”）。问题原文在扩展的 `SHELL_RULES` / `EVAL_RULES` 里。
+  - 每个问题写明这一类该用的内置工具和不算违规的情况（构建、测试、git、外部 CLI、计数和校验和、`sudo` 等；搜索和编辑不算“读文件”；eval 里经 `tool.<name>` 调用 harness 工具不算“跑程序”）。问题原文在扩展的 `jev.ts`（`SHELL_RULES` / `EVAL_RULES`）里。
 - **提醒**：一次调用只要违反任何一类，就发一条消息，逐条列出这次调用违反的每一类和应改用的工具，再附上这次调用的命令或代码；同时弹 UI 警告，列出各类违规的概率。不计数、不封顶，每个违规调用都提醒，也不读写启发式检测的状态。
 - **时机**：判定与工具调用并行，不阻塞命令，结果通常在调用结束后才到，所以消息以 `aside` 插到下一个 step 边界；会话已经空闲时开启新一轮。判定返回前会话切换、分支切换或树跳转时不发消息，只弹 info。
 - **失败**：模型找不到、不是 judgment API、没有凭据、请求出错或 90 秒超时时不提醒，也不退回启发式检测；同一原因每个进程警告一次，headless 只写日志。
@@ -680,7 +722,7 @@ model: "(gpt-5|o3)"
 
 **最后执行**：`before_agent_start` 按扩展的加载顺序串行执行，每个 handler 拿到的是前一个返回的 system prompt。加载顺序是：native 发现（`~/.omp/agent/extensions/`，以及 `settings.json` 的 `extensions` 列出的模块，不管有没有 `config.yml`）→ hooks → 插件扩展 → `-e` 参数 → `config.yml` 的 `extensions`（按列表顺序）→ OMP 内置的 inline 扩展（SDK 传入的扩展、autoresearch、`.omp/tools/` 等自定义工具的包装）；同一路径只加载第一次出现的那个。因此本扩展放在 `extensions/` 之外的 `extensions-last/`，并写成 `config.yml` 中 `extensions` 的最后一项，在所有按路径加载的扩展之后执行。放进 `extensions/` 会随 native 批次提前加载，`config.yml` 里的条目也会被当成重复路径丢掉。以后往 `config.yml` 的 `extensions` 加条目，要写在它前面；本机条目由更新器自动放在仓库条目前面。inline 扩展仍在它之后：其中 autoresearch 在 `/autoresearch` 模式下会改写 system prompt，那时它加的文字不经过这里的替换。
 
-`extensions/` 目录内部没有排序：顺序取决于 native `glob` 遍历返回的顺序，不是文件名顺序，所以不能用文件名前缀控制先后。需要确定顺序的，只能靠 `config.yml` 的 `extensions` 列表。
+`extensions/` 目录内部没有排序：顺序取决于 native `glob` 遍历返回的顺序，不是目录名顺序，所以不能用目录名前缀控制先后。需要确定顺序的，只能靠 `config.yml` 的 `extensions` 列表。
 
 - **时机**：每次 `before_agent_start`，主会话和每个 subagent 都执行，轻量模式除外（见[轻量模式](#轻量模式)）。每条 prompt 重新读规则文件，改规则不用重启；改扩展本身要重启。
 - **失败**：规则文件不存在时不替换。JSON 或规则格式错误时不替换，记 warning，同一错误连续出现只记一次。某条规则的目标在主会话的 system prompt 里一处都找不到时（升级 OMP 后模板文字变了，或规则写错），每条规则每个进程警告一次：交互模式弹 UI 警告，headless 写 stderr，同时记日志。subagent 不做这项检查，它们的 prompt 本来就可能没有目标文字（比如不能派发的 worker 没有 `task` 工具说明）。都不阻塞 prompt。
@@ -933,7 +975,7 @@ overlay 里上下键或滚轮滚动，解释完整生成后 `C` 复制到系统�
 
 - **配置检查（CI）**：push 到 `master`、每个 PR、每天定时和手动触发时，在一次性环境里装最新 omp、用更新器应用仓库配置，再用免费模型分别跑一次完整模式和轻量模式的真实 session，收集更新器和会话的诊断以及 omp 的 warn/error 日志（安装成功时的输出不收集），去重后逐个报告；宿主自身的已知噪音单独列出、不计入。每个故障带一个 hash 标识（类别加归一化文字的 SHA-256 前 12 位），类别和归一化文字不变时跨运行稳定。检查本身不拦截合并，是否阻塞取决于 GitHub 的分支保护设置。本地用 `bun ci/check.ts` 复现。设计、判据和覆盖边界见 `ci/README.md`。检查的 prompt 不要求调用工具或派 subagent，但也不禁用、不断言它们，所以扩展行为的改动仍要用 `/update-omp` 应用工作区、重启 OMP，实际触发对应的工具、命令或钩子，看输出和副作用。改动合并前，开了自动更新的机器在根会话启动或执行 `run` 时，如果拉取成功、默认分支提交与已应用的不同，会把本机改动覆盖回去。
 - **增删托管项时同时改三处**：`agent/omp-config-update.ts` 的 `managedPlain` / `STRUCTURED`（扩展目录里新加的非 `.ts` 文件默认属于本机，要归仓库就得加进去），`.omp/commands/sync-omp-config.md` 的同步范围，以及本文件。更新器的 `applySnapshot(options)` 接口要保持兼容：已安装的旧更新器会导入新提交里的它。
-- **写扩展代码**：先 `bun install`，交付前 `bun run check`（Biome 格式与 lint、`tsc --noEmit`，CI 的 `code` job 也跑它）。目录结构、`_shared` 的用法和代码规范见 `AGENTS.md` 的 Code Conventions。类型检查用的是 `node_modules` 里的宿主包，证明不了扩展在 omp 里能加载：新引入的 `@oh-my-pi/*` 子路径要在没有 `node_modules` 的目录里真实加载一次（`@oh-my-pi/pi-tui/thinking` 这类子路径在 omp 里加载不到）。
+- **写扩展代码**：先 `bun install`，交付前 `bun run check`，规范见[目录结构与开发规范](#目录结构与开发规范)。新引入的 `@oh-my-pi/*` 子路径要在没有 `node_modules` 的目录里真实加载一次。
 - **不要在 `omp-config-update.ts` 里写出 Otty 标记的字面量**：标记检查是“文件任意位置含有”，这个文件自己也是托管文件，写出来就会被当成应用托管文件，从此跳过更新。
 - **扩展建的辅助会话必须传 `taskDepth: 1`。** 一次性的模型调用统一走 `_shared/helper-session.ts` 的 `runHelperPrompt`，它已经传了（`bro`、`doc-polish`、`input-polish`、`lang-nag`、`watchdog-agent` 的聊天 reviewer 都用它）；自己建会话的只有 `fork-task` 的 shake，也传了。不传的话 SDK 把它当主会话，`dispose()` 时会销毁全局 `AgentLifecycleManager`，所有空闲 subagent 变成 `Unknown agent`，无法再续聊。`lang-nag` 几乎每轮都建辅助会话，漏传会让 subagent 很快失联。只调用 `completeSimple` 的扩展（`task-split-check`、`task-completion-judge`）不建会话，不涉及这条。
 - **升级 OMP 后**，在真实 TUI 里重新验证 [fork-task](#fork-task)、[subagent-todo](#subagent-todo)、[user-prompt-inject](#user-prompt-inject)、[turn-judge](#turn-judge)、[task-completion-judge](#task-completion-judge)、[ctx-tool](#ctx-tool)（含 compact 后注入）、[ctx-tasklog](#ctx-tasklog)、[bro](#bro) 和 [wt-tool](#wt-tool)，它们依赖 OMP 内部实现（`AgentRegistry`、`ctx.agent`、子会话文件路径、会话条目类型、local root、钩子顺序、`context` 事件的调用时机、宿主工具注入、`TodoTool` 读写的会话接口、compaction 事件、bro 用到的文档转换、剪贴板和抓取内部模块、InteractiveMode 的原型与公开成员、`executeBuiltinSlashCommand`、`/wt` 和 `/move` 的 TUI 处理、`planWorktreeExit` 的指纹、VCS 的 `worktreeRemove`）。
