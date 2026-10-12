@@ -3,7 +3,7 @@
 本节点设计 omp-config 的配置检查：在一次性环境里安装最新 omp，用仓库自己的更新器应用配置，再用免费模型跑真实 session，把 omp 和扩展打印的故障与警告去重后逐个报告出来。同一个 workflow 另有一个 `code` job，跑 `bun install` 和 `bun run check`（Biome 格式与 lint、`tsc --noEmit`），它的规则在仓库 `AGENTS.md` 的代码规范一节，不属于本节点。
 
 - **拥有**：检查运行的阶段、诊断的判据与分类、免费模型和影子模型的接入、workflow 的触发事件与权限。
-- **不拥有**：配置项本身的规则（仓库 `README.md`）；更新器写什么、删什么（`agent/omp-config-update.ts` 头注释）；各扩展的行为（`README.md`「本地扩展」）。
+- **不拥有**：配置项本身的规则（仓库 `README.md`）；更新器写什么、删什么（`agent/extensions/omp-config-autoupdate/omp-config-update.ts` 头注释）；各扩展的行为（`README.md`「本地扩展」）。
 - **非目标**：让模型执行任务或调用工具；验证付费 helper 的判定（`task-split-check`、`task-completion-judge`）；TUI 专属行为；拦截合并（不设 branch protection）。
 - **输入**：仓库工作区（被检查对象），npm 上的 `@oh-my-pi/pi-coding-agent`，`install-plugins.sh` 声明的插件，Kilo 网关的匿名免费模型。
 
@@ -58,7 +58,7 @@ flowchart LR
 |阶段|做什么|产生的诊断|
 |---|---|---|
 |install|`bun install -g @oh-my-pi/pi-coding-agent@${OMP_VERSION:-latest}`，`omp --version`|失败为 `environment`，检查就此结束|
-|apply|`bun agent/omp-config-update.ts apply --source <仓库> --agent-dir … --json`|stderr 每行；JSON 报告的 `errors`；`pluginsMissing` 每项；没有 JSON 报告|
+|apply|`bun agent/extensions/omp-config-autoupdate/omp-config-update.ts apply --source <仓库> --agent-dir … --json`|stderr 每行；JSON 报告的 `errors`；`pluginsMissing` 每项；没有 JSON 报告|
 |models|写 `models.yml`（免费模型 + 影子模型），把 `config.yml` 的 `modelRoles` 设为免费模型|无|
 |full session、light session|RPC 模式启动，等 `ready` 后发一条 prompt，保持 stdin 直到 `prompt_result`，再关闭并等进程退出|见下方判据|
 |omp 日志|读 `$HOME/.omp/logs/*.log` 的 `warn`、`error` 记录|不属于主机噪声的每条记录|

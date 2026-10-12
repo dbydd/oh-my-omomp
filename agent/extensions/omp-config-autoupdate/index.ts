@@ -11,11 +11,12 @@
 //
 // WHAT. Registers /omp-config-autoupdate in every session and session_start for
 // main sessions only. When on, once per process, the main session's hook runs
-// `bun <agent dir>/omp-config-update.ts auto --agent-dir <agent dir> --json`
-// as a child process. That script fetches origin into its own clone and, when
-// the fetch succeeds and the fetched commit differs from the one last applied
-// to this agent dir, applies it (see the header of omp-config-update.ts for
-// what it touches and what it never touches). A failed fetch applies nothing.
+// `bun <this dir>/omp-config-update.ts auto --agent-dir <agent dir> --json`
+// as a child process; the updater script ships beside this file. It fetches
+// origin into its own clone and, when the fetch succeeds and the fetched
+// commit differs from the one last applied to this agent dir, applies it (see
+// the header of omp-config-update.ts for what it touches and what it never
+// touches). A failed fetch applies nothing.
 //
 // MANUAL RUN. `/omp-config-autoupdate run` runs the same child now, whatever
 // the switch says, and once the session is idle posts the full report (commit
@@ -132,7 +133,7 @@ function runChild(bun: string, script: string, agentDir: string): Promise<ChildR
 }
 
 async function runUpdater(agentDir: string): Promise<RunOutcome> {
-	const script = join(agentDir, SCRIPT);
+	const script = join(import.meta.dir, SCRIPT);
 	if (!existsSync(script)) return { kind: "no-script", script };
 	const bun = Bun.which("bun");
 	if (!bun) return { kind: "no-bun" };

@@ -10,7 +10,7 @@ definitions, local TypeScript extensions (one directory each, with the
 extension's own config files and templates beside its code), the agent-root
 `thinking-translator.json` for `omp-thinking-translator`, the `pi-bansos`
 plugin state (`pi/agent/pi-bansos-relay-state.json`), the plugin install
-list, the repo → machine updater (`agent/omp-config-update.ts`) with its
+list, the repo → machine updater (`agent/extensions/omp-config-autoupdate/omp-config-update.ts`) with its
 startup hook, the maintenance commands that move state between this repo
 and a machine's live `~/.omp/agent` (plus `~/.pi/agent` for the `pi-bansos`
 state) and install its PATH launcher, the configuration check (CI) that
@@ -39,7 +39,7 @@ flowchart LR
     L1["agent/config-light.yml"]
     L2["agent/APPEND_SYSTEM_LIGHT.md"]
     L3["agent/omp-light.ts"]
-    U["agent/omp-config-update.ts"]
+    U["agent/extensions/omp-config-autoupdate/omp-config-update.ts"]
     T["agent/thinking-translator.json"]
     Q["agent/extensions/_shared/*.ts"]
     G["agent/agents/*.md"]
@@ -54,7 +54,7 @@ flowchart LR
     LG["agents/"]
     LE["extensions/&lt;name&gt;/ / extensions/_shared/ / extensions-last/"]
     LL["config-light.yml / APPEND_SYSTEM_LIGHT.md / omp-light.ts"]
-    LU["omp-config-update.ts / .omp-config-applied"]
+    LU[".omp-config-applied"]
   end
   PL["~/.omp/plugins/"]
   subgraph pihome["~/.pi/agent"]
@@ -106,13 +106,13 @@ flowchart LR
   `glob` walk returns — no sort, not filename order — so filename prefixes
   cannot order extensions.
 - **Two one-way syncs, never one "sync".** `/sync-omp-config` never writes the
-  machine; its sync range includes the three light assets, `omp-config-update.ts`, the agent-root
-  `thinking-translator.json`, the extension modules and shipped templates, the structured
+  machine; its sync range includes the three light assets, the agent-root
+  `thinking-translator.json`, the extension modules (the updater script included) and shipped templates, the structured
   extension configs, and `~/.pi/agent/pi-bansos-relay-state.json`, but excludes installed
   PATH launchers, `.omp-config-applied`, and every host-owned file inside an extension
   directory. It stops on a machine still on the flat extension layout and asks for
   `/update-omp` first. Repo → machine is the updater
-  (`agent/omp-config-update.ts`; its header is the contract): automatically at
+  (`agent/extensions/omp-config-autoupdate/omp-config-update.ts`; its header is the contract): automatically at
   start, or via `/update-omp`. It writes the machine and installs `omp-light`
   beside the resolved `omp` executable. Its managed set (`managedPlain`,
   `STRUCTURED`) must match the sync range in `.omp/commands/sync-omp-config.md`.
@@ -140,13 +140,17 @@ flowchart LR
   relocations below.
 - **Relocations from the flat layout run in both modes** (updater header,
   RELOCATIONS): a flat `extensions/<name>.ts` superseded by a shipped
-  `<name>/index.ts` is deleted (two modules with one id would both load);
+  `<name>/index.ts` is deleted (two modules with one id would both load), and
+  so is the agent-root `omp-config-update.ts` the updater replaced;
   structured configs are merged from their old path (`legacyRel`) and the old
   copy deleted; agent-root data (`APPEND_SYSTEM_MODEL.md`, `bro-*`,
   `omp-config-autoupdate.json`, `extensions/doc-polish.json`, `WATCHDOG-*.md`,
   the machine's own `PROMPT-INJECT-*` / `TURN-JUDGE-*`) is renamed into its
   extension directory when the new path is free; the retired `config.yml`
   `extensions` entry `…/extensions-last/system-prompt-replace.ts` is dropped.
+  Machines whose installed updater predates the move fetch from the old
+  `agent/omp-config-update.ts` path, fail with "has no agent/omp-config-update.ts",
+  and need one `/update-omp` to install the updater at its new path.
 - **Structured configs are compared field by field.** `config.yml`, the
   agent-root `thinking-translator.json`,
   `extensions-last/system-prompt-replace/system-prompt-replace.json`,
@@ -181,14 +185,14 @@ flowchart LR
 | repo root | `install-plugins.sh`, `plugin-audit.sh`, `README.md` (authoritative, in Chinese), and the dev tooling `package.json` / `biome.json` / `tsconfig.json` (`bun run check`). |
 | `ci/`, `.github/workflows/config-check.yml` | The configuration check (CI): `ci/check.ts` installs the latest omp in a throwaway HOME, applies the repo with its own updater (plugins included), runs one real RPC session per mode (full, `omp-light`) on a keyless free model, and collects updater and session diagnostics (every session stderr line, `extension_error`) and omp log warn/error; install output is collected only when a step fails. The report groups them into findings keyed by a SHA-256 of kind + normalized text, so one fault appears once with its per-phase counts and keeps its id across runs while kind and normalized text stay the same. `ci/README.md` holds its design, criteria, and coverage boundary. |
 | `agent/config-light.yml`, `agent/APPEND_SYSTEM_LIGHT.md`, `agent/omp-light.ts` | Light-mode assets are included in both sync directions; the updater copies them to `~/.omp/agent` and installs the PATH entry beside the resolved `omp`. Generated `omp-light` / `omp-light.cmd` entries are not repo files. |
-| `agent/omp-config-update.ts` | The repo → machine updater (Bun script, also a managed item copied to `~/.omp/agent`). `auto` mode runs at every start when the machine's auto-update switch is on; `apply --source <dir> [--check]` backs `/update-omp`. Its header documents what it touches, deletes, and never touches. |
+| `agent/extensions/omp-config-autoupdate/omp-config-update.ts` | The repo → machine updater: a standalone Bun script that sits beside the extension that spawns it (not an extension module; only `index.ts` is loaded), copied like the extension's other modules. `auto` mode runs at every start when the machine's auto-update switch is on; `apply --source <dir> [--check]` backs `/update-omp`. Its header documents what it touches, deletes, and never touches. |
 
 ## Development Commands
 
 Slash commands run inside `omp` started at the repo root:
 
 ```
-/update-omp [check]           # working checkout -> machine via `omp-config-update.ts apply --source .`; asks about plugin uninstall candidates and missing machine-local init files
+/update-omp [check]           # working checkout -> machine via the updater's `apply --source .`; asks about plugin uninstall candidates and missing machine-local init files
 /sync-omp-config [check]      # machine -> repo (repo write only); syncs light assets, never installed PATH entries. Full mode commits+pushes
 /migrate-omp-keys <target>    # SSH-copy auth_credentials to a remote omp host (not a snapshot path)
 /omp-config-autoupdate [status|on|off|run]   # machine-local switch for startup auto-update (off by default; applies from next start); run = update from GitHub now, full report in the transcript
@@ -199,8 +203,8 @@ Shell scripts and dev tooling run from repo root:
 ```bash
 ./plugin-audit.sh             # read-only: diff install-plugins.sh (history from base 5974c4fa) vs `omp plugin list`
 ./install-plugins.sh          # `omp install` each declared plugin into ~/.omp/plugins (network required)
-bun agent/omp-config-update.ts apply --source . [--check] [--no-plugins] [--agent-dir DIR]   # what /update-omp runs
-bun ~/.omp/agent/omp-config-update.ts auto [--branch NAME]                                   # what the startup hook runs
+bun agent/extensions/omp-config-autoupdate/omp-config-update.ts apply --source . [--check] [--no-plugins] [--agent-dir DIR]   # what /update-omp runs
+bun ~/.omp/agent/extensions/omp-config-autoupdate/omp-config-update.ts auto [--branch NAME]                                   # what the startup hook runs
 bun install                   # dev dependencies (Biome, TypeScript, omp host packages for types); node_modules/ and bun.lock are not committed
 bun run check                 # biome check . && tsc --noEmit: format, lint and type-check agent/**/*.ts and ci/**/*.ts
 bun run format                # biome check --write .: apply formatting and safe fixes
@@ -237,7 +241,10 @@ exercised in a real omp session.
   subscribes. Other `*.ts` files in the directory are the extension's private
   modules, one level only. Nothing directly under `extensions/` or
   `extensions-last/` is a `.ts` file. Only the default export, unless another
-  file of the same extension imports a name; no test seams.
+  file of the same extension imports a name; no test seams. The one
+  exception is `omp-config-autoupdate/omp-config-update.ts`, the updater: a
+  standalone script whose exports (`applySnapshot`, `LOCAL_CONFIG_FIELDS`, …)
+  are its contract with older updaters and the sync command.
 - **No cross-extension imports.** Code used by two or more extensions lives in
   `extensions/_shared/` and is imported by relative path with the `.ts`
   extension (`../_shared/config.ts`). `_shared` provides mechanics, not policy:
@@ -262,9 +269,7 @@ exercised in a real omp session.
 - **Files an extension owns sit beside it** and are read via `import.meta.dir`,
   never via `getAgentDir()` or the agent root. Only files whose path is fixed by
   someone else stay where they are (`thinking-translator.json` by its plugin,
-  `commandcode-models.json` by the commandcode plugin, the updater
-  `omp-config-update.ts` that `omp-config-autoupdate` spawns from the agent
-  dir, omp's own files).
+  `commandcode-models.json` by the commandcode plugin, omp's own files).
 - **Format:** Biome only (tabs, double quotes, semicolons, trailing commas,
   width 140). Run `bun run format`; never hand-format.
 - **Types:** strict `tsc` with `noUncheckedIndexedAccess`; no `any`. An `as`
@@ -372,12 +377,12 @@ exercised in a real omp session.
   (auto-update and `/update-omp`) installs it as executable `omp-light` on POSIX/macOS/Linux, or as
   `omp-light.ts` plus a generated `omp-light.cmd` on Windows, beside the resolved
   `omp`; generated entries are not part of the repo copy set.
-- `agent/omp-config-update.ts` + `agent/extensions/omp-config-autoupdate/` —
+- `agent/extensions/omp-config-autoupdate/` (`index.ts` + `omp-config-update.ts`) —
   the updater and its startup hook. The hook is off by default:
   `/omp-config-autoupdate` (`status` reads; `on`/`off` write) manages the machine-local switch
   `omp-config-autoupdate.json` beside the extension (`{"enabled": bool}`; missing or
   invalid = off), which neither the updater nor `/sync-omp-config` carries, and
-  which the hook reads once per start. When on, the hook spawns the installed updater with
+  which the hook reads once per start. When on, the hook spawns the updater beside it with
   `bun` from a managed `ctx.setTimeout` (an in-process fault must not take OMP
   down) and notifies only on changes or failures (up to date, a busy lock, and
   a failed fetch only log); `/omp-config-autoupdate run`
@@ -458,7 +463,7 @@ Direct-migration copy set (never copy the whole `agent/`; `README.md`):
 ```bash
 mkdir -p "$HOME/.omp/agent"
 cp agent/config.yml agent/APPEND_SYSTEM.md agent/thinking-translator.json \
-  agent/config-light.yml agent/APPEND_SYSTEM_LIGHT.md agent/omp-light.ts agent/omp-config-update.ts \
+  agent/config-light.yml agent/APPEND_SYSTEM_LIGHT.md agent/omp-light.ts \
   "$HOME/.omp/agent/"
 cp -a agent/agents agent/extensions agent/extensions-last "$HOME/.omp/agent/"
 mkdir -p "$HOME/.pi/agent"

@@ -2,9 +2,9 @@
 description: 用本仓库工作区更新本机 OMP 配置和 pi-bansos 状态（repo → 本机）
 ---
 
-用当前仓库工作区（含未推送的改动）手动执行一次 repo → 本机更新，与 `/sync-omp-config` 方向相反。实际写入全部由 `agent/omp-config-update.ts` 完成，规则以它文件头的说明和代码为准；本命令只负责运行、补上脚本不做的插件卸载判断、报告结果。不使用 subagent，直接执行。
+用当前仓库工作区（含未推送的改动）手动执行一次 repo → 本机更新，与 `/sync-omp-config` 方向相反。实际写入全部由更新器 `agent/extensions/omp-config-autoupdate/omp-config-update.ts` 完成，规则以它文件头的说明和代码为准；本命令只负责运行、补上脚本不做的插件卸载判断、报告结果。不使用 subagent，直接执行。
 
-`omp-config-autoupdate` 扩展可以在每次 OMP 启动时从 GitHub 默认分支自动更新，但默认关闭，要执行 `/omp-config-autoupdate on` 打开。没打开时，repo → 本机靠本命令；打开后，本命令用于新机器首次安装更新器，以及把未推送的本地改动先应用到本机。
+`omp-config-autoupdate` 扩展可以在每次 OMP 启动时从 GitHub 默认分支自动更新，但默认关闭，要执行 `/omp-config-autoupdate on` 打开。没打开时，repo → 本机靠本命令；打开后，本命令用于新机器首次安装更新器、自动更新报 `has no agent/omp-config-update.ts`（机器上还是更新器挪位置之前的旧版）时装上新位置的更新器，以及把未推送的本地改动先应用到本机。
 
 `$ARGUMENTS`：
 - 为空：执行更新。
@@ -13,8 +13,8 @@ description: 用本仓库工作区更新本机 OMP 配置和 pi-bansos 状态（
 ## 步骤
 
 1. 在仓库根目录运行：
-   - 更新：`bun agent/omp-config-update.ts apply --source .`
-   - `check`：`bun agent/omp-config-update.ts apply --source . --check`
+   - 更新：`bun agent/extensions/omp-config-autoupdate/omp-config-update.ts apply --source .`
+   - `check`：`bun agent/extensions/omp-config-autoupdate/omp-config-update.ts apply --source . --check`
 
    agent 目录默认取 `PI_CODING_AGENT_DIR`，否则 `~/.omp/agent`；使用 named profile 时加 `--agent-dir <omp config path 的输出>`。脚本报告 `another update holds …` 时，说明有一次自动更新正在进行，稍后重跑。
 2. 跑 `./plugin-audit.sh`，只处理 `[卸载候选]`：问用户是否 `omp plugin uninstall <name>`，并告知作者从脚本移除通常已经验证过，可以直接删。`[安装]` 已由脚本补装，`[保留]` 不动。

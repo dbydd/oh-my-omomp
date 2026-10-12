@@ -2,9 +2,11 @@
 
 // ============================================================================
 // omp-config-update — apply the omp-config repo snapshot to an OMP agent dir.
+// Lives in extensions/omp-config-autoupdate/ beside the extension that spawns
+// it; it is a standalone Bun script, not an extension module (not index.ts).
 //
 // TWO ENTRY POINTS, ONE APPLY.
-//   auto   Run by extensions/omp-config-autoupdate/ at OMP start when the
+//   auto   Run by the omp-config-autoupdate extension at OMP start when the
 //          machine's switch is on (`/omp-config-autoupdate on`; off by default).
 //          Refreshes the updater-owned clone (~/.omp/omp-config-src) from
 //          origin, and applies only when the fetch succeeds and its commit
@@ -44,9 +46,11 @@
 //
 // RELOCATIONS. Both modes, planned like every other op. Earlier layouts kept
 // extensions flat (extensions/<name>.ts) and their files at the agent root.
-//   - A flat module SUPERSEDED by a module the source ships is deleted: two
-//     modules with one extension id would both load. An app-managed one is
-//     reported as an error instead.
+//   - A file SUPERSEDED by one the source ships is deleted: a flat module
+//     would load beside its directory version (two modules, one extension
+//     id), and the agent-root updater is replaced by the copy in
+//     extensions/omp-config-autoupdate/. An app-managed one is reported as
+//     an error instead.
 //   - A structured file with a `legacyRel` is merged from the old host copy
 //     when the new one is absent, then the old copy is deleted; the previous
 //     commit's keys are read from either path, so dropped keys still go.
@@ -134,7 +138,10 @@ const RETIRED_LIST_ENTRIES: Readonly<Record<string, readonly string[]>> = {
 	extensions: ["~/.omp/agent/extensions-last/system-prompt-replace.ts"],
 };
 
-/** Flat modules of earlier layouts (agent-dir relative) and the module that replaced each. */
+/** Where this script lives, relative to the agent dir (and to `agent/` in the repo). */
+const UPDATER_REL = "extensions/omp-config-autoupdate/omp-config-update.ts";
+
+/** Files of earlier layouts (agent-dir relative) and the file that replaced each. */
 const SUPERSEDED: readonly { readonly from: string; readonly by: string }[] = [
 	...[
 		"append-system-model",
@@ -160,6 +167,7 @@ const SUPERSEDED: readonly { readonly from: string; readonly by: string }[] = [
 	].map((name) => ({ from: `extensions/${name}.ts`, by: `extensions/${name}/index.ts` })),
 	{ from: "extensions/ctx-post-compact-hint.ts", by: "extensions/ctx-tool/index.ts" },
 	{ from: "extensions-last/system-prompt-replace.ts", by: "extensions-last/system-prompt-replace/index.ts" },
+	{ from: "omp-config-update.ts", by: UPDATER_REL },
 ];
 
 /**
@@ -226,7 +234,7 @@ function managedPlain(rel: string): boolean {
 	if (rel.split("/").some((part) => part.startsWith("."))) return false;
 	return (
 		/^agent\/(APPEND_SYSTEM|APPEND_SYSTEM_LIGHT)\.md$/.test(rel) ||
-		/^agent\/(config-light\.yml|omp-light\.ts|omp-config-update\.ts)$/.test(rel) ||
+		/^agent\/(config-light\.yml|omp-light\.ts)$/.test(rel) ||
 		/^agent\/agents\/.+$/.test(rel) ||
 		/^agent\/(extensions|extensions-last)\/[^/]+\/[^/]+\.ts$/.test(rel) ||
 		/^agent\/extensions\/user-prompt-inject\/PROMPT-INJECT-[^/]+\.md$/.test(rel) ||
@@ -234,6 +242,7 @@ function managedPlain(rel: string): boolean {
 	);
 }
 
+/** Extension code takes effect on the next start; the updater script itself runs fresh each time. */
 const RESTART_SCOPED = /^agent\/(APPEND_SYSTEM\.md|extensions\/.+\.ts|extensions-last\/.+\.ts)$/;
 
 // --- report -----------------------------------------------------------------
@@ -815,7 +824,7 @@ export async function applySnapshot(opts: ApplyOptions): Promise<ApplyReport> {
 		return report;
 	}
 	for (const op of ops) {
-		if (RESTART_SCOPED.test(op.rel)) report.restartNeeded = true;
+		if (RESTART_SCOPED.test(op.rel) && op.rel !== `agent/${UPDATER_REL}`) report.restartNeeded = true;
 		try {
 			switch (op.kind) {
 				case "move":
@@ -943,9 +952,9 @@ export async function runAuto(agentDir: string, branch: string): Promise<AutoRes
 		const previousCommit = applied && git(CLONE_DIR, ["cat-file", "-e", `${applied}^{commit}`]).ok ? applied : undefined;
 		// Apply with the fetched commit's own rules. Dynamic import is required:
 		// the module is the just-fetched clone's copy, chosen at runtime, not this file.
-		const fetchedUpdater = join(CLONE_DIR, "agent", "omp-config-update.ts");
+		const fetchedUpdater = join(CLONE_DIR, "agent", UPDATER_REL);
 		if (!existsSync(fetchedUpdater))
-			return { kind: "failed", error: `${branch} at ${commit.slice(0, 7)} has no agent/omp-config-update.ts; nothing applied` };
+			return { kind: "failed", error: `${branch} at ${commit.slice(0, 7)} has no agent/${UPDATER_REL}; nothing applied` };
 		const fetched: { applySnapshot?: typeof applySnapshot } = await import(pathToFileURL(fetchedUpdater).href);
 		if (typeof fetched.applySnapshot !== "function")
 			return { kind: "failed", error: "fetched omp-config-update.ts exports no applySnapshot" };

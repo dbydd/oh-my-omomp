@@ -274,7 +274,16 @@ function installOmp(env: Record<string, string>, cwd: string, out: Diagnostic[])
 
 function applyConfig(env: IsolatedEnv, cwd: string, out: Diagnostic[]): ApplyReport | undefined {
 	const apply = run(
-		["bun", join(REPO, "agent/omp-config-update.ts"), "apply", "--source", REPO, "--agent-dir", env.PI_CODING_AGENT_DIR, "--json"],
+		[
+			"bun",
+			join(REPO, "agent/extensions/omp-config-autoupdate/omp-config-update.ts"),
+			"apply",
+			"--source",
+			REPO,
+			"--agent-dir",
+			env.PI_CODING_AGENT_DIR,
+			"--json",
+		],
 		env,
 		cwd,
 		INSTALL_TIMEOUT_MS,

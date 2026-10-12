@@ -8,10 +8,10 @@ description: 把本机 ~/.omp/agent 配置和 pi-bansos 状态同步进本仓库
 
 ## 同步范围
 
-本机 `~/.omp/agent` 与仓库 `agent/` 按同名一一对应，范围与 `agent/omp-config-update.ts` 的 `managedPlain` 和 `STRUCTURED` 一致，改一边就要改另一边：
+本机 `~/.omp/agent` 与仓库 `agent/` 按同名一一对应，范围与更新器 `agent/extensions/omp-config-autoupdate/omp-config-update.ts` 的 `managedPlain` 和 `STRUCTURED` 一致，改一边就要改另一边：
 
-- 根目录：`config.yml`、`APPEND_SYSTEM.md`、`thinking-translator.json`、`config-light.yml`、`APPEND_SYSTEM_LIGHT.md`、`omp-light.ts`、`omp-config-update.ts`，以及 `agents/` 整个目录。
-- 扩展目录里只有这些属于仓库：`extensions/<名字>/*.ts`（含 `extensions/_shared/*.ts`）、`extensions-last/<名字>/*.ts`、`extensions/user-prompt-inject/PROMPT-INJECT-*.md`、`extensions/turn-judge/TURN-JUDGE-*.md`，以及结构化配置 `extensions/lang-nag/lang-nag.json`、`extensions/input-polish/input-polish.json`、`extensions/tool-policy-nag/tool-policy-nag.json`、`extensions-last/system-prompt-replace/system-prompt-replace.json`。
+- 根目录：`config.yml`、`APPEND_SYSTEM.md`、`thinking-translator.json`、`config-light.yml`、`APPEND_SYSTEM_LIGHT.md`、`omp-light.ts`，以及 `agents/` 整个目录。
+- 扩展目录里只有这些属于仓库：`extensions/<名字>/*.ts`（含 `extensions/_shared/*.ts` 和更新器 `extensions/omp-config-autoupdate/omp-config-update.ts`）、`extensions-last/<名字>/*.ts`、`extensions/user-prompt-inject/PROMPT-INJECT-*.md`、`extensions/turn-judge/TURN-JUDGE-*.md`，以及结构化配置 `extensions/lang-nag/lang-nag.json`、`extensions/input-polish/input-polish.json`、`extensions/tool-policy-nag/tool-policy-nag.json`、`extensions-last/system-prompt-replace/system-prompt-replace.json`。
 - 扩展目录里的其他文件属于本机，不收回：`extensions/doc-polish/doc-polish.json`、`extensions/bro/bro-settings.json` 和 `bro-prompt.md`、`extensions/omp-config-autoupdate/omp-config-autoupdate.json`、`extensions/append-system-model/APPEND_SYSTEM_MODEL.md`、`extensions/watchdog-agent/WATCHDOG-*.md`，以及仓库没有的同名模式模板。
 
 本机 `settings.json` 不在范围内：`config.yml` 存在时 OMP 不再把它的 `extensions` 当扩展包根目录，但其中的 TS/JS 扩展模块条目照样加载，属于本机。
@@ -22,8 +22,8 @@ description: 把本机 ~/.omp/agent 配置和 pi-bansos 状态同步进本仓库
 - 运行时文件：`*.db*`、`*-wal`、`*-shm`、`*.lock`、`models.yml`、`models.yml.bak-*`、`commandcode-models.json`、`last-changelog-version`、`sessions/`、`terminal-sessions/`、`blobs/`、`cache/`、`logs/`，以及自动更新的记录 `.omp-config-applied` 和本机开关 `omp-config-autoupdate.json`。
 - `omp` 安装目录里的 `omp-light`、`omp-light.ts`、`omp-light.cmd`；light 三件只从 `~/.omp/agent` 取。
 - 应用托管的扩展：首行为 `// @orca-managed-pi-extension`，或任意位置含 `marker: _otty`。以标记为准，不凭文件名判断。
-- `config.yml` 中的本机字段，仓库保留原值：即 `agent/omp-config-update.ts` 的 `LOCAL_CONFIG_FIELDS`，自动更新同样不写这些字段。
-- `config.yml` 中本机列表的本机条目：`agent/omp-config-update.ts` 的 `MACHINE_LIST_FIELDS`（`extensions`）里，仓库列表没有的条目（例如 `~/.claude`）属于本机，不写进仓库。这类列表只比对仓库已有的条目：本机删掉的，从仓库删除。要给仓库加新条目，直接改仓库。
+- `config.yml` 中的本机字段，仓库保留原值：即更新器的 `LOCAL_CONFIG_FIELDS`，自动更新同样不写这些字段。
+- `config.yml` 中本机列表的本机条目：更新器的 `MACHINE_LIST_FIELDS`（`extensions`）里，仓库列表没有的条目（例如 `~/.claude`）属于本机，不写进仓库。这类列表只比对仓库已有的条目：本机删掉的，从仓库删除。要给仓库加新条目，直接改仓库。
 
 ## 步骤
 
