@@ -8,6 +8,7 @@ import type { GlobMatch, GrepMatch } from "@oh-my-pi/pi-natives";
 import { FileType, GrepOutputMode, glob, grep } from "@oh-my-pi/pi-natives";
 import { isRecord } from "@oh-my-pi/pi-utils";
 import { parseTaskLogEvent, taskLogPath } from "../_shared/task-log.ts";
+import { goalLines, type TodoGoal, todoGoalSchema } from "../_shared/todo-goal.ts";
 
 const COLLAPSE_THRESHOLD = 8;
 const SUMMARY_LIMIT = 120;
@@ -94,6 +95,7 @@ type NodeData = {
 	readonly handoff: string;
 	readonly tasks?: TaskCounts;
 	readonly timeline?: TaskTimeline;
+	readonly goal?: TodoGoal;
 };
 
 type ContextNode = {
@@ -109,6 +111,7 @@ type ContextNode = {
 	readonly tasks?: TaskCounts;
 	readonly handoff: string;
 	readonly timeline?: TaskTimeline;
+	readonly goal?: TodoGoal;
 	readonly file?: string;
 	readonly children: readonly ContextNode[];
 };
@@ -140,6 +143,7 @@ type SidecarCacheEntry = FileMetadata & { readonly summary: SummaryCell } & (
 type TaskLogCacheEntry = FileMetadata & {
 	readonly counts: TaskCounts;
 	readonly timeline: TaskTimeline;
+	readonly goal?: TodoGoal;
 };
 
 type TranscriptSource = {
@@ -902,18 +906,31 @@ async function taskLogFor(
 	localRoot: string,
 	id: string,
 	snapshots: FileSnapshot,
-): Promise<{ counts: TaskCounts | undefined; timeline: TaskTimeline | undefined }> {
+): Promise<{ counts: TaskCounts | undefined; timeline: TaskTimeline | undefined; goal: TodoGoal | undefined }> {
 	const file = taskLogPath(localRoot, id);
 	const metadata = snapshots.metadataByPath.get(file);
-	if (!metadata) return { counts: undefined, timeline: undefined };
+	if (!metadata) return { counts: undefined, timeline: undefined, goal: undefined };
 	const cached = taskLogCache.get(file);
-	if (cached && sameMetadata(cached, metadata)) return { counts: cached.counts, timeline: cached.timeline };
+	if (cached && sameMetadata(cached, metadata)) return { counts: cached.counts, timeline: cached.timeline, goal: cached.goal };
 	const text = await readTextFile(file);
-	if (text === undefined) return { counts: undefined, timeline: undefined };
+	if (text === undefined) return { counts: undefined, timeline: undefined, goal: undefined };
 	const counts = taskLogCounts(text);
 	const timeline = taskLogTimeline(text);
-	taskLogCache.set(file, { ...metadata, counts, timeline });
-	return { counts, timeline };
+	const goal = taskLogGoal(text);
+	taskLogCache.set(file, { ...metadata, counts, timeline, goal });
+	return { counts, timeline, goal };
+}
+
+/** The last schema-valid goal record wins, independently of todo timeline replay. */
+function taskLogGoal(content: string): TodoGoal | undefined {
+	const lines = content.split(/\r?\n/);
+	for (let index = lines.length - 1; index >= 0; index--) {
+		const event = parseTaskLogEvent(lines[index]!);
+		if (event?.tool !== "todo-goal") continue;
+		const parsed = todoGoalSchema.safeParse(parseJsonValue(event.detail));
+		if (parsed.success) return parsed.data;
+	}
+	return undefined;
 }
 
 function taskTarget(detail: string): string | undefined {
@@ -1327,6 +1344,7 @@ function materialize(node: ContextDraft, data: ReadonlyMap<string, NodeData>): C
 		tasks: nodeData.tasks,
 		handoff: nodeData.handoff,
 		timeline: nodeData.timeline,
+		goal: nodeData.goal,
 		file: node.file,
 		flavor: node.flavor,
 		children: node.children.map((child) => materialize(child, data)),
@@ -1519,6 +1537,7 @@ function renderShow(node: ContextNode, breadcrumb: readonly string[]): string {
 		"## Handoff",
 		"",
 		node.handoff,
+		...(node.goal ? ["", "## Goal", "", ...goalLines(node.goal)] : []),
 		"",
 		"## Tasks",
 		"",
@@ -1544,6 +1563,7 @@ async function hydrateData(inventory: Inventory, nodes: readonly ContextDraft[])
 			handoff: "(none)",
 			tasks: taskLog.counts,
 			timeline: taskLog.timeline,
+			goal: taskLog.goal,
 		};
 		data.set(node.id, value);
 		if (node.file) {
@@ -1564,6 +1584,7 @@ async function hydrateShow(inventory: Inventory, target: ContextDraft): Promise<
 			handoff: inventory.currentCompactionHandoff,
 			tasks: taskLog.counts,
 			timeline: taskLog.timeline,
+			goal: taskLog.goal,
 		});
 	} else {
 		const directory = target.file ? path.dirname(target.file) : (inventory.artifactRoot ?? inventory.localRoot);
@@ -1573,6 +1594,7 @@ async function hydrateShow(inventory: Inventory, target: ContextDraft): Promise<
 			handoff: handoff.handoff,
 			tasks: taskLog.counts,
 			timeline: taskLog.timeline,
+			goal: taskLog.goal,
 		});
 		if (target.file) {
 			const cached = transcriptCache.get(target.file);
@@ -1629,7 +1651,7 @@ export async function renderCtxListText(
  * `ctx show <id>` rendering as a plain string. Same output shape and
  * source of truth as the tool call. `id` defaults to the current
  * session so post-compaction injections can attach the main session's
- * per-task timeline without a follow-up tool call. Returns `undefined`
+ * goal and per-task timeline without a follow-up tool call. Returns `undefined`
  * when the id is not in the inventory.
  */
 export async function renderCtxShowText(inventory: Inventory, id?: string): Promise<{ text: string; id: string } | undefined> {
@@ -1648,7 +1670,7 @@ export function registerCtxTool(pi: ExtensionAPI): void {
 		description:
 			"Composed, read-only recall view of what prior contexts (this session and its subagents) did — never mutates a session or file. A different axis from `read history://<id>`, which returns the raw transcript verbatim: `ctx` stitches the current session, its subagent registry, transcripts, compaction sidecar summaries, and per-agent task logs into a shallow tree of status, handoff, and task counts.\n" +
 			'- `ctx list`: the current session and its `task` subagents as a shallow tree with status, one-line handoff, and todo progress (done / total / blocked); internal contexts (mentor/discuss/trace) are hidden by default. `ctx list all=true` includes them; `ctx list <id>` expands the subtree rooted at that context (large subtrees collapse with a `ctx list <id>` expand marker). Answer most "what did we already do?" questions here before opening any transcript.\n' +
-			"- `ctx show <id>`: one context's handoff plus a `## Tasks` timeline replayed from its todo log — each named task's final state (completed / open, with block reasons) and local timestamp. The handoff is the current branch's compaction summary for this session, or the adjacent sidecar summary for another context. Tasks only created by `init`/`append` and never touched by name do not appear. `<id>` is what `ctx list` prints, and what `agent://<id>` and `history://<id>` accept.\n" +
+			"- `ctx show <id>`: one context's handoff, current todo goal (when recorded), and a `## Tasks` timeline replayed from its todo log — each named task's final state (completed / open, with block reasons) and local timestamp. The handoff is the current branch's compaction summary for this session, or the adjacent sidecar summary for another context. Tasks only created by `init`/`append` and never touched by name do not appear. `<id>` is what `ctx list` prints, and what `agent://<id>` and `history://<id>` accept.\n" +
 			"- `read history://<id>` is the fallback, not the default: reach for the raw transcript only when `ctx show` is insufficient — exact wording, the concrete tool arguments issued, an elided message, or raw error text the task log did not capture. Transcripts are large and unindexed; opening one when `ctx` already answers is wasted effort.\n" +
 			"- Scope: this session and its descendants only. Sibling or unrelated sessions never surface here; if you already hold their id, address them directly via `history://<id>` or `agent://<id>`.\n" +
 			"- `todo` ops feed the timeline `ctx show` replays; update todo the moment state changes so this recall view stays worth consulting.",

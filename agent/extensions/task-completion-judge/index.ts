@@ -4,15 +4,16 @@
  * one step every task run (sync or async) passes before its result reaches
  * the parent. A fast model compares the assignment (the `task` prompt the
  * executor recorded in the run's `session_init`, plus the batch's shared
- * context) with the last 50 tool calls the subagent made after that point and
- * the submitted result, and decides whether the work was actually finished.
+ * context) with the subagent's todo goal, the last 50 tool calls the subagent
+ * made after that point and the submitted result, and decides whether the
+ * work was actually finished.
  * A `fork_task` child's transcript opens with a copy of the parent's
  * conversation; everything before its own `session_init` is background, never
  * the assignment or the subagent's work.
  *
  * Per subagent session: the first terminal yield judged NOT done is blocked
  * and the reason goes back to the subagent, which keeps working. A terminal
- * yield judged DONE while the session's own todo list (see `subagent-todo/index.ts`)
+ * yield judged DONE while the session's own todo list (see `todo-goal/index.ts`)
  * still has pending or in-progress items is blocked once, asking the subagent
  * to bring the todo list up to date before yielding. Each bounce happens at
  * most once, so one session can see a NOT done bounce and later a todo
@@ -27,8 +28,9 @@
  * is converted to `data: { result: <that text>, completion_judge }`.
  *
  * Registers `tool_call` and `session_shutdown`; it reads the host-managed session
- * branch and agent registry, writes only in-memory round state, and has no private
- * configuration files. Only the named task subagents are judged; main sessions pass.
+ * branch (including the `todo-goal` entries) and agent registry, writes only
+ * in-memory round state, and has no private configuration files. Only the
+ * named task subagents are judged; main sessions pass.
  * Every failure (agent not identified, model missing, provider error,
  * unparseable answer, deadline) lets the yield pass as written. The deadline
  * stays under the harness's 30 s `tool_call` handler timeout, which would
@@ -42,6 +44,7 @@ import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { errorText } from "../_shared/errors.ts";
 import { textOf } from "../_shared/messages.ts";
+import { currentTodoGoal, explanationOf, goalLines, type TodoGoalState } from "../_shared/todo-goal.ts";
 
 const MODEL = "openai-codex/gpt-6-sol";
 const EFFORT = THINKING_EFFORTS.find((effort) => effort === "low");
@@ -55,7 +58,8 @@ const SUBMISSION_CHAR_LIMIT = 6_000;
 
 const SYSTEM_PROMPT = [
 	"You audit whether a worker agent actually completed the assignment it was given.",
-	"You receive: the assignment, the shared background context (may be empty), the worker's last tool calls with their results in order, and the result the worker is now submitting.",
+	"You receive: the assignment, the shared background context (may be empty), the worker's todo goal (may be absent), the worker's last tool calls with their results in order, and the result the worker is now submitting.",
+	"The todo goal is the worker's own restatement of the work: its objective, how it measures the result, and how far it must go to count as done. The assignment stays the standard; the goal adds checks. Answer NOT_DONE when the goal narrows the assignment, when the stated measure was never applied in the tool calls, or when its done-when bar is not met.",
 	"Judge from the tool-call evidence, not from the worker's own claims. A claim in the submitted result that no tool call backs up does not count as done.",
 	"DONE: everything the assignment asks for was delivered, and the tool calls show it (the edits or artifacts exist, the required commands ran, the required verification ran and passed).",
 	"NOT_DONE: a required part is missing or only stubbed; the scope was quietly narrowed; required verification was skipped; a failure or error in the results was ignored; or the submitted result claims work the tool calls do not show.",
@@ -252,6 +256,7 @@ const renderPrompt = (ctx: ExtensionContext, transcript: Transcript, yieldCallId
 			"</call>",
 		].join("\n");
 	});
+	const goal = currentTodoGoal(ctx.sessionManager.getBranch());
 	return [
 		"<assignment>",
 		transcript.assignment.trim() || "(missing)",
@@ -259,6 +264,9 @@ const renderPrompt = (ctx: ExtensionContext, transcript: Transcript, yieldCallId
 		"<shared-context>",
 		sharedContextOf(ctx) || "(none)",
 		"</shared-context>",
+		"<todo-goal>",
+		goal.kind === "set" ? goalLines(goal.goal).join("\n") : "(none)",
+		"</todo-goal>",
 		`<tool-calls shown="${window.length}" total="${prior.length}">`,
 		...renderedCalls,
 		"</tool-calls>",
@@ -302,12 +310,15 @@ const judge = async (ctx: ExtensionContext, prompt: string, signal: AbortSignal)
 	}
 };
 
-/** Pending or in-progress items of the session's own todo list. */
-const openTodoItems = (session: AgentSession | null): string[] =>
+/** Pending or in-progress items of the session's own todo list, with their explanations. */
+const openTodoItems = (session: AgentSession | null, goal: TodoGoalState): string[] =>
 	(session?.getTodoPhases() ?? []).flatMap((phase) =>
 		phase.tasks
 			.filter((task) => task.status === "pending" || task.status === "in_progress")
-			.map((task) => `${phase.name}: ${task.content}`),
+			.map((task) => {
+				const explanation = explanationOf(goal, task.content);
+				return `${phase.name}: ${task.content}${explanation === undefined ? "" : ` — ${explanation}`}`;
+			}),
 	);
 
 export default function taskCompletionJudge(pi: ExtensionAPI): void {
@@ -399,7 +410,8 @@ export default function taskCompletionJudge(pi: ExtensionAPI): void {
 				throw new Error(`Unexpected completion verdict: ${unexpected}`);
 			}
 		}
-		const openItems = verdict.kind === "done" && !round.todoPrompted ? openTodoItems(ref.session) : [];
+		const openItems =
+			verdict.kind === "done" && !round.todoPrompted ? openTodoItems(ref.session, currentTodoGoal(ctx.sessionManager.getBranch())) : [];
 		if (openItems.length > 0) {
 			rounds.set(sessionFile, { ...round, todoPrompted: true });
 			const reason = [

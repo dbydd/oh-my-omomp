@@ -1,7 +1,7 @@
 /**
  * Post-compaction hint: after a compaction boundary finishes, inject
  * the rendered `ctx list` output plus the current main session's
- * `ctx show` (handoff + per-task timeline) directly into the session,
+ * `ctx show` (handoff + goal + per-task timeline) directly into the session,
  * so the model sees pre-compaction context without spending tool
  * calls to fetch it.
  *
@@ -49,7 +49,7 @@ const buildMessage = (payload: MessagePayload): string => {
 	const lines: string[] = [
 		"<post-compact-ctx>",
 		`Auto-attached after compaction. Same output as \`ctx list\` (${total} context(s)).`,
-		"Sibling contexts: `ctx show <id>` for their handoff + per-task timeline;",
+		"Sibling contexts: `ctx show <id>` for their handoff + goal + per-task timeline;",
 		"read `history://<id>` only when the timeline is not enough.",
 		"",
 		"## List",

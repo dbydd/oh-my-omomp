@@ -1,17 +1,19 @@
 /**
  * Records successful todo/goal mutations from tool_result for main and sub sessions.
- * Appends timestamped lines to local://task-log/<agent-id>.md; reads that file's
+ * Appends timestamped lines to local://task-log/<agent-id>.md, with a todo-goal
+ * set line after each todo mutation carrying a valid goal. Reads that file's
  * metadata to add its heading once. Read-only operations are not logged.
  * Writes are serialized and failures are warned without failing the host hook.
  */
 import { appendFile, mkdir, stat } from "node:fs/promises";
 import { dirname, resolve as resolvePath } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
+import { type ExtensionAPI, type ExtensionContext, z } from "@oh-my-pi/pi-coding-agent";
 import { type LocalProtocolOptions, resolveLocalRoot } from "@oh-my-pi/pi-coding-agent/internal-urls";
 import { AgentRegistry, MAIN_AGENT_ID } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { isRecord } from "@oh-my-pi/pi-utils";
 import { errorText } from "../_shared/errors.ts";
 import { type GoalOperation, goalOperation, type TodoOperation, taskLogPath, todoOperation } from "../_shared/task-log.ts";
+import { todoGoalSchema } from "../_shared/todo-goal.ts";
 
 interface TodoPhaseDetails {
 	name: string;
@@ -33,6 +35,8 @@ interface TodoCounts {
 	phases: number;
 	tasks: number;
 }
+const inputItemsSchema = z.array(z.object({ title: z.string() }));
+const inputPhasesSchema = z.array(z.object({ phase: z.string(), items: inputItemsSchema }));
 
 let writeTail: Promise<void> = Promise.resolve();
 
@@ -94,19 +98,15 @@ function parseGoalDetails(value: unknown): GoalResultDetails | undefined {
 function parseInputPhases(value: unknown): TodoCounts | undefined {
 	if (!isRecord(value)) return undefined;
 	if (Array.isArray(value.list)) {
-		let tasks = 0;
-		for (const phaseValue of value.list) {
-			if (!isRecord(phaseValue) || typeof phaseValue.phase !== "string" || !Array.isArray(phaseValue.items)) {
-				return undefined;
-			}
-			if (!phaseValue.items.every((item) => typeof item === "string")) return undefined;
-			tasks += phaseValue.items.length;
-		}
-		return { phases: value.list.length, tasks };
+		const parsed = inputPhasesSchema.safeParse(value.list);
+		if (!parsed.success) return undefined;
+		return {
+			phases: parsed.data.length,
+			tasks: parsed.data.reduce((total, phase) => total + phase.items.length, 0),
+		};
 	}
-	if (Array.isArray(value.items) && value.items.every((item) => typeof item === "string")) {
-		return { phases: 1, tasks: value.items.length };
-	}
+	const parsed = inputItemsSchema.safeParse(value.items);
+	if (parsed.success) return { phases: 1, tasks: parsed.data.length };
 	return undefined;
 }
 
@@ -138,8 +138,8 @@ function formatTodoDetail(op: TodoOperation, input: Record<string, unknown>, det
 		}
 		case "append": {
 			const phase = stringValue(input.phase);
-			const items = Array.isArray(input.items) ? input.items : undefined;
-			const count = items?.every((item) => typeof item === "string") ? items.length : 0;
+			const items = inputItemsSchema.safeParse(input.items);
+			const count = items.success ? items.data.length : 0;
 			return `phase ${quote(phase)}: +${count}`;
 		}
 		case "rm": {
@@ -251,7 +251,12 @@ export default function ctxTaskLog(pi: ExtensionAPI): void {
 			}
 			if (detail === undefined || operation === undefined) return;
 			const target = resolveTaskLogPath(ctx);
-			await queueTaskLog(pi, target.path, target.agentId, `- ${timestamp} ${event.toolName} ${operation}: ${detail}`);
+			let line = `- ${timestamp} ${event.toolName} ${operation}: ${detail}`;
+			if (event.toolName === "todo") {
+				const goal = todoGoalSchema.safeParse(input.goal);
+				if (goal.success) line += `\n- ${timestamp} todo-goal set: ${JSON.stringify(goal.data)}`;
+			}
+			await queueTaskLog(pi, target.path, target.agentId, line);
 		} catch (error) {
 			safeWarn(pi, error);
 		}

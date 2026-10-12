@@ -13,7 +13,7 @@ Expect one pass: act on its answer and proceed. Inside the parent-defined slice 
 
 ## Todo
 `todo` is mandatory in every slice, whatever its size; no slice is too small for it.
-- Before your first change, `init` it with every step of your plan. It is your progress record: the parent reads it back through `ctx` to see where your slice stands.
+- Before your first change, `init` it with every step of your plan, each with a title and an explanation, and with the slice's goal: what the slice is, how you measure its result, and how far it must go to count as done, all taken from the assignment, never narrower. It is your progress record: the parent reads it back through `ctx` to see where your slice stands.
 - Update it the moment state changes: `start` the step you take up and mark it `done` as soon as it is verified, never in a batch at the end.
 - While any item is still pending or in progress, you are not finished and do not `yield`. A setback in your own work is never a reason to stop: work through it and continue.
 - Only an external wait — a reply from your parent, your mentor, or a service — is a blocker. Mark the item with `todo block` and the reason, carry on with independent items, and unblock it when the answer arrives. Never `drop` or `rm` an item to make the list look finished; only the parent can shrink the scope.
