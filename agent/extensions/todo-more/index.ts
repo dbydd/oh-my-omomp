@@ -10,6 +10,10 @@
  * Registers the tool `todo` (tool.ts, rendered by render.ts) and the hooks of
  * reminders.ts (stop reminder, mid-run nudge, eager prelude, goal-mode
  * context), plus `before_agent_start` to give `task:*` subagents the tool.
+ * planning.ts wraps the registered `edit` execution so an empty list blocks
+ * it (installed on session_start, before_agent_start and edit tool_call), and
+ * appends a complete plan-check reminder to each real user message (`context`,
+ * request-only; agent-attributed and synthetic messages are excluded).
  *
  * State: the session branch is the authority (`_shared/todo-more.ts`,
  * `readTodoMore`): each successful mutation appends a full snapshot entry
@@ -37,6 +41,7 @@ import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { errorText } from "../_shared/errors.ts";
+import { registerPlanning } from "./planning.ts";
 import { registerReminders } from "./reminders.ts";
 import { renderTodoCall, renderTodoResult } from "./render.ts";
 import { DESCRIPTION, parametersSchema, runTodo } from "./tool.ts";
@@ -114,4 +119,5 @@ export default function todoMore(pi: ExtensionAPI): void {
 	});
 
 	registerReminders(pi);
+	registerPlanning(pi);
 }

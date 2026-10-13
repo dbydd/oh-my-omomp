@@ -798,6 +798,12 @@ model: "(gpt-5|o3)"
 - “缺解释”的项在工具结果、渲染和提醒里单独列出，并要求模型用 `explain` 补上。
 - 每次修改同时把原生格式的列表（标题作为 content、状态、blocker）写进会话的 `TodoTracker`，工具结果的 details 也带同一份原生格式列表，所以 OMP 的 HUD、底栏、`/todo`、分支恢复、eval 里的 `tool.todo(...)`、prewalk 门槛照常工作。
 
+**计划约束**（`planning.ts`，完整和轻量模式都生效）：
+
+- **编辑前检查**：在已注册的 `edit` 执行函数外加前置检查，紧贴真实执行读取当前分支 todo；没有任何项就返回错误，不调用原编辑函数，要求先用 `init` 写 goal 和带标题、解释的完整计划，再重试。`session_start`、`before_agent_start` 和 `edit` 的 `tool_call` 负责给当前工具实例安装这项检查；不在整批调用准备时预判，避免同一批里 `init` 或 `rm` 之后检查旧状态。只拦 `edit`，不扩展到 `write`、shell 或 `ast_edit`。所有项都已完成仍算非空，不因为没有 pending 项而要求重建。
+- **每条用户消息的提醒**：模型请求里的每条真实用户消息都附一个提醒。列表为空时要求立即初始化；不为空时要求核对 todo 和当前计划、最新用户要求是否一致，并直接附完整 JSON 快照：goal 的三个字段、所有阶段、每项的标题、解释、状态和 blocker，包括 completed、abandoned、blocked，不截断，也不要求先调用 `todo view`。
+- **投放与原文**：用 `context` 只改请求消息，保留用户或用户发起的 custom 消息角色与附件，覆盖普通输入、RPC、排队输入和实时 steering；不改存储的用户原文，因此不会污染 `user-prompt-inject`。agent-attributed 和 synthetic 消息不附这项提醒。历史用户消息使用它进入会话时的 todo，尚未写入分支的排队消息使用投放时的当前 todo；每次请求从原始消息重建，不累计重复提醒。
+
 **提醒**：原生 todo 关掉后，`TodoTracker` 的提醒全部停止，`reminders.ts` 按原生逻辑重做，读 `todo.reminders`、`todo.remindersMax`、`todo.eager` 设置：
 
 - **停下时的提醒**：还有 pending / in_progress 项、模型以纯文字结束时，提醒继续。原生文字之外加上 goal 和每项的解释，以及缺解释的项。跳过的情况与原生相同：plan mode、上一条提醒之后还没调用过任何工具、超过次数上限、最后一条回复在问用户、还有后台任务。主会话用 `session_stop` 续上，次数按一次连续的续写链计；subagent 没有这个钩子，在 `agent_end` 后补一条提醒并唤醒，次数按最近一条用户消息之后已发的提醒计，属于近似实现。
