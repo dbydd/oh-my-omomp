@@ -21,8 +21,8 @@
  *   `agent_end` instead, deferred by a grace window: the reminder is sent only
  *   when no turn, no queued message and no editor draft appeared meanwhile, so
  *   a human who interrupted to take over keeps the stop. One nudge per stalled
- *   chain: it is armed again only after the run produces a tool result or
- *   another prompt starts a new cycle, so a repeated interrupt is never fought.
+ *   chain: it is armed again only after the run produces a successful tool result
+ *   or another prompt starts a new cycle, so a repeated interrupt is never fought.
  * - Mid-run nudge (`takeMidRunNudge`): after 12 successful
  *   bash/eval/edit/write/ast_edit results without a todo call, at most twice
  *   per cycle, a hidden aside at the step boundary.
@@ -704,8 +704,8 @@ export function registerReminders(pi: ExtensionAPI): void {
 	let cutOff: { readonly ctx: ExtensionContext; readonly timer: Timer } | undefined;
 	/**
 	 * The reminder text of the cut-off nudge this stalled chain already got, held
-	 * until the run moves again (any tool result) or another prompt starts a new
-	 * cycle. One nudge per chain: a human who stops the run it started is not
+	 * until the run moves again (a successful tool result) or another prompt starts
+	 * a new cycle. One nudge per chain: a human who stops the run it started is not
 	 * fought twice, and a stall that follows real progress is nudged again.
 	 */
 	let cutOffNudge: string | undefined;
@@ -867,8 +867,9 @@ export function registerReminders(pi: ExtensionAPI): void {
 		const message = event.message;
 		if (message.role !== "toolResult") return;
 		onToolResult(cycle, message.toolName, message.isError);
-		// The run moved, so the chain's nudge is settled: a later stall nudges again.
-		cutOffNudge = undefined;
+		// A cancelled or failed result is not progress: only a successful one settles the
+		// chain's nudge, so interrupting a running tool cannot re-arm it.
+		if (!message.isError) cutOffNudge = undefined;
 	});
 
 	pi.on("turn_end", (event, ctx) => {
