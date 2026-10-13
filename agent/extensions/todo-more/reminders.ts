@@ -718,7 +718,10 @@ export function registerReminders(pi: ExtensionAPI): void {
 					if (ctx.hasUI && ctx.ui.getEditorText().trim() !== "") return;
 					const completion = checkCompletion(session, cycle, cycle.reminderCount, message, readTodoMore(ctx.sessionManager.getBranch()));
 					if (completion.kind !== "remind") return;
-					pending = { kind: "main", text: completion.text, details: completion.details, countBefore: cycle.reminderCount };
+					// The message itself is this turn's prompt and its own visible reminder, so
+					// there is no host continuation to hand a notice to: `pending` stays clear and
+					// `before_agent_start` leaves the reminder count alone (only `resetCycle` runs),
+					// which is what keeps the budget counting nudges across settles.
 					cycle.reminderCount = completion.attempt;
 					cycle.awaitingProgress = true;
 					cycle.mutationsSinceLastTouch = 0;
