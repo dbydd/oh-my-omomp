@@ -15,14 +15,14 @@
  *   explanation and the items that still lack one. Native also skips stop
  *   reminders in print mode (`omp -p`) through a private session flag no hook
  *   can read; these fire there too.
- *   A settle the host routes past both its own reminder and `session_stop` — an
- *   aborted run, a provider error, or a run that ended with tool calls still
- *   outstanding (`agent-session.ts`, settle routing) — is nudged from
+ *   A settle the host routes past both its own reminder and `session_stop` — a
+ *   provider error, a run that ended with tool calls still outstanding, or an
+ *   abort nobody asked for (`agent-session.ts`, settle routing) — is nudged from
  *   `agent_end` instead, deferred by a grace window: the reminder is sent only
- *   when no turn, no queued message and no editor draft appeared meanwhile, so
- *   a human who interrupted to take over keeps the stop. One nudge per stalled
- *   chain: it is armed again only after the run produces a successful tool result
- *   or another prompt starts a new cycle, so a repeated interrupt is never fought.
+ *   when no turn, no queued message and no editor draft appeared meanwhile. A stop
+ *   the human asked for (Esc/Ctrl+C/Enter, or a silent abort) never resumes, and a
+ *   stalled chain is nudged once: it is armed again only after the run produces a
+ *   successful tool result or another prompt starts a new cycle.
  * - Mid-run nudge (`takeMidRunNudge`): after 12 successful
  *   bash/eval/edit/write/ast_edit results without a todo call, at most twice
  *   per cycle, a hidden aside at the step boundary.
@@ -418,18 +418,40 @@ function terminalAnswer(message: AgentMessage | undefined): AssistantMessage | u
 }
 
 /** Stop reasons where the run was cut off rather than ended on a text answer (see `cutOffAnswer`). */
-const CUT_OFF_STOP_REASONS: Record<string, true> = { aborted: true, error: true, toolUse: true };
+const CUT_OFF_STOP_REASONS: Record<string, true> = { error: true, toolUse: true };
+
+// @upstream adapted @oh-my-pi/pi-tui@18.10.1 src/chat/messages.ts#isUserInterruptAbort
+// plus #isSilentAbort, inlined because an extension may not import the pi-tui chat
+// subpath: both markers only ever ride the aborted assistant message, as a flag on
+// `errorId` with the legacy `errorMessage` string as fallback.
+const USER_INTERRUPT_LABEL = "Interrupted by user";
+const SILENT_ABORT_MARKER = "__omp.silent_abort__";
+/** `AIError.Flag.UserInterrupt` | `Flag.SilentAbort` (pi-ai error flags), as bits. */
+const HUMAN_ABORT_FLAGS = 0x0400_0000 | 0x0200_0000;
+
+/** The human asked for this stop: Esc/Ctrl+C/Enter, or a silent abort. */
+function isHumanAbort(message: AssistantMessage): boolean {
+	const errorId = message.errorId;
+	return (
+		(typeof errorId === "number" && (errorId & HUMAN_ABORT_FLAGS) !== 0) ||
+		message.errorMessage === USER_INTERRUPT_LABEL ||
+		message.errorMessage === SILENT_ABORT_MARKER
+	);
+}
+// @upstream-end
 
 /**
  * The settled turn the host routes past its own reminder and past `session_stop`
- * (`agent-session.ts`, settle routing): an aborted run, a provider error, or a run
- * that ended with tool calls still outstanding. The model never produced the text
- * answer `terminalAnswer` describes, yet the session is now idle with the list
- * still open — exactly the stop the reminder exists to catch. A capped empty stop
- * stays out: the host's own recovery declared that turn terminal.
+ * (`agent-session.ts`, settle routing): a provider error, a run that ended with tool
+ * calls still outstanding, or an abort nobody asked for. The model never produced
+ * the text answer `terminalAnswer` describes, yet the session is now idle with the
+ * list still open — exactly the stop the reminder exists to catch. A stop the human
+ * asked for stays stopped, and a capped empty stop stays out too: the host's own
+ * recovery declared that turn terminal.
  */
 function cutOffAnswer(message: AgentMessage | undefined): AssistantMessage | undefined {
 	if (message?.role !== "assistant") return undefined;
+	if (message.stopReason === "aborted") return isHumanAbort(message) ? undefined : message;
 	return CUT_OFF_STOP_REASONS[message.stopReason] === true ? message : undefined;
 }
 
