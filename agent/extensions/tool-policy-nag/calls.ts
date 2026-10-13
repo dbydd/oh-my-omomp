@@ -9,9 +9,19 @@ const execSchema = z.object({ cmd: z.string(), tty: z.unknown().optional() });
 const writeSchema = z.object({ path: z.string(), content: z.string() });
 const evalSchema = z.object({ language: z.string(), code: z.string() });
 
+type DeviceTool = "bash" | "bash_bg" | "exec_command";
+
+/** Device paths that carry a shell command, mapped to the tool the payload runs. */
+const DEVICE_TOOLS: Record<string, DeviceTool> = {
+	"xd://bash": "bash",
+	"xd://bash_bg": "bash_bg",
+	"xd://exec_command": "exec_command",
+};
+
 /** Device JSON is untrusted; malformed or non-shell payloads are intentionally ignored. */
 function deviceShellCall(path: string, content: string): WatchedCall | null {
-	if (path !== "xd://bash" && path !== "xd://bash_bg" && path !== "xd://exec_command") return null;
+	const tool = DEVICE_TOOLS[path];
+	if (tool === undefined) return null;
 	let payload: unknown;
 	try {
 		payload = JSON.parse(content);
@@ -19,10 +29,12 @@ function deviceShellCall(path: string, content: string): WatchedCall | null {
 		// Invalid device JSON is an expected non-shell payload.
 		return null;
 	}
-	return shellCall(path, payload);
+	// Name the tool the payload runs, not the device path: the judge and the nag
+	// then describe the same operation the same way whichever lane called it.
+	return shellCall(tool, payload);
 }
 function shellCall(tool: string, input: unknown): WatchedCall | null {
-	if (tool === "exec_command" || tool === "xd://exec_command") {
+	if (tool === "exec_command") {
 		const parsed = execSchema.safeParse(input);
 		return parsed.success ? { kind: "shell", tool, command: parsed.data.cmd, tty: parsed.data.tty === true } : null;
 	}
