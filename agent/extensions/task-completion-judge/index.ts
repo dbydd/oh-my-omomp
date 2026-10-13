@@ -1,8 +1,8 @@
 /**
  * Completion judge for `task:low` / `task:mid` / `task:free` subagents. It runs
- * inside the subagent's own session and intercepts its terminal `yield` — the
- * one step every task run (sync or async) passes before its result reaches
- * the parent. A fast model compares the assignment (the `task` prompt the
+ * inside the subagent's own session and intercepts a terminal `yield` when
+ * that run has a structured yield tool. Unstructured task runs have no yield
+ * to intercept. A fast model compares the assignment (the `task` prompt the
  * executor recorded in the run's `session_init`, plus the batch's shared
  * context) with the subagent's todo goal, the last 50 tool calls the subagent
  * made after that point and the submitted result, and decides whether the
@@ -13,8 +13,8 @@
  *
  * Per subagent session: the first terminal yield judged NOT done is blocked
  * and the reason goes back to the subagent, which keeps working. A terminal
- * yield judged DONE while the session's own todo list (see `todo-more/index.ts`)
- * still has pending or in-progress items is blocked once, asking the subagent
+ * yield judged DONE while a fresh `omp-todo-more:read` projection of that
+ * session still has pending or in-progress items is blocked once, asking the subagent
  * to bring the todo list up to date before yielding. Each bounce happens at
  * most once, so one session can see a NOT done bounce and later a todo
  * bounce. Every yield that passes after a definitive verdict carries it to
@@ -28,11 +28,12 @@
  * is converted to `data: { result: <that text>, completion_judge }`.
  *
  * Registers `tool_call` and `session_shutdown`; it reads the host-managed session
- * branch (including the `todo-more` entries) and agent registry, writes only
- * in-memory round state, and has no private configuration files. Only the
+ * branch for the assignment/tools and requests the independent Todo owner's
+ * synchronous read projection before and after judging. It writes only
+ * in-memory round state and has no private configuration files. Only the
  * named task subagents are judged; main sessions pass.
- * Every failure (agent not identified, model missing, provider error,
- * unparseable answer, deadline) lets the yield pass as written. The deadline
+ * Every failure (agent not identified, Todo owner unavailable, model missing,
+ * provider error, unparseable answer, deadline) lets the yield pass as written. The deadline
  * stays under the harness's 30 s `tool_call` handler timeout, which would
  * otherwise block the yield.
  */
@@ -43,7 +44,6 @@ import { type ExtensionAPI, type ExtensionContext, z } from "@oh-my-pi/pi-coding
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { errorText } from "../_shared/errors.ts";
 import { textOf } from "../_shared/messages.ts";
-import { actionableItems, explanationText, goalLines, readTodoMore, type TodoMoreState } from "../_shared/todo-more.ts";
 
 const MODEL = "openai-codex/gpt-6-sol";
 const EFFORT = THINKING_EFFORTS.find((effort) => effort === "low");
@@ -54,6 +54,37 @@ const TOOL_CALL_WINDOW = 50;
 const ARGS_CHAR_LIMIT = 800;
 const RESULT_CHAR_LIMIT = 800;
 const SUBMISSION_CHAR_LIMIT = 6_000;
+
+const nonEmpty = z.string().refine((value) => value.trim().length > 0, "must not be empty");
+const todoReadSchema = z.union([
+	z.object({
+		kind: z.literal("ok"),
+		goal: z.object({ objective: nonEmpty, measure: nonEmpty, doneWhen: nonEmpty }).nullable(),
+		openItems: z.array(z.object({ phase: z.string(), title: z.string(), explanation: z.string().nullable() })),
+	}),
+	z.object({ kind: z.literal("unavailable") }),
+]);
+type TodoMoreReadResponse = z.infer<typeof todoReadSchema>;
+type ReviewTodo = Extract<TodoMoreReadResponse, { kind: "ok" }>;
+
+/** The owner replies before emit returns; missing or malformed replies are not an empty list. */
+function readTodoForReview(pi: ExtensionAPI, agentId: string): TodoMoreReadResponse {
+	let value: unknown;
+	pi.events.emit("omp-todo-more:read", {
+		agentId,
+		reply: (response: unknown) => {
+			value = response;
+		},
+	});
+	const parsed = todoReadSchema.safeParse(value);
+	return parsed.success ? parsed.data : { kind: "unavailable" };
+}
+
+function requireReviewTodo(pi: ExtensionAPI, agentId: string): ReviewTodo {
+	const response = readTodoForReview(pi, agentId);
+	if (response.kind === "unavailable") throw new Error("todo-more review state unavailable");
+	return response;
+}
 
 const SYSTEM_PROMPT = [
 	"You audit whether a worker agent actually completed the assignment it was given.",
@@ -242,7 +273,7 @@ const sharedContextOf = (ctx: ExtensionContext): string => {
 	return (end === -1 ? body : body.slice(0, end)).trim();
 };
 
-const renderPrompt = (ctx: ExtensionContext, transcript: Transcript, yieldCallId: string, submission: string): string => {
+const renderPrompt = (ctx: ExtensionContext, transcript: Transcript, yieldCallId: string, submission: string, todo: ReviewTodo): string => {
 	const prior = transcript.calls.filter((call) => call.id !== yieldCallId);
 	const window = prior.slice(-TOOL_CALL_WINDOW);
 	const renderedCalls = window.map((call, index) => {
@@ -255,7 +286,6 @@ const renderPrompt = (ctx: ExtensionContext, transcript: Transcript, yieldCallId
 			"</call>",
 		].join("\n");
 	});
-	const todo = readTodoMore(ctx.sessionManager.getBranch());
 	return [
 		"<assignment>",
 		transcript.assignment.trim() || "(missing)",
@@ -264,7 +294,7 @@ const renderPrompt = (ctx: ExtensionContext, transcript: Transcript, yieldCallId
 		sharedContextOf(ctx) || "(none)",
 		"</shared-context>",
 		"<worker-goal>",
-		todo.kind === "list" && todo.goal.kind === "set" ? goalLines(todo.goal.goal).join("\n") : "(none)",
+		todo.goal === null ? "(none)" : `Objective: ${todo.goal.objective}\nMeasure: ${todo.goal.measure}\nDone when: ${todo.goal.doneWhen}`,
 		"</worker-goal>",
 		`<tool-calls shown="${window.length}" total="${prior.length}">`,
 		...renderedCalls,
@@ -310,8 +340,10 @@ const judge = async (ctx: ExtensionContext, prompt: string, signal: AbortSignal)
 };
 
 /** Pending or in-progress items of the session's own todo list, with their explanations. */
-const openTodoItems = (todo: TodoMoreState): string[] =>
-	actionableItems(todo).map(({ phase, item }) => `${phase}: ${item.title} — ${explanationText(item)}`);
+const openTodoItems = (todo: ReviewTodo): string[] =>
+	todo.openItems.map(
+		({ phase, title, explanation }) => `${phase}: ${title} — ${explanation ?? "(no explanation yet: add one with op explain)"}`,
+	);
 
 export default function taskCompletionJudge(pi: ExtensionAPI): void {
 	const rounds = new Map<string, Round>();
@@ -371,7 +403,8 @@ export default function taskCompletionJudge(pi: ExtensionAPI): void {
 		}
 		const assistantText = transcript.assistantTextByCallId.get(toolCallId);
 		const submission = call.kind === "text" ? (assistantText ?? "") : stringify(input.data);
-		const verdict = await judge(ctx, renderPrompt(ctx, transcript, toolCallId, submission), AbortSignal.timeout(DEADLINE_MS));
+		const todo = requireReviewTodo(pi, ctx.agent.id);
+		const verdict = await judge(ctx, renderPrompt(ctx, transcript, toolCallId, submission, todo), AbortSignal.timeout(DEADLINE_MS));
 		pi.logger.info("task-completion-judge verdict", {
 			agent: basename(sessionFile, ".jsonl"),
 			agentName,
@@ -402,7 +435,8 @@ export default function taskCompletionJudge(pi: ExtensionAPI): void {
 				throw new Error(`Unexpected completion verdict: ${unexpected}`);
 			}
 		}
-		const openItems = verdict.kind === "done" && !round.todoPrompted ? openTodoItems(readTodoMore(ctx.sessionManager.getBranch())) : [];
+		const currentTodo = requireReviewTodo(pi, ctx.agent.id);
+		const openItems = verdict.kind === "done" && !round.todoPrompted ? openTodoItems(currentTodo) : [];
 		if (openItems.length > 0) {
 			rounds.set(sessionFile, { ...round, todoPrompted: true });
 			const reason = [

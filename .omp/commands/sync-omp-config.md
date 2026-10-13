@@ -13,6 +13,7 @@ description: 把本机 ~/.omp/agent 配置和 pi-bansos 状态同步进本仓库
 - 根目录：`config.yml`、`APPEND_SYSTEM.md`、`thinking-translator.json`、`config-light.yml`、`APPEND_SYSTEM_LIGHT.md`、`omp-light.ts`，以及 `agents/` 整个目录。
 - 扩展目录里只有这些属于仓库：`extensions/<名字>/*.ts`（含 `extensions/_shared/*.ts` 和更新器 `extensions/omp-config-autoupdate/omp-config-update.ts`）、`extensions-last/<名字>/*.ts`、`extensions/user-prompt-inject/PROMPT-INJECT-*.md`、`extensions/turn-judge/TURN-JUDGE-*.md`、`extensions/tool-policy-nag/INTENT-*.md`，以及结构化配置 `extensions/lang-nag/lang-nag.json`、`extensions/input-polish/input-polish.json`、`extensions/tool-policy-nag/tool-policy-nag.json`、`extensions-last/system-prompt-replace/system-prompt-replace.json`。
 - 扩展目录里的其他文件属于本机，不收回：`extensions/doc-polish/doc-polish.json`、`extensions/bro/bro-settings.json` 和 `bro-prompt.md`、`extensions/omp-config-autoupdate/omp-config-autoupdate.json`、`extensions/append-system-model/APPEND_SYSTEM_MODEL.md`、`extensions/watchdog-agent/WATCHDOG-*.md`，以及仓库没有的同名模式模板。
+- 已退休的 Todo 源码不收回，即使旧机器仍有文件，也不进入“仓库缺失/不同/已删除”候选：`extensions/todo-more/index.ts`、`tool.ts`、`render.ts`、`reminders.ts`、`planning.ts`（后四个同属 `extensions/todo-more/`），`extensions/_shared/todo-more.ts`、`extensions/subagent-todo.ts`、`extensions/subagent-todo/index.ts`。独立插件的安装只按第 3 步处理，不复制其 package 或内部 reader。
 
 本机 `settings.json` 不在范围内：`config.yml` 存在时 OMP 不再把它的 `extensions` 当扩展包根目录，但其中的 TS/JS 扩展模块条目照样加载，属于本机。
 
@@ -27,7 +28,7 @@ description: 把本机 ~/.omp/agent 配置和 pi-bansos 状态同步进本仓库
 
 ## 步骤
 
-0. 本机还是平铺布局时停止：`~/.omp/agent/extensions/` 下直接有本仓库扩展同名的 `.ts`（不含应用托管文件），或 `~/.omp/agent/extensions-last/system-prompt-replace.ts` 存在。报告这些文件，要求先执行 `/update-omp` 迁移本机，不比对、不写仓库：拿平铺布局和仓库比对会把仓库的整套目录误判为本机已删除。
+0. 本机还是平铺布局时停止：`~/.omp/agent/extensions/` 下直接有本仓库扩展同名的 `.ts`（不含应用托管文件和上述退休 Todo 路径），或 `~/.omp/agent/extensions-last/system-prompt-replace.ts` 存在。报告这些文件，要求先执行 `/update-omp` 迁移本机，不比对、不写仓库：拿平铺布局和仓库比对会把仓库的整套目录误判为本机已删除。
 1. 按上面的范围逐文件比对，列出仓库缺失、内容不同、本机已删除三类差异；扩展目录按范围里的文件类型逐个比对，不用整目录 `diff -rq`。`extensions-last/README.md` 只存在于仓库，不算本机已删除。同时比对第 3 步的插件列表。文件和插件列表都没有差异时，报告已同步并结束。
 2. 把差异写入仓库。结构化配置（`config.yml`、各 JSON）先 `read` 两边、比出有差异的字段，再用 `edit` 只改这些行，不整文件覆盖、不重新序列化；`config.yml` 的本机字段和本机列表条目不写。
 3. `~/.omp/plugins/package.json` 的依赖与 `install-plugins.sh` 的列表不一致时，重写列表：URL/Git 依赖原样保留，npm 依赖去掉版本号。列表里注释掉的条目是可选插件，本机装了也保持注释、不改成有效条目，也不算差异。
