@@ -1,3 +1,5 @@
 {
-  "detector": "heuristic"
+  "detector": "jev",
+  "judge": "commandcode/typesafe/jev",
+  "threshold": 0.5
 }
