@@ -5,5 +5,10 @@
   "intent": {
     "judge": "commandcode/typesafe/jev",
     "threshold": 0.5
+  },
+  "risk": {
+    "minCommands": 4,
+    "minChars": 600,
+    "minPrograms": 3
   }
 }

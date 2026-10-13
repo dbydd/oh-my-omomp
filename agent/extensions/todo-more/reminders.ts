@@ -20,7 +20,9 @@
  *   outstanding (`agent-session.ts`, settle routing) — is nudged from
  *   `agent_end` instead, deferred by a grace window: the reminder is sent only
  *   when no turn, no queued message and no editor draft appeared meanwhile, so
- *   a human who interrupted to take over keeps the stop.
+ *   a human who interrupted to take over keeps the stop. One nudge per stalled
+ *   chain: it is armed again only after the run produces a tool result or
+ *   another prompt starts a new cycle, so a repeated interrupt is never fought.
  * - Mid-run nudge (`takeMidRunNudge`): after 12 successful
  *   bash/eval/edit/write/ast_edit results without a todo call, at most twice
  *   per cycle, a hidden aside at the step boundary.
@@ -700,6 +702,13 @@ export function registerReminders(pi: ExtensionAPI): void {
 	 * The grace window is the only reason it is not sent from the settle itself.
 	 */
 	let cutOff: { readonly ctx: ExtensionContext; readonly timer: Timer } | undefined;
+	/**
+	 * The reminder text of the cut-off nudge this stalled chain already got, held
+	 * until the run moves again (any tool result) or another prompt starts a new
+	 * cycle. One nudge per chain: a human who stops the run it started is not
+	 * fought twice, and a stall that follows real progress is nudged again.
+	 */
+	let cutOffNudge: string | undefined;
 	const cancelCutOff = (): void => {
 		if (cutOff === undefined) return;
 		cutOff.ctx.clearTimer(cutOff.timer);
@@ -713,6 +722,8 @@ export function registerReminders(pi: ExtensionAPI): void {
 				cutOff = undefined;
 				try {
 					if (ownSession(ctx) !== session) return;
+					// A chain that already got its nudge waits for progress or a new cycle.
+					if (cutOffNudge !== undefined) return;
 					// The human owns the stop once a turn runs, a message waits, or a draft is being typed.
 					if (!ctx.isIdle() || ctx.hasPendingMessages()) return;
 					if (ctx.hasUI && ctx.ui.getEditorText().trim() !== "") return;
@@ -722,6 +733,7 @@ export function registerReminders(pi: ExtensionAPI): void {
 					// there is no host continuation to hand a notice to: `pending` stays clear and
 					// `before_agent_start` leaves the reminder count alone (only `resetCycle` runs),
 					// which is what keeps the budget counting nudges across settles.
+					cutOffNudge = completion.text;
 					cycle.reminderCount = completion.attempt;
 					cycle.awaitingProgress = true;
 					cycle.mutationsSinceLastTouch = 0;
@@ -800,6 +812,9 @@ export function registerReminders(pi: ExtensionAPI): void {
 		try {
 			const own = pending;
 			pending = NO_PENDING;
+			// This module's own cut-off nudge keeps its latch; any other prompt is a new
+			// cycle where the human or another continuation is driving.
+			if (event.prompt !== cutOffNudge) cutOffNudge = undefined;
 			switch (own.kind) {
 				case "none":
 					break;
@@ -850,7 +865,10 @@ export function registerReminders(pi: ExtensionAPI): void {
 
 	pi.on("message_end", (event) => {
 		const message = event.message;
-		if (message.role === "toolResult") onToolResult(cycle, message.toolName, message.isError);
+		if (message.role !== "toolResult") return;
+		onToolResult(cycle, message.toolName, message.isError);
+		// The run moved, so the chain's nudge is settled: a later stall nudges again.
+		cutOffNudge = undefined;
 	});
 
 	pi.on("turn_end", (event, ctx) => {

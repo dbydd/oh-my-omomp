@@ -22,6 +22,11 @@
  *   (`INTENT-*.md`), read per call. No counting, no cap: one reminder per
  *   offending call. A failed judge request warns once per reason and reminds
  *   nothing.
+ * - `risk` — the risk lane (`risk.ts`): no judge, no counting. A shell call that
+ *   is long, runs many different programs and writes something has an outcome
+ *   nobody can read off the call; it gets one reminder naming the length, the
+ *   programs and the writing steps. Deterministic and independent of the other
+ *   lanes: a call can be a tool violation, a risk, both, or neither.
  *
  * DELIVERY IS SHARED. At most one reminder per watched call: when the intent
  * lane is enabled it owns delivery, because its reminder names the intent and
@@ -39,6 +44,7 @@ import { type WatchedCall, watchedCallOf } from "./calls.ts";
 import { type IntentLane, type Lanes, loadLanes } from "./detector-config.ts";
 import { detectEvalViolations, detectShellViolations } from "./heuristic.ts";
 import { intentReminder, intentViolation, JUDGE_TIMEOUT_MS, judgeIntent, loadIntentSpec } from "./intent.ts";
+import { inspectRisk, riskReminder } from "./risk.ts";
 
 const NAG_TEXT = "你为什么不遵守system prompt。";
 const STATE_ENTRY_TYPE = "mouriya.omp.tool-policy-nag.state";
@@ -276,6 +282,22 @@ export default function toolPolicyNag(pi: ExtensionAPI): void {
 				void intentCheck(ctx, lanes.intent, call).catch((error) => {
 					pi.logger.warn("Tool-policy nag hook failed", { error: errorText(error) });
 				});
+			}
+			if (lanes.risk !== null && call.kind === "shell") {
+				const finding = inspectRisk(call.command, lanes.risk);
+				if (finding !== null) {
+					pi.logger.warn("Tool-policy risk", { limits: lanes.risk, ...finding });
+					pi.sendUserMessage(
+						riskReminder(call.command, finding),
+						ctx.isIdle() ? { attribution: "agent" } : { deliverAs: "aside", attribution: "agent" },
+					);
+					if (ctx.hasUI) {
+						ctx.ui.notify(
+							`tool-policy-nag 风险：${call.tool} ${finding.commands} 段 / ${finding.programs.length} 个程序，会写 ${finding.writes.join("、")}`,
+							"warning",
+						);
+					}
+				}
 			}
 		}),
 	);

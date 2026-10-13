@@ -7,6 +7,13 @@
 # A picked option is a violation for a shell call unless it is `none`, and for
 # an eval call unless it is `eval` or `none`.
 #
+# TOOL ROUTING ONLY. Every option asks which built-in tool should have done this
+# call's work; `mixed` is the case where the call reassembles more than one
+# tool's operation. How big, chained or destructive a call is does not decide
+# anything here: a long line that downloads, checksums, greps and writes files
+# is `none` when every step belongs to the shell. Judging that call's
+# side-effect surface is the risk lane's job, not this question's.
+#
 # The coverage sentences in the body deliberately narrow `APPEND_SYSTEM.md`.
 # That file lists the shell forms the policy forbids without the exclusions this
 # question needs (its `# Tool Call` table names bare `>` redirection as an `edit`
@@ -67,10 +74,10 @@ options:
     rubric: |
       The call exists to start an operating-system process that should run through `exec_command`: `subprocess.run`, `os.system`, `!cmd`, `Bun.$`, `Bun.spawn`, `child_process` in eval code. Examples: `import subprocess; print(subprocess.run(['date'], …).stdout)`, and a shell command run from eval through the harness bridge. Not: calling another harness tool through `tool.<name>(…)`; and not eval code handing the shell a command line whose own operation a built-in tool covers — that call's intent is the covered operation (`read`, `list`, …), which is why routing it through eval is the violation.
   mixed:
-    title: 一次调用里读写混在一起
-    tool: "拆开：读走 `read` / `glob` / `grep`，写走 `edit` / `write`"
+    title: 一次调用重拼了多个内置工具的操作
+    tool: 拆开：读走 `read` / `glob` / `grep`，写走 `edit` / `write`
     rubric: |
-      One call mixes reading and writing with a side-effect surface the agent cannot bound: several chained commands that both change the repository and read it, so the agent cannot tell which parts wrote — `cd x && sed -i … && grep … && echo … > f`, a loop that reads and writes, a long generated one-liner that downloads, checksums, greps and writes files. The fix is to split it: reading through `read` / `glob` / `grep`, writing through `edit` / `write`. Not: a pure read, a pure write, or a build/setup command that only writes its own artifacts.
+      One call reassembles the operations of more than one built-in tool, so no single tool could have done this call's work: a search and an in-place edit (`grep -rn foo . ; sed -i 's/a/b/' f`), a read and a write (`cat a && echo … > b`), or several operations of different kinds chained together. The fix is to split it: each operation goes to its own tool (`read` / `glob` / `grep` for reading, `edit` / `write` for writing), with `exec_command` still running any real program among them. Not: a single operation (that is that tool's own option); and not a call that is long, chained or generated while every step belongs to the shell (that is `none` here, whatever its risk).
   none:
     title: 不走内置工具
     tool: 保持原样
