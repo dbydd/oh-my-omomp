@@ -12,8 +12,14 @@ import { type LocalProtocolOptions, resolveLocalRoot } from "@oh-my-pi/pi-coding
 import { AgentRegistry, MAIN_AGENT_ID } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { isRecord } from "@oh-my-pi/pi-utils";
 import { errorText } from "../_shared/errors.ts";
-import { type GoalOperation, goalOperation, type TodoOperation, taskLogPath, todoOperation } from "../_shared/task-log.ts";
-import { todoGoalSchema } from "../_shared/todo-more.ts";
+import {
+	type GoalOperation,
+	goalOperation,
+	type TodoOperation,
+	taskLogGoalSchema,
+	taskLogPath,
+	todoOperation,
+} from "../_shared/task-log.ts";
 
 interface TodoPhaseDetails {
 	name: string;
@@ -255,7 +261,7 @@ export default function ctxTaskLog(pi: ExtensionAPI): void {
 			const target = resolveTaskLogPath(ctx);
 			let line = `- ${timestamp} ${event.toolName} ${operation}: ${detail}`;
 			if (event.toolName === "todo") {
-				const goal = todoGoalSchema.safeParse(input.goal);
+				const goal = taskLogGoalSchema.safeParse(input.goal);
 				if (goal.success) line += `\n- ${timestamp} todo-more set: ${JSON.stringify(goal.data)}`;
 			}
 			await queueTaskLog(pi, target.path, target.agentId, line);

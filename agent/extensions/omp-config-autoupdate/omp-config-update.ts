@@ -36,13 +36,12 @@
 //     and delete;
 //   - symlinks: a symlinked target is written through to its resolved file.
 //
-// DELETIONS. Only in `auto`, and only what git says the repo dropped between
-// the applied commit and the new one: managed files deleted in that range,
-// structured keys present in the old repo version but not the new one
-// (a dropped map loses only the repo's old keys; it is removed only if that
-// leaves it empty), and entries of a MACHINE_LIST_FIELDS list the old repo
-// list had and the new one does not. Without the old commit (first run,
-// gc'd object) nothing is deleted.
+// DELETIONS. Git-derived removals run only in `auto`, and only what the repo
+// dropped between applied and new commits: managed files, structured keys
+// and MACHINE_LIST_FIELDS entries. Without the old commit those removals skip.
+// The finite TODO_RETIREMENTS are different: when the source declares the
+// independent Todo plugin, both modes retire those exact leaves after the
+// OMP owner confirms plugin readiness, even on first apply or without history.
 //
 // RELOCATIONS. Both modes, planned like every other op. Earlier layouts kept
 // extensions flat (extensions/<name>.ts) and their files at the agent root.
@@ -60,21 +59,27 @@
 //     is deleted, as the source writes or dropped it. Symlinks are never
 //     moved, only noted.
 //   - Retired config.yml list entries (RETIRED_LIST_ENTRIES) are dropped.
-// Manual apply deletes nothing else.
+// Manual apply otherwise deletes only relocations and the ready-plugin Todo leaves.
 //
-// SAFETY. Every structured source must parse to a mapping before any write;
-// one invalid source aborts the whole apply. A host structured file that does
-// not parse is left untouched and reported as an error. Writes go to a temp file in the
-// target's directory and are renamed over it. Order: moves, plain files,
-// JSON, config.yml, deletions. Any error leaves the applied marker unchanged, so
-// the next start retries. A lock dir (~/.omp/omp-config-update.lock) keeps
+// SAFETY. Parse and plan all source/host inputs and retirement ownership before
+// plugin installation or file writes. Preflight errors stop the whole apply.
+// Install missing plugins, then freshly query OMP for the required Todo entry;
+// failed readiness leaves all managed file operations unapplied. `--check`
+// only reports candidates and prerequisites. Writes use a temp file and rename.
+// Order after readiness: moves, plain files, JSON, config.yml, deletions.
+// During Todo cutover, any move/write error prevents the deletion phase entirely.
+// Automatic markers are written last after an error-free apply; manual apply
+// never records a working-tree HEAD. Partial cutover errors require a rerun
+// before restart. A lock dir (~/.omp/omp-config-update.lock) keeps
 // concurrent OMP starts and /update-omp from refreshing or applying at once;
 // the loser skips. The lock records its holder's pid: a dead holder's lock is
 // taken over, and a process only releases a lock it holds.
 //
-// PLUGINS. Entries of install-plugins.sh missing from
-// ~/.omp/plugins/package.json are installed with `omp install`. Nothing is
-// ever uninstalled here; /update-omp handles uninstall candidates.
+// PLUGINS. Missing entries of install-plugins.sh are installed with `omp install`
+// before managed file operations. Existing packages are not upgraded or enabled.
+// Todo handover requires a fresh enabled npm catalog entry, its declared root
+// entry and the actual file. No plugin internals or Tern catalog are imported here.
+// Nothing is uninstalled; /update-omp handles uninstall candidates.
 // ============================================================================
 
 import { spawnSync } from "node:child_process";
@@ -94,7 +99,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 export const REPO_URL = "https://github.com/mouriya-s-lab/omp-config.git";
@@ -141,6 +146,20 @@ const RETIRED_LIST_ENTRIES: Readonly<Record<string, readonly string[]>> = {
 /** Where this script lives, relative to the agent dir (and to `agent/` in the repo). */
 const UPDATER_REL = "extensions/omp-config-autoupdate/omp-config-update.ts";
 
+const TODO_PLUGIN_URL = "https://github.com/mouriya-s-lab/omp-todo-more";
+const TODO_PLUGIN_NAME = "omp-todo-more";
+/** Exact legacy leaves; directories, interior links and neighboring host files are not retirement targets. */
+const TODO_RETIREMENTS: readonly string[] = [
+	"extensions/todo-more/index.ts",
+	"extensions/todo-more/tool.ts",
+	"extensions/todo-more/render.ts",
+	"extensions/todo-more/reminders.ts",
+	"extensions/todo-more/planning.ts",
+	"extensions/_shared/todo-more.ts",
+	"extensions/subagent-todo.ts",
+	"extensions/subagent-todo/index.ts",
+];
+
 /** Files of earlier layouts (agent-dir relative) and the file that replaced each. */
 const SUPERSEDED: readonly { readonly from: string; readonly by: string }[] = [
 	...[
@@ -165,9 +184,6 @@ const SUPERSEDED: readonly { readonly from: string; readonly by: string }[] = [
 		"wt-tool",
 	].map((name) => ({ from: `extensions/${name}.ts`, by: `extensions/${name}/index.ts` })),
 	{ from: "extensions/ctx-post-compact-hint.ts", by: "extensions/ctx-tool/index.ts" },
-	// subagent-todo installed native `todo` in task subagents; todo-more now owns `todo` there.
-	{ from: "extensions/subagent-todo.ts", by: "extensions/todo-more/index.ts" },
-	{ from: "extensions/subagent-todo/index.ts", by: "extensions/todo-more/index.ts" },
 	{ from: "extensions-last/system-prompt-replace.ts", by: "extensions-last/system-prompt-replace/index.ts" },
 	{ from: "omp-config-update.ts", by: UPDATER_REL },
 ];
@@ -325,11 +341,12 @@ function targetOf(rel: string, agentDir: string): string {
  */
 const OTTY_MARKER = ["marker:", "_otty"].join(" ");
 
-function isAppManaged(path: string): boolean {
+function isAppManaged(path: string, strict = false): boolean {
 	let text: string;
 	try {
 		text = readFileSync(path, "utf8");
-	} catch {
+	} catch (error) {
+		if (strict && !(typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT")) throw error;
 		return false;
 	}
 	return text.split("\n", 1)[0]?.trim() === "// @orca-managed-pi-extension" || text.includes(OTTY_MARKER);
@@ -464,9 +481,10 @@ function oldRepoText(opts: ApplyOptions, rel: string): string | undefined {
 	return shown.ok ? shown.out : undefined;
 }
 
-function planPlain(opts: ApplyOptions, report: ApplyReport): Op[] {
+function planPlain(opts: ApplyOptions, report: ApplyReport, todoRequired: boolean): Op[] {
 	const ops: Op[] = [];
 	for (const rel of listSourceFiles(opts.source)) {
+		if (todoRequired && TODO_RETIREMENTS.includes(rel.slice("agent/".length))) continue;
 		const target = targetOf(rel, opts.agentDir);
 		const content = readFileSync(join(opts.source, rel));
 		if (existsSync(target)) {
@@ -577,6 +595,55 @@ function lexists(path: string): boolean {
 	}
 }
 
+type RetirementInspection =
+	| { readonly kind: "missing" }
+	| { readonly kind: "candidate" }
+	| { readonly kind: "blocked"; readonly message: string };
+
+/** Reused immediately before unlink: a long owner installation cannot authorize a changed filesystem object. */
+function inspectTodoRetirement(agentDir: string, rel: string): RetirementInspection {
+	const root = resolve(agentDir);
+	const target = join(root, rel);
+	try {
+		const entry = lstatSync(target);
+		if (!entry.isFile() && !entry.isSymbolicLink())
+			return { kind: "blocked", message: `${target}: not a regular file or leaf symlink; left untouched` };
+		for (let parent = dirname(target); parent !== root; parent = dirname(parent)) {
+			if (lstatSync(parent).isSymbolicLink())
+				return { kind: "blocked", message: `${target}: retirement traverses symlink parent ${parent}; backing object left untouched` };
+		}
+		if (isAppManaged(target, true))
+			return { kind: "blocked", message: `${target}: app-managed Todo retirement conflicts with plugin handover; left untouched` };
+		return { kind: "candidate" };
+	} catch (error) {
+		if (typeof error === "object" && error !== null && "code" in error && (error.code === "ENOENT" || error.code === "ENOTDIR"))
+			return { kind: "missing" };
+		return { kind: "blocked", message: `${target}: cannot preflight retirement (${errorText(error)})` };
+	}
+}
+
+function planTodoRetirements(opts: ApplyOptions, report: ApplyReport): Op[] {
+	const ops: Op[] = [];
+	for (const rel of TODO_RETIREMENTS) {
+		const inspected = inspectTodoRetirement(opts.agentDir, rel);
+		switch (inspected.kind) {
+			case "missing":
+				break;
+			case "candidate":
+				ops.push({ kind: "delete", rel: `agent/${rel}`, target: join(opts.agentDir, rel) });
+				break;
+			case "blocked":
+				report.errors.push(inspected.message);
+				break;
+			default: {
+				const unreachable: never = inspected;
+				throw new Error(String(unreachable));
+			}
+		}
+	}
+	return ops;
+}
+
 /** True when the previous applied commit had `rel`; always false in manual apply. */
 function previouslyShipped(opts: ApplyOptions, rel: string): boolean {
 	return opts.previousCommit !== undefined && git(opts.source, ["cat-file", "-e", `${opts.previousCommit}:${rel}`]).ok;
@@ -642,7 +709,7 @@ function planRelocations(opts: ApplyOptions, report: ApplyReport): Op[] {
 	return ops;
 }
 
-function planDeletions(opts: ApplyOptions, report: ApplyReport): Op[] {
+function planDeletions(opts: ApplyOptions, report: ApplyReport, todoRequired: boolean): Op[] {
 	if (opts.previousCommit === undefined) return [];
 	// -z: NUL-separated, unquoted paths (non-ASCII names are C-quoted otherwise).
 	const diff = git(opts.source, [
@@ -662,6 +729,8 @@ function planDeletions(opts: ApplyOptions, report: ApplyReport): Op[] {
 	}
 	const ops: Op[] = [];
 	for (const rel of diff.out.split("\0").filter(Boolean)) {
+		// The finite planner owns these leaves, including its app-managed errors and plugin prerequisite.
+		if (todoRequired && TODO_RETIREMENTS.includes(rel.slice("agent/".length))) continue;
 		if (!managedPlain(rel)) continue;
 		const target = targetOf(rel, opts.agentDir);
 		try {
@@ -768,11 +837,55 @@ function npmName(spec: string): string {
 	return at === -1 ? spec : spec.slice(0, at);
 }
 
-function syncPlugins(opts: ApplyOptions, report: ApplyReport): void {
+type TodoPluginReadiness =
+	| { readonly kind: "ready" }
+	| { readonly kind: "missing" }
+	| { readonly kind: "invalid"; readonly message: string };
+
+function isStringArray(value: unknown): value is string[] {
+	return Array.isArray(value) && value.every((entry: unknown) => typeof entry === "string");
+}
+
+/** Owner query, not dependency presence: no private imports, upgrades, enablement or Tern inspection. */
+function todoPluginReadiness(): TodoPluginReadiness {
+	const omp = Bun.which("omp");
+	if (omp === null) return { kind: "invalid", message: "Todo plugin readiness unavailable: omp is not on PATH" };
+	const result = spawnSync(omp, ["plugin", "list", "--json"], { encoding: "utf8" });
+	if (result.error || result.status !== 0)
+		return {
+			kind: "invalid",
+			message: `Todo plugin readiness query failed: ${(result.stderr || result.error?.message || result.stdout).trim()}`,
+		};
+	try {
+		const value: unknown = JSON.parse(result.stdout);
+		if (!isMapping(value) || !Array.isArray(value.npm)) return { kind: "invalid", message: "Todo plugin readiness: invalid npm catalog" };
+		const entries: unknown[] = value.npm;
+		let plugin: Mapping | undefined;
+		for (const entry of entries) {
+			if (!isMapping(entry) || entry.name !== TODO_PLUGIN_NAME) continue;
+			if (plugin !== undefined) return { kind: "invalid", message: "Todo plugin readiness: ambiguous npm entries" };
+			plugin = entry;
+		}
+		if (plugin === undefined) return { kind: "missing" };
+		if (plugin.enabled !== true) return { kind: "invalid", message: "Todo plugin is disabled or has invalid enablement; nothing switched" };
+		if (!isMapping(plugin.manifest) || !isStringArray(plugin.manifest.extensions) || !plugin.manifest.extensions.includes("./index.ts")) {
+			return { kind: "invalid", message: "Todo plugin does not declare ./index.ts; nothing switched" };
+		}
+		if (typeof plugin.path !== "string" || !isAbsolute(plugin.path) || !statSync(join(plugin.path, "index.ts")).isFile()) {
+			return { kind: "invalid", message: "Todo plugin entry is missing or invalid; nothing switched" };
+		}
+		return { kind: "ready" };
+	} catch (error) {
+		return { kind: "invalid", message: `Todo plugin readiness cannot be confirmed (${errorText(error)}); nothing switched` };
+	}
+}
+
+function syncPlugins(opts: ApplyOptions, report: ApplyReport, declared: readonly string[], todo: TodoPluginReadiness | undefined): void {
 	const installed = installedPluginSpecs();
-	const missing = declaredPlugins(opts.source).filter((spec) =>
-		spec.includes("://") ? !installed.values.has(spec.split("#", 1)[0]!) : !installed.names.has(npmName(spec)),
-	);
+	const missing = declared.filter((spec) => {
+		if (spec === TODO_PLUGIN_URL) return todo?.kind === "missing" && !installed.names.has(TODO_PLUGIN_NAME);
+		return spec.includes("://") ? !installed.values.has(spec.split("#", 1)[0]!) : !installed.names.has(npmName(spec));
+	});
 	if (missing.length === 0) return;
 	if (opts.check || !opts.plugins) {
 		report.pluginsMissing.push(...missing);
@@ -811,24 +924,72 @@ export async function applySnapshot(opts: ApplyOptions): Promise<ApplyReport> {
 		restartNeeded: false,
 	};
 	let ops: Op[];
+	let declared: string[];
+	let todoRequired: boolean;
 	try {
 		const sources = parseSources(opts, report);
+		declared = declaredPlugins(opts.source);
+		todoRequired = declared.includes(TODO_PLUGIN_URL);
 		const planned = [
 			...planRelocations(opts, report),
-			...planPlain(opts, report),
+			...planPlain(opts, report, todoRequired),
 			...planStructured(opts, report, sources),
-			...planDeletions(opts, report),
+			...planDeletions(opts, report, todoRequired),
+			...(todoRequired ? planTodoRetirements(opts, report) : []),
 		];
-		// Moves first, so writes land beside moved host files; deletions last, so a failure never leaves a module missing.
+		// Moves first, managed writes next, deletions last; Todo retirement requires all preceding operations to succeed.
 		const rank: Record<Op["kind"], number> = { move: 0, write: 1, delete: 2 };
 		ops = planned.toSorted((a, b) => rank[a.kind] - rank[b.kind]);
 	} catch (error) {
 		report.errors.push(errorText(error));
 		return report;
 	}
+	if (report.errors.length > 0 && !opts.check) return report;
+	const before = todoRequired ? todoPluginReadiness() : undefined;
+	if (before?.kind === "invalid") {
+		report.errors.push(before.message);
+		if (!opts.check) return report;
+	}
+	syncPlugins(opts, report, declared, before);
+	if (!opts.check && report.errors.length > 0) {
+		if (report.restartNeeded) report.notes.push("Cutover incomplete; do not restart OMP. Resolve errors and rerun apply.");
+		return report;
+	}
+	if (todoRequired) {
+		const ready = opts.check ? before : todoPluginReadiness();
+		switch (ready?.kind) {
+			case "ready":
+				report.notes.push("Todo plugin prerequisite confirmed by OMP owner catalog.");
+				break;
+			case "missing":
+				report.errors.push(
+					`Required plugin ${TODO_PLUGIN_NAME} is missing; no managed files switched${opts.check ? " (check never installs)" : ""}.`,
+				);
+				break;
+			case "invalid":
+				if (ready !== before) report.errors.push(ready.message);
+				break;
+			case undefined:
+				throw new Error("Todo readiness was not requested");
+			default: {
+				const unreachable: never = ready;
+				throw new Error(String(unreachable));
+			}
+		}
+		if (!opts.check && report.errors.length > 0) {
+			if (report.restartNeeded) report.notes.push("Cutover incomplete; do not restart OMP. Resolve errors and rerun apply.");
+			return report;
+		}
+	}
 	for (const op of ops) {
-		if (RESTART_SCOPED.test(op.rel) && op.rel !== `agent/${UPDATER_REL}`) report.restartNeeded = true;
+		if (!opts.check && todoRequired && op.kind === "delete" && report.errors.length > 0) break;
+		const retirement = todoRequired && op.kind === "delete" && TODO_RETIREMENTS.includes(op.rel.slice("agent/".length));
 		try {
+			if (!opts.check && retirement) {
+				const current = inspectTodoRetirement(opts.agentDir, op.rel.slice("agent/".length));
+				if (current.kind === "missing") continue;
+				if (current.kind === "blocked") throw new Error(current.message);
+			}
 			switch (op.kind) {
 				case "move":
 					if (!opts.check) {
@@ -851,12 +1012,15 @@ export async function applySnapshot(opts: ApplyOptions): Promise<ApplyReport> {
 					throw new Error(`unknown op ${JSON.stringify(unreachable)}`);
 				}
 			}
+			if (!opts.check && RESTART_SCOPED.test(op.rel) && op.rel !== `agent/${UPDATER_REL}`) report.restartNeeded = true;
 		} catch (error) {
 			report.errors.push(`${op.target}: ${errorText(error)}`);
+			if (retirement) break;
 		}
 	}
 	installLauncher(opts, report);
-	syncPlugins(opts, report);
+	if (report.errors.length > 0 && !opts.check && (todoRequired || report.restartNeeded))
+		report.notes.push("Cutover incomplete; do not restart OMP. Resolve errors and rerun apply.");
 	return report;
 }
 
@@ -962,7 +1126,7 @@ export async function runAuto(agentDir: string, branch: string): Promise<AutoRes
 		if (typeof fetched.applySnapshot !== "function")
 			return { kind: "failed", error: "fetched omp-config-update.ts exports no applySnapshot" };
 		const report = await fetched.applySnapshot({ source: CLONE_DIR, agentDir, previousCommit, check: false, plugins: true });
-		if (applied && previousCommit === undefined) report.notes.push(`previous commit ${applied} unavailable, no deletions`);
+		if (applied && previousCommit === undefined) report.notes.push(`previous commit ${applied} unavailable, no git-derived deletions`);
 		if (report.errors.length === 0) atomicWrite(markerPath, `${commit}\n`);
 		return { kind: "applied", commit, previous: applied || undefined, report };
 	} catch (error) {
@@ -986,7 +1150,7 @@ function formatReport(report: ApplyReport, check: boolean): string {
 	for (const note of report.notes) lines.push(`note: ${note}`);
 	for (const error of report.errors) lines.push(`error: ${error}`);
 	if (report.written.length + report.moved.length + report.deleted.length === 0) lines.push("no file changes");
-	if (report.restartNeeded) lines.push("restart OMP: APPEND_SYSTEM.md, extensions or plugins changed");
+	if (report.restartNeeded && report.errors.length === 0) lines.push("restart OMP: APPEND_SYSTEM.md, extensions or plugins changed");
 	return lines.join("\n");
 }
 

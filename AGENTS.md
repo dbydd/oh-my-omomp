@@ -134,11 +134,11 @@ flowchart LR
   non-map), machine entries of `config.yml` `extensions` (`MACHINE_LIST_FIELDS`:
   entries the repo's list does not have, kept ahead of the repo's entries and
   never synced back, e.g. `~/.claude`), app-managed files, unparsable host
-  structured files, or runtime state. It deletes only what git shows the repo
-  dropped between the applied commit and the new one (managed files,
-  structured keys, and `extensions` entries; a whole dropped structured file
-  leaves the live file alone); `/update-omp` deletes nothing beyond the
-  relocations below.
+  structured files, or runtime state. General deletions use git's applied-to-new
+  diff (managed files, structured keys and `extensions` entries; a whole dropped
+  structured file leaves the live file alone). Both modes also run relocations
+  and the finite Todo retirement after the independent plugin is ready.
+  `/update-omp` has no git-derived deletion baseline.
 - **Relocations from the flat layout run in both modes** (updater header,
   RELOCATIONS): a flat `extensions/<name>.ts` superseded by a shipped
   `<name>/index.ts` is deleted (two modules with one id would both load), and
@@ -152,6 +152,23 @@ flowchart LR
   Machines whose installed updater predates the move fetch from the old
   `agent/omp-config-update.ts` path, fail with "has no agent/omp-config-update.ts",
   and need one `/update-omp` to install the updater at its new path.
+- **Todo is an installed plugin, not local configuration source.** `install-plugins.sh`
+  declares `mouriya-s-lab/omp-todo-more`; normal plugin discovery supplies full/light
+  `todo` with native Todo still explicitly disabled. The updater preflights all
+  source/file operations, installs missing plugins before writes, then requests
+  OMP's npm catalog to confirm `omp-todo-more` is enabled, its manifest declares
+  `./index.ts`, and that entry exists. Missing/disallowed installation, failed
+  initialization, disabled/bad entry or retirement ownership conflicts stop
+  the cutover. Both modes unlink only these eight known leaves:
+  `extensions/todo-more/{index,tool,render,reminders,planning}.ts`,
+  `extensions/_shared/todo-more.ts`, `extensions/subagent-todo.ts` and
+  `extensions/subagent-todo/index.ts`. No directory, host neighbor, app-managed
+  file or link backing is removed; parent links/unexpected leaf objects reject.
+  Reverse sync excludes the same paths. During Todo cutover, any preceding
+  move/write error prevents all deletes. Partial IO failure is not completion:
+  report actual changes and forbid restart on every failed retry, even with no
+  new successful mutation; repair and rerun. Only error-free auto writes the
+  applied marker, while manual apply never does.
 - **Structured configs are compared field by field.** `config.yml`, the
   agent-root `thinking-translator.json`,
   `extensions-last/system-prompt-replace/system-prompt-replace.json`,
@@ -174,7 +191,7 @@ flowchart LR
 | Path | Purpose |
 | --- | --- |
 | `agent/` | Managed harness config. Only listed items are portable; the whole dir is **not**. |
-| `agent/extensions/` | Local TypeScript extensions (the code core), one directory per extension: `<name>/index.ts` is the entry, other `*.ts` there are its private modules, and the extension's own config files and templates sit beside them, read via `import.meta.dir`. `_shared/` holds the helpers used by two or more extensions (`errors`, `messages`, `config` (`loadJsonConfig`), `models` (`resolveModelChain`), `helper-session` (`runHelperPrompt`), `judge` (`openNativeJudge`), `spec-files` (`discoverSpecFiles`, `parseFrontmatter`), `task-log`, `todo-more` (`readTodoMore`)); it has no `index.ts`, so omp never loads it as an extension. 20 extensions: `omp-config-autoupdate/`, which, when switched on with `/omp-config-autoupdate on` (off by default), runs `omp-config-update.ts auto` as a child process once per process from the root session's `session_start` and reports the result; `bro/`, the built-in-AI rewrite of the former `pi-bro` plugin; `input-polish/`, which polishes the input-box draft on the configured chord (default Ctrl+Enter) and shows the result in an overlay over the input box, where Enter sends it and Esc discards it; `watchdog-agent/`; `user-prompt-inject/`, which renders the root session's user prompts into `PROMPT-INJECT-*.md` templates and prepends them, request-only, to every model call of the targeted subagents (mentor and discussants by default); `turn-judge/`, which, after every main-session turn the model ended itself (`stopReason: "stop"`), asks a judgment-API model (Jev) each `TURN-JUDGE-*.md` question about that turn (the human's prompts and the model's text only) and either types the option's prompt once its probability reaches the option's threshold or shows the verdict as one info notification per turn; `tool-policy-nag/`, which watches main-session shell commands and eval code, in three lanes configured side by side in `tool-policy-nag.json`: the `form` lane is the command parser, which counts hits and, past three, steers a generic nag (at most three per context) — the fallback when no valid config exists; the `intent` lane asks a judgment model one `choice` question per call (which built-in tool should have done this call's work) built from the `INTENT-*.md` spec beside it (`INTENT-policy.md` ships; each option carries the rubric the judge reads plus the intent title and required tool the reminder names), and reminds once per offending call when the picked option's probability reaches `threshold`, uncapped; the `risk` lane is deterministic and judge-free, flagging a shell call that is long, runs many programs and writes something, whose outcome cannot be read off the call. The two tool lanes share one delivery rule — with the `intent` lane on it owns delivery and the `form` lane only counts and logs — while the `risk` lane is independent of both. A lane set to `null` is off, the older single-detector config still reads, and a spec that does not parse leaves the intent lane silent; `append-system-model/`, which appends the `APPEND_SYSTEM_MODEL.md` blocks whose `model`/`provider` regexes match the session's model to the system prompt on every `before_agent_start`; `fork-task/`, which seeds native `task` children with a copy of the caller's conversation; `task-split-check/`, which blocks main-agent `task` items for `task:low`/`task:mid`/`task:free` that cover more than one topic, and any `task`/`fork_task` call that caps a `task:*` worker's report length; `todo-more/`, the replacement for native todo (`config.yml` sets `todo.enabled: false`), rebuilt from OMP's own code: the `todo` tool (`tool.ts`; list with a goal `{objective, measure, doneWhen}`, items `{title, explanation}`, an `explain` op), the TodoTracker reminders (`reminders.ts`: stop reminder via `session_stop` in main sessions and `agent_end` + wake in subagents — a main session also gets a deferred `agent_end` reminder for the settles the host routes past `session_stop` that nobody asked for — a provider error, a run that ended with tool calls outstanding, or an abort without the user-interrupt/silent-abort marker, never a stop the human asked for — at most one per stalled chain and only after the run produced a successful tool result or a new prompt started a cycle; mid-run nudge, eager prelude, goal-mode context), and its renderer (`render.ts`); state is the session branch (`mouriya.omp.todo-more` snapshots joined with host `user_todo_edit` writes by `_shared/todo-more.ts`), projected into the host TodoTracker so the HUD and `/todo` keep working; it also puts `todo` back on every `task:*` worker that OMP strips it from; `task-completion-judge/`, which bounces a `task:low`/`task:mid`/`task:free` worker's first final `yield` once when a model judges the slice unfinished (judging against the assignment and the worker's todo goal), and once more when it is finished but the worker's todo list still has open items; `ctx-tool/` (the `ctx` tool plus the post-compact `ctx` injection) and `ctx-tasklog/`; and `wt-tool/`, which gives the main agent of the interactive TUI two queued session-move tools: `wt` runs the human-only `/wt` through the TUI's own slash-command dispatcher on the live InteractiveMode once the turn has ended and the session is idle (when the session is already in a linked worktree, it first returns that worktree's details and a `confirm` value and creates only on a second call with it), and `wt_remove` first checks (read-only report plus a state-bound `confirm` value) and, when called again with that value, runs the human `/move` to the main checkout and force-removes the linked worktree it left, keeping the branch. Config beside its extension: `input-polish/input-polish.json`, `lang-nag/lang-nag.json`, `tool-policy-nag/tool-policy-nag.json` and `tool-policy-nag/INTENT-policy.md` are synced both ways; `doc-polish/doc-polish.json` is a machine-local example (see Important Files). |
+| `agent/extensions/` | Local TypeScript extensions (the code core), one directory per extension: `<name>/index.ts` is the entry, other `*.ts` there are its private modules, and the extension's own config files and templates sit beside them, read via `import.meta.dir`. `_shared/` holds the helpers used by two or more extensions (`errors`, `messages`, `config` (`loadJsonConfig`), `models` (`resolveModelChain`), `helper-session` (`runHelperPrompt`), `judge` (`openNativeJudge`), `spec-files` (`discoverSpecFiles`, `parseFrontmatter`), `task-log`); it has no `index.ts`, so omp never loads it as an extension. Extensions include `omp-config-autoupdate/`, which, when switched on with `/omp-config-autoupdate on` (off by default), runs `omp-config-update.ts auto` as a child process once per process from the root session's `session_start` and reports the result; `bro/`, the built-in-AI rewrite of the former `pi-bro` plugin; `input-polish/`, which polishes the input-box draft on the configured chord (default Ctrl+Enter) and shows the result in an overlay over the input box, where Enter sends it and Esc discards it; `watchdog-agent/`; `user-prompt-inject/`, which renders the root session's user prompts into `PROMPT-INJECT-*.md` templates and prepends them, request-only, to every model call of the targeted subagents (mentor and discussants by default); `turn-judge/`, which, after every main-session turn the model ended itself (`stopReason: "stop"`), asks a judgment-API model (Jev) each `TURN-JUDGE-*.md` question about that turn (the human's prompts and the model's text only) and either types the option's prompt once its probability reaches the option's threshold or shows the verdict as one info notification per turn; `tool-policy-nag/`, which watches main-session shell commands and eval code, in three lanes configured side by side in `tool-policy-nag.json`: the `form` lane is the command parser, which counts hits and, past three, steers a generic nag (at most three per context) — the fallback when no valid config exists; the `intent` lane asks a judgment model one `choice` question per call (which built-in tool should have done this call's work) built from the `INTENT-*.md` spec beside it (`INTENT-policy.md` ships; each option carries the rubric the judge reads plus the intent title and required tool the reminder names), and reminds once per offending call when the picked option's probability reaches `threshold`, uncapped; the `risk` lane is deterministic and judge-free, flagging a shell call that is long, runs many programs and writes something, whose outcome cannot be read off the call. The two tool lanes share one delivery rule — with the `intent` lane on it owns delivery and the `form` lane only counts and logs — while the `risk` lane is independent of both. A lane set to `null` is off, the older single-detector config still reads, and a spec that does not parse leaves the intent lane silent; `append-system-model/`, which appends the `APPEND_SYSTEM_MODEL.md` blocks whose `model`/`provider` regexes match the session's model to the system prompt on every `before_agent_start`; `fork-task/`, which seeds native `task` children with a copy of the caller's conversation; `task-split-check/`, which blocks main-agent `task` items for `task:low`/`task:mid`/`task:free` that cover more than one topic, and any `task`/`fork_task` call that caps a `task:*` worker's report length; `task-completion-judge/`, which consumes the independent Todo plugin's synchronous read projection and bounces a `task:low`/`task:mid`/`task:free` worker's first final `yield` once when a model judges the slice unfinished, and once more when it is finished but its freshly read list still has open items; `ctx-tool/` (the `ctx` tool plus the post-compact `ctx` injection) and `ctx-tasklog/`, sharing their own historical goal model rather than a Todo reader; and `wt-tool/`, which gives the main agent of the interactive TUI two queued session-move tools: `wt` runs the human-only `/wt` through the TUI's own slash-command dispatcher on the live InteractiveMode once the turn has ended and the session is idle (when the session is already in a linked worktree, it first returns that worktree's details and a `confirm` value and creates only on a second call with it), and `wt_remove` first checks (read-only report plus a state-bound `confirm` value) and, when called again with that value, runs the human `/move` to the main checkout and force-removes the linked worktree it left, keeping the branch. Config beside its extension: `input-polish/input-polish.json`, `lang-nag/lang-nag.json`, `tool-policy-nag/tool-policy-nag.json` and `tool-policy-nag/INTENT-policy.md` are synced both ways; `doc-polish/doc-polish.json` is a machine-local example (see Important Files). |
 | `agent/extensions-last/` | Extensions that must run after every other path-loaded extension, loaded by path as the last `config.yml` `extensions` entry (`~/.omp/agent/extensions-last/system-prompt-replace/index.ts`); `README.md` there documents load order and is repo-only. Holds `system-prompt-replace/`, which applies the rules in its `system-prompt-replace.json` (`literal` or `regex` + `replace`) to the system prompt on every `before_agent_start`, main session and subagents; it rewrites built-in tool descriptions that conflict with `APPEND_SYSTEM.md`. The rules file is a structured item synced both ways (field-level diff and edit; validate with `JSON.parse`), read per prompt, so edits apply without restart; a rule whose target is absent from the main session's system prompt raises a visible warning (UI notification, or stderr when headless) once per rule per process. Excluded in light mode by `config-light.yml`'s empty `extensions` override; `omp-light` passes every other `config.yml` `extensions` entry back with `-e`. |
 | `agent/agents/` | Custom subagent definitions (`*.md`) + `README.txt` authoring pitfalls. |
 | `agent/thinking-translator.json` | Agent-root translator config for `omp-thinking-translator` (the plugin fixes its path). Portable regular item: `/sync-omp-config` carries machine → repo, the updater carries repo → machine. |
@@ -267,9 +284,10 @@ exercised in a real omp session.
   - `*-<label>.md` spec files: `discoverSpecFiles` (extension directory, then
     cwd up to the git root and each `.omp/`), `parseFrontmatter`, `unquote`.
   - Message text: `textOf`, `lastAssistantText`; errors: `errorText`.
-  - Todo list on a session branch: `readTodoMore` plus `hostPhases`,
-    `actionableItems`, `unexplainedItems`, `goalLines`, `explanationText`
-    (`todo-more.ts`; `todo-more` writes the `mouriya.omp.todo-more` entries it reads).
+  - Task-log goal: `TaskLogGoal`, `taskLogGoalSchema`, `taskLogGoalLines`
+    (`task-log.ts`), a historical event model shared by logger and ctx. The
+    independent Todo plugin's current reader/types are never imported here;
+    completion review parses its synchronous `omp-todo-more:read` wire response.
 - **Code copied from OMP** is wrapped in `// @upstream <verbatim|adapted>
   <package>@<version> <src path>#<symbol>` … `// @upstream-end` (`verbatim` =
   character-for-character upstream; `adapted` = changed; `#*` = a whole prompt
@@ -327,9 +345,9 @@ exercised in a real omp session.
   state goes through session custom entries (e.g. `tool-policy-nag`'s form lane persists
   `mouriya.omp.tool-policy-nag.state` and rebuilds it on restore) or, for
   `ctx-tasklog`, append-only files under the local root
-  (`task-log/<agent-id>.md`, format in `_shared/task-log.ts`). `todo-more` keeps the
-  whole todo list as full-snapshot `mouriya.omp.todo-more` entries, appended at once
-  because a batch's earlier tool results are not on the branch yet.
+  (`task-log/<agent-id>.md`, format in `_shared/task-log.ts`). The independently
+  installed `omp-todo-more` owns rich branch snapshots; task log records only
+  successful tool events and is not the current Todo projection.
 
 ### Subagent definitions (`agent/agents/*.md`)
 
@@ -361,22 +379,24 @@ exercised in a real omp session.
   `task.disabledAgents`, `compaction.methodOrder` (`compaction.thresholdTokens` is machine-local),
   feature toggles (`astGrep.enabled: true`, `github.enabled: true`,
   `fetch.enabled: true`, `browser.enabled: false`, `todo.enabled: false` — native
-  todo is off; `todo-more` provides `todo`).
+  todo is off; the installed `omp-todo-more` plugin provides `todo`).
 - `agent/APPEND_SYSTEM.md` — global system-prompt appendix (user-instruction precedence, the final-reply
   contract, orchestration stance, no-token-saving rule, design-document read-in-full rule, spawn briefing,
   agent chat and lifecycle, agent tiers, shared-checkout vs `isolated: true` rules, tool policy). Task children
   never receive it, so rules they need are repeated in the `task:*` definitions. Rules about
   how to use one tool (`todo` timing and revision, explicit `agent`, per-spawn `effort`,
   `task` vs `fork_task`) live in that tool's description instead — built-in ones rewritten by
-  `system-prompt-replace.json`, `todo`'s written directly in `todo-more/tool.ts` (native todo
-  is off, so no rule targets it), `fork_task`'s in `fork-task/index.ts` — so subagents see them too;
+  `system-prompt-replace.json`, `todo`'s written directly in the independent
+  plugin's `src/tool.ts` (native todo is off), `fork_task`'s in `fork-task/index.ts` — so subagents see them too;
   this relies on `config.yml` `inlineToolDescriptors: "on"`, which renders every tool
   description into the system prompt.
 - `agent/config-light.yml` — declarative light-mode config overlay: disables thirteen
   optional behavior extensions (including `task-completion-judge`, `turn-judge` and
-  `user-prompt-inject`); the other seven (`append-system-model`, `bro`, `input-polish`, `repo-rules`,
-  `todo-more`, `omp-config-autoupdate`, and the `commandcode-model-spec` compatibility fix) stay loaded,
-  as listed in `README.md`, so `omp-light` also auto-updates when the switch is on.
+  `user-prompt-inject`); unfiltered local extensions (`append-system-model`,
+  `bro`, `input-polish`, `repo-rules`, `omp-config-autoupdate`, and the
+  `commandcode-model-spec` compatibility fix) stay loaded. The independent Todo
+  plugin stays loaded through ordinary plugin discovery; no launcher or `-e`
+  change is needed. `omp-light` also auto-updates when the switch is on.
   It overrides `extensions` to `[]` to drop `system-prompt-replace`:
   `disabledExtensions` filters discovered `extension-module:<name>` entries, so it
   cannot drop an extension listed as a file path (in `extensions` or `-e`); modules
@@ -408,8 +428,10 @@ exercised in a real omp session.
   commit is applied by its own rules; keep `applySnapshot(options)`
   backward-compatible. It parses the child's JSON result with a schema
   (`moved` included). The marker `<agent dir>/.omp-config-applied` is written
-  only after an error-free apply. Plugin URLs are matched with `#ref` stripped,
-  so a host install pinned to a branch counts as installed. Never put the Otty
+  only after an error-free apply. Plugin URLs are normally matched with `#ref`
+  stripped; Todo readiness is additionally confirmed by OMP catalog identity
+  and actual entry, so a different installed URL/ref spelling does not trigger
+  an upgrade. Never put the Otty
   marker literal in the updater: the marker check matches anywhere in a file
   and the updater is itself a managed file.
 - `agent/thinking-translator.json` — agent-root config read by
@@ -464,8 +486,10 @@ exercised in a real omp session.
   on macOS, Linux, and Windows under Bun, and loads `@homebridge/node-pty-prebuilt-multiarch`
   only under Node.js; its `fork-features/README.md` records the customizations and sync policy),
   `Mouriya-Emma/omp-thinking-translator`
-  (its runtime config is the portable agent-root `thinking-translator.json` above), and
-  `mouriya-s-lab/omp-codex-image-gen`. All unpinned: `omp install` resolves npm versions,
+  (its runtime config is the portable agent-root `thinking-translator.json` above),
+  `mouriya-s-lab/omp-codex-image-gen`, and `mouriya-s-lab/omp-todo-more`
+  (independent rich Todo, reminders/planning, read projection and native editing,
+  with awaited Tern owner asset initialization). All unpinned: `omp install` resolves npm versions,
   and GitHub URLs track the default branch (re-run the same `omp install <url>` to update). An existing
   npm `pi-bansos` install must be removed with `omp plugin uninstall pi-bansos` before installing the fork URL,
   and an existing `pi-unified-exec` with `omp plugin uninstall pi-unified-exec` (both register the same tools).
@@ -498,8 +522,9 @@ The copy set overwrites whole files: the target's machine-local `config.yml`
 fields (e.g. `compaction.thresholdTokens`) and its machine `extensions` entries
 (e.g. `~/.claude`) are replaced, the example `extensions/doc-polish/doc-polish.json`
 overwrites a live copy there, and the repo-only `extensions-last/README.md` comes along;
-it does not relocate files a machine still keeps in the flat layout. On a
-machine with existing config use `/update-omp` or restore those afterwards.
+it does not relocate flat-layout files or retire old local Todo modules. On a
+machine with existing config use `/update-omp`; direct copy plus plugin install
+can otherwise leave both Todo implementations loaded.
 The installed `omp-light` / `omp-light.cmd` entries are generated outputs, not
 copy-set files. Copying the three light assets alone does not make `omp-light`
 resolvable: run `/update-omp` on the target, or `/omp-config-autoupdate on` and
