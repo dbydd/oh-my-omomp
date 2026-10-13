@@ -74,6 +74,8 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 
 **单独补偿语言设置丢失。** Claude 的 server compact 之后，重新注入的 system prompt 可能没有恢复语言约束。[lang-nag](#lang-nag) 因此独立检查回复语言，并在下一次输入前补充提醒；它不改写已经发出的回复。
 
+**把最终回复当作唯一的交付物。** 用户看不到思考、读过的文件、工具结果和 subagent 的汇报，只看到最后一条回复，所以回复的正文要用有主语的完整句子，第一次出现的对象先说明它是什么，每条结论旁边写出支撑它的观察，内容只要有结构就画图、不要打比方。完整规则见 `agent/APPEND_SYSTEM.md` 的 `# The user sees only the final reply`。
+
 ### Context 管理
 
 **把 context 视为意图状态。** context 不只是文件内容，还包含需求、取舍、已确认的事实，以及与人类对齐过的意图。compact 会压缩这些信息，所以长程任务中的每次 compact 都是高损耗操作，应尽量避免。
@@ -277,7 +279,7 @@ subagent 分三类：`task:*` 执行，`discuss:*` 只读讨论，`mentor:defaul
 
 |要改的|位置|
 |---|---|
-|编排流程、各类 agent 如何配合|`agent/APPEND_SYSTEM.md`|
+|编排流程、各类 agent 如何配合、最终回复怎么写|`agent/APPEND_SYSTEM.md`|
 |某个 agent 的职责（`description`）和它自己的角色提示（正文）|`agent/agents/<name>.md`|
 |注入给某些 agent 的用户原话模板|`agent/extensions/user-prompt-inject/PROMPT-INJECT-*.md`，见 [user-prompt-inject](#user-prompt-inject)|
 |模型、推理强度、运行开关、禁用入口|`agent/config.yml`|
@@ -731,7 +733,7 @@ model: "(gpt-5|o3)"
     - 拒绝用它调查文件：读内容（`cat`、`head`、`tail`、`sed -n`、`less`）、列目录或找文件（`ls`、`find`、`fd`、`tree`）、搜文本（`grep`、`rg`、`ag`、`awk`），不管单独跑、放进管道还是包在 `python -c` / `node -e` / `bun -e` 里，都归 `read`、`glob`、`grep`；随手看一眼、批量处理、少调几次工具都不算例外。它只留给真正的二进制程序和简短的事实型管道：构建、测试、git、外部 CLI、计数、校验和。
     - 交互式操作用 `tty: true` 启动、用 `write_stdin` 驱动：`ssh` 会话，密码、口令和 host-key 提示，REPL 和数据库 shell，TUI，以及通过真实 TUI 测试 harness 或 CLI；管道、heredoc、`yes |` 都不能代替终端。不要过早轮询 TTY：启动程序或发送输入后，把 `yield_time_ms` 设到能覆盖预期响应的长度（shell 提示符或 `ssh` 登录几秒，harness 里一轮模型回复 20–30 秒），等这个窗口过了还没出现预期的提示或输出，才发空轮询；程序还在干活时连着轮询，只会拿到画了一半的屏幕，白白浪费轮次。
   - `xd://` 设备的调用说明 “Write JSON args as `content` to `xd://<tool>` via `<写工具>`.” 之后追加：设备不是函数，不存在 `xd__<tool>`、`xd_<tool>` 或裸 `<tool>` 函数，不要调用；唯一的调用方式是用这个写工具、`path` 设为 `xd://<tool>`。
-- 关于某个工具怎么用的规则，优先改写该工具的说明，而不是写进 `APPEND_SYSTEM.md`：subagent 收不到附录，但能看到工具说明，规则只写一处就覆盖所有会话。附录只保留编排逻辑，并要求遵守 `todo` 工具的规则。
+- 关于某个工具怎么用的规则，优先改写该工具的说明，而不是写进 `APPEND_SYSTEM.md`：subagent 收不到附录，但能看到工具说明，规则只写一处就覆盖所有会话。附录只保留编排逻辑和最终回复的写法，并要求遵守 `todo` 工具的规则。
 - 改写工具说明依赖 `config.yml` 的 `inlineToolDescriptors: "on"`：打开时完整工具说明都写进 system prompt。默认的 `auto` 只对 Gemini 这样做，`off` 一律不做；不写进 system prompt、又走原生 tool calling 时，system prompt 只列工具名，说明随 `tools[]` 发送，这类规则就失效了。
 - 内置 prompt 的规则句常省略主语，以覆盖所有场景；改写时保持这种写法，只补意思，不加明确主语。
 

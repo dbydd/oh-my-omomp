@@ -362,9 +362,9 @@ exercised in a real omp session.
   feature toggles (`astGrep.enabled: true`, `github.enabled: true`,
   `fetch.enabled: true`, `browser.enabled: false`, `todo.enabled: false` — native
   todo is off; `todo-more` provides `todo`).
-- `agent/APPEND_SYSTEM.md` — global system-prompt appendix (user-instruction precedence, orchestration stance,
-  no-token-saving rule, design-document read-in-full rule, spawn briefing, agent chat and lifecycle,
-  agent tiers, shared-checkout vs `isolated: true` rules, tool policy). Task children
+- `agent/APPEND_SYSTEM.md` — global system-prompt appendix (user-instruction precedence, the final-reply
+  contract, orchestration stance, no-token-saving rule, design-document read-in-full rule, spawn briefing,
+  agent chat and lifecycle, agent tiers, shared-checkout vs `isolated: true` rules, tool policy). Task children
   never receive it, so rules they need are repeated in the `task:*` definitions. Rules about
   how to use one tool (`todo` timing and revision, explicit `agent`, per-spawn `effort`,
   `task` vs `fork_task`) live in that tool's description instead — built-in ones rewritten by
