@@ -411,8 +411,8 @@ omp 从 `~/.omp/agent/extensions/` 往下只找一层：直接放的 `*.ts`、`<
 
 - **检查的调用**（两种方式相同）：`bash` / `bash_bg` 的命令；`exec_command` 的命令；经 `write` 写到 `xd://bash`、`xd://bash_bg`、`xd://exec_command` 的命令；`eval` 的 Python / JS 代码。
 - **配置** `tool-policy-nag.json`：
-  - `{"detector": "heuristic"}`：启发式检测，仓库里的值。
-  - `{"detector": "jev", "judge": "commandcode/typesafe/jev", "threshold": 0.5}`：Jev 检测。`judge` 是 judgment API 模型的 `provider/model`，`threshold` 取 (0, 1]，两项必填。
+  - `{"detector": "heuristic"}`：启发式检测。
+  - `{"detector": "jev", "judge": "commandcode/typesafe/jev", "threshold": 0.5}`：Jev 检测，仓库里的值。`judge` 是 judgment API 模型的 `provider/model`，`threshold` 取 (0, 1]，两项必填。
   - 依次尝试 cwd 下和扩展目录下的文件，第一个存在且有效的生效；缺失或无效时试下一个，两个都不行就用启发式检测。无效的文件每个进程警告一次。每次检查调用时重读，改文件从下一次 shell / eval 调用生效，不用重启。
 
 **启发式检测：**
