@@ -712,7 +712,6 @@ model: "(gpt-5|o3)"
 - 规则按文件顺序依次作用于每个 system prompt 块，后一条看到的是前一条替换后的结果。
 - 仓库里的规则（改的都是 OMP 内置 prompt 或插件工具说明里的句子）：
   - `task` 工具那句换成 “Always set \`agent\` explicitly; never rely on the default.”，和 `APPEND_SYSTEM.md` 要求写明 agent 一致。默认 agent 名用正则匹配，所以 `spawns` 不同、默认 agent 不同的 subagent 也能命中。
-  - `todo` 的 “Before work, init for 3+ steps, …” 换成：动手前就 `init`，任何多步工作都要；改动按 context 记录、经 `ctx` 读回；列表跟随当前范围而不是最初的计划，工作一变（新的或修改的指令、计划变化、发现要增删步骤）就立即 `append`、`rm`/`drop` 或重新 `init`。`todo` 的说明现在由 [todo-more](#todo-more) 提供，它原样保留了这句原生文字，所以这条规则照常命中。
   - Engineering 的 “NEVER rerun checks to confirm them.” 换成 “NEVER rerun checks to doubt them. Reproducing to locate the cause and confirming the fix still apply.”：用户报的问题不用复跑去怀疑，但为定位原因复现、修完确认仍要做，和 Workflow 的 “reproduce before; confirm after” 不再冲突。
   - “Compiled code: NEVER avoidable allocation, …” 补上谓语 `add`。
   - `eval` 工具说明末尾 “On error, retry only the failed step; …” 之后追加一段：拒绝用 `eval` 调查文件。读内容（`open`、`Path.read_text`、`Bun.file`、`readFileSync`、prelude 的 `read()`）、列目录或找文件（`os.listdir`、`os.walk`、`glob.glob`、`readdirSync`）、搜文本（对文件内容跑正则、`subprocess` 调 `cat`/`ls`/`find`/`grep`/`rg`）都归 `read`、`glob`、`grep`；随手看一眼、批量处理多个文件、少调几次工具都不算例外。`eval` 只用于对已拿到的数据做计算、转换、结构化解析和库调用。`APPEND_SYSTEM.md` 的 Tool Call 一节有同类规则，但 subagent 收不到附录，工具说明里这段对所有带 `eval` 的会话生效。
@@ -790,7 +789,7 @@ model: "(gpt-5|o3)"
 - **goal**：`{objective, measure, doneWhen}`，即这件事是什么、用什么方法衡量结果、要做到什么程度才算完成。`init` 必须带；列表还没有 goal 时（例如人用 `/todo` 建的列表），任何修改操作都必须带；其他修改操作可以带一个新的 goal 替换旧的；`view` 不能带。列表清空（没有任何项）时 goal 一起清掉。
 - **标题和解释**：每一项是 `{title, explanation}`，两项都不能为空。`title` 是之后 `start`、`done` 等操作用 `task` 指名的名字；`explanation` 说明这一项包括什么、怎样算做完。新增的操作 `explain {task, explanation}` 给一项补上或改写解释。
 
-其余参数和原生一致：九个原生操作，以及 `list`、`items`、`task`、`phase`、`reason`；省略 `op` 时按原生规则推断；一次调用里只要有错误，整次作废。工具说明在原生说明的基础上补了这两样，其余句子保持原文，[system-prompt-replace](#system-prompt-replace) 的 todo 规则照常命中。
+其余参数和原生一致：九个原生操作，以及 `list`、`items`、`task`、`phase`、`reason`；省略 `op` 时按原生规则推断；一次调用里只要有错误，整次作废。工具说明在原生说明的基础上补了这两样，并把原生的 “Before work, init for 3+ steps, …” 直接改写为：动手前就 `init`，任何多步工作都要；改动按 context 记录、经 `ctx` 读回；列表跟随当前范围而不是最初的计划，工作一变（新的或修改的指令、计划变化、发现要增删步骤）就立即 `append`、`rm`/`drop` 或重新 `init`。其余句子保持原文。
 
 **状态**：权威是当前会话分支，读取规则在 `_shared/todo-more.ts` 的 `readTodoMore`，不做缓存。
 

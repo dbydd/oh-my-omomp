@@ -366,9 +366,9 @@ exercised in a real omp session.
   agent tiers, shared-checkout vs `isolated: true` rules, tool policy). Task children
   never receive it, so rules they need are repeated in the `task:*` definitions. Rules about
   how to use one tool (`todo` timing and revision, explicit `agent`, per-spawn `effort`,
-  `task` vs `fork_task`) live in that tool's description instead — built-in ones and `todo`'s
-  (written by `todo-more`, keeping the native sentences) rewritten by
-  `system-prompt-replace.json`, `fork_task`'s in `fork-task/index.ts` — so subagents see them too;
+  `task` vs `fork_task`) live in that tool's description instead — built-in ones rewritten by
+  `system-prompt-replace.json`, `todo`'s written directly in `todo-more/tool.ts` (native todo
+  is off, so no rule targets it), `fork_task`'s in `fork-task/index.ts` — so subagents see them too;
   this relies on `config.yml` `inlineToolDescriptors: "on"`, which renders every tool
   description into the system prompt.
 - `agent/config-light.yml` — declarative light-mode config overlay: disables thirteen
