@@ -15,6 +15,12 @@
  *   explanation and the items that still lack one. Native also skips stop
  *   reminders in print mode (`omp -p`) through a private session flag no hook
  *   can read; these fire there too.
+ *   A settle the host routes past both its own reminder and `session_stop` — an
+ *   aborted run, a provider error, or a run that ended with tool calls still
+ *   outstanding (`agent-session.ts`, settle routing) — is nudged from
+ *   `agent_end` instead, deferred by a grace window: the reminder is sent only
+ *   when no turn, no queued message and no editor draft appeared meanwhile, so
+ *   a human who interrupted to take over keeps the stop.
  * - Mid-run nudge (`takeMidRunNudge`): after 12 successful
  *   bash/eval/edit/write/ast_edit results without a todo call, at most twice
  *   per cycle, a hidden aside at the step boundary.
@@ -70,6 +76,13 @@ const EAGER_PRELUDE_TYPE = `${TODO_MORE_ENTRY_TYPE}.eager-prelude`;
 /** Native goal mode's per-prompt context message (`agent-session.ts#buildGoalModeMessage`). */
 const GOAL_MODE_CONTEXT_TYPE = "goal-mode-context";
 const TODO_TOOL = "todo";
+/**
+ * Grace before a cut-off settle is nudged. Long enough for a human who
+ * interrupted to say something — a submitted message starts a turn, a draft
+ * shows in the editor — and short enough that a session that stalled on its own
+ * resumes while the human is still looking at it.
+ */
+const CUT_OFF_GRACE_MS = 10_000;
 
 // @upstream verbatim @oh-my-pi/pi-coding-agent@18.10.1 src/session/todo-tracker.ts#MID_RUN_NUDGE_MUTATION_THRESHOLD
 const MID_RUN_NUDGE_MUTATION_THRESHOLD = 12;
@@ -402,6 +415,22 @@ function terminalAnswer(message: AgentMessage | undefined): AssistantMessage | u
 	return assistantText(message) === "" ? undefined : message;
 }
 
+/** Stop reasons where the run was cut off rather than ended on a text answer (see `cutOffAnswer`). */
+const CUT_OFF_STOP_REASONS: Record<string, true> = { aborted: true, error: true, toolUse: true };
+
+/**
+ * The settled turn the host routes past its own reminder and past `session_stop`
+ * (`agent-session.ts`, settle routing): an aborted run, a provider error, or a run
+ * that ended with tool calls still outstanding. The model never produced the text
+ * answer `terminalAnswer` describes, yet the session is now idle with the list
+ * still open — exactly the stop the reminder exists to catch. A capped empty stop
+ * stays out: the host's own recovery declared that turn terminal.
+ */
+function cutOffAnswer(message: AgentMessage | undefined): AssistantMessage | undefined {
+	if (message?.role !== "assistant") return undefined;
+	return CUT_OFF_STOP_REASONS[message.stopReason] === true ? message : undefined;
+}
+
 /** Subagent budget: this module's reminders on the branch since the latest real user message. */
 function remindersSinceUserMessage(branch: readonly SessionEntry[]): number {
 	let count = 0;
@@ -665,28 +694,94 @@ export function registerReminders(pi: ExtensionAPI): void {
 		}
 	});
 
-	pi.on("agent_end", (event, ctx) => {
-		try {
-			if (ctx.agent.kind !== "sub" || event.willContinue === true) return;
-			const session = ownSession(ctx);
-			const message = terminalAnswer(event.messages.at(-1));
-			if (session === undefined || message === undefined) return;
-			const branch = ctx.sessionManager.getBranch();
-			const completion = checkCompletion(session, cycle, remindersSinceUserMessage(branch), message, readTodoMore(branch));
-			switch (completion.kind) {
-				case "silent":
-					return;
-				case "reset":
-					cycle.awaitingProgress = false;
-					return;
-				case "remind":
-					pending = { kind: "sub", text: completion.text };
-					cycle.mutationsSinceLastTouch = 0;
+	/**
+	 * A deferred reminder for a cut-off settle: armed at `agent_end`, cancelled the
+	 * moment a turn takes over (a scheduled continuation, the human's own reply).
+	 * The grace window is the only reason it is not sent from the settle itself.
+	 */
+	let cutOff: { readonly ctx: ExtensionContext; readonly timer: Timer } | undefined;
+	const cancelCutOff = (): void => {
+		if (cutOff === undefined) return;
+		cutOff.ctx.clearTimer(cutOff.timer);
+		cutOff = undefined;
+	};
+	const armCutOff = (ctx: ExtensionContext, session: AgentSession, message: AssistantMessage): void => {
+		cancelCutOff();
+		cutOff = {
+			ctx,
+			timer: ctx.setTimeout(() => {
+				cutOff = undefined;
+				try {
+					if (ownSession(ctx) !== session) return;
+					// The human owns the stop once a turn runs, a message waits, or a draft is being typed.
+					if (!ctx.isIdle() || ctx.hasPendingMessages()) return;
+					if (ctx.hasUI && ctx.ui.getEditorText().trim() !== "") return;
+					const completion = checkCompletion(session, cycle, cycle.reminderCount, message, readTodoMore(ctx.sessionManager.getBranch()));
+					if (completion.kind !== "remind") return;
+					pending = { kind: "main", text: completion.text, details: completion.details, countBefore: cycle.reminderCount };
+					cycle.reminderCount = completion.attempt;
 					cycle.awaitingProgress = true;
+					cycle.mutationsSinceLastTouch = 0;
 					pi.sendMessage<ReminderDetails>(
 						{ customType: REMINDER_TYPE, content: completion.text, display: true, details: completion.details, attribution: "agent" },
 						{ deliverAs: "nextTurn", triggerTurn: true },
 					);
+				} catch (error) {
+					pi.logger.warn("todo-more cut-off reminder failed", { error: errorText(error) });
+				}
+			}, CUT_OFF_GRACE_MS),
+		};
+	};
+	pi.on("agent_start", () => cancelCutOff());
+	pi.on("session_shutdown", () => cancelCutOff());
+
+	pi.on("agent_end", (event, ctx) => {
+		try {
+			if (event.willContinue === true) return;
+			const session = ownSession(ctx);
+			if (session === undefined) return;
+			const last = event.messages.at(-1);
+			if (ctx.agent.kind === "sub") {
+				const message = terminalAnswer(last);
+				if (message === undefined) return;
+				const branch = ctx.sessionManager.getBranch();
+				const completion = checkCompletion(session, cycle, remindersSinceUserMessage(branch), message, readTodoMore(branch));
+				switch (completion.kind) {
+					case "silent":
+						return;
+					case "reset":
+						cycle.awaitingProgress = false;
+						return;
+					case "remind":
+						pending = { kind: "sub", text: completion.text };
+						cycle.mutationsSinceLastTouch = 0;
+						cycle.awaitingProgress = true;
+						pi.sendMessage<ReminderDetails>(
+							{ customType: REMINDER_TYPE, content: completion.text, display: true, details: completion.details, attribution: "agent" },
+							{ deliverAs: "nextTurn", triggerTurn: true },
+						);
+						return;
+					default: {
+						const unreachable: never = completion;
+						throw new Error(`Unexpected completion: ${String(unreachable)}`);
+					}
+				}
+			}
+			// Main session cut off mid-work: no `session_stop` reaches this settle, so a
+			// deferred reminder is all that stands between the open list and an idle
+			// session — the stop the reminder exists to catch.
+			const cutOff = cutOffAnswer(last);
+			if (cutOff === undefined) return;
+			const completion = checkCompletion(session, cycle, cycle.reminderCount, cutOff, readTodoMore(ctx.sessionManager.getBranch()));
+			switch (completion.kind) {
+				case "silent":
+					return;
+				case "reset":
+					cycle.reminderCount = 0;
+					cycle.awaitingProgress = false;
+					return;
+				case "remind":
+					armCutOff(ctx, session, cutOff);
 					return;
 				default: {
 					const unreachable: never = completion;
@@ -694,7 +789,7 @@ export function registerReminders(pi: ExtensionAPI): void {
 				}
 			}
 		} catch (error) {
-			pi.logger.warn("todo-more subagent stop reminder failed", { error: errorText(error) });
+			pi.logger.warn("todo-more stop reminder failed", { error: errorText(error) });
 		}
 	});
 

@@ -240,7 +240,8 @@ function managedPlain(rel: string): boolean {
 		/^agent\/agents\/.+$/.test(rel) ||
 		/^agent\/(extensions|extensions-last)\/[^/]+\/[^/]+\.ts$/.test(rel) ||
 		/^agent\/extensions\/user-prompt-inject\/PROMPT-INJECT-[^/]+\.md$/.test(rel) ||
-		/^agent\/extensions\/turn-judge\/TURN-JUDGE-[^/]+\.md$/.test(rel)
+		/^agent\/extensions\/turn-judge\/TURN-JUDGE-[^/]+\.md$/.test(rel) ||
+		/^agent\/extensions\/tool-policy-nag\/INTENT-[^/]+\.md$/.test(rel)
 	);
 }
 

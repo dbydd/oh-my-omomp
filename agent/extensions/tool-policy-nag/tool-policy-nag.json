@@ -1,5 +1,9 @@
 {
-  "detector": "jev",
-  "judge": "commandcode/typesafe/jev",
-  "threshold": 0.5
+  "form": {
+    "detector": "heuristic"
+  },
+  "intent": {
+    "judge": "commandcode/typesafe/jev",
+    "threshold": 0.5
+  }
 }

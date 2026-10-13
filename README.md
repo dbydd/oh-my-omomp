@@ -407,15 +407,17 @@ omp 从 `~/.omp/agent/extensions/` 往下只找一层：直接放的 `*.ts`、`<
 
 #### tool-policy-nag
 
-`tool-policy-nag/` 只作用于主会话。它在 `tool_call` 阶段检查模型是否用 shell 或 eval 代替内置工具，只提醒，不拦截命令。检测方式有两种，由同目录的 `tool-policy-nag.json` 选择。
+`tool-policy-nag/` 只作用于主会话。它在 `tool_call` 阶段检查模型是否用 shell 或 eval 代替内置工具，只提醒，不拦截命令。两条通道各管一件事，由同目录的 `tool-policy-nag.json` 分别开关，可以同时开着：`form` 是字符串检测（命令解析器，机械地数这次调用里有几个操作本该用内置工具），`intent` 是意图检测（把这次调用整体交给 Jev，问它这次调用想干什么、这件事该用哪个内置工具）。
 
-- **检查的调用**（两种方式相同）：`bash` / `bash_bg` 的命令；`exec_command` 的命令；经 `write` 写到 `xd://bash`、`xd://bash_bg`、`xd://exec_command` 的命令；`eval` 的 Python / JS 代码。
+- **检查的调用**（两条通道相同）：`bash` / `bash_bg` 的命令；`exec_command` 的命令；经 `write` 写到 `xd://bash`、`xd://bash_bg`、`xd://exec_command` 的命令；`eval` 的 Python / JS 代码。工具名按底层工具算（`exec_command`），不是设备路径（`xd://exec_command`），所以同一条命令经设备写和直接调用得到同一条描述。
 - **配置** `tool-policy-nag.json`：
-  - `{"detector": "heuristic"}`：启发式检测。
-  - `{"detector": "jev", "judge": "commandcode/typesafe/jev", "threshold": 0.5}`：Jev 检测，仓库里的值。`judge` 是 judgment API 模型的 `provider/model`，`threshold` 取 (0, 1]，两项必填。
-  - 依次尝试 cwd 下和扩展目录下的文件，第一个存在且有效的生效；缺失或无效时试下一个，两个都不行就用启发式检测。无效的文件每个进程警告一次。每次检查调用时重读，改文件从下一次 shell / eval 调用生效，不用重启。
+  - `form`：`{"detector": "heuristic"}` 打开字符串通道，`null` 关掉。
+  - `intent`：`{"judge": "commandcode/typesafe/jev", "threshold": 0.5}` 打开意图通道，仓库里的值；`threshold` 取 (0, 1]；`null` 关掉。
+  - 两个块都没有时读旧形状：`{"detector": "heuristic"}` 等于只开 form，`{"detector": "jev", "judge": …, "threshold": …}` 等于只开 intent。
+  - 依次尝试 cwd 下和扩展目录下的文件，第一个存在且有效的生效；缺失或无效时试下一个，两个都不行就只开 form。无效的文件每个进程警告一次。每次检查调用时重读，改文件从下一次 shell / eval 调用生效，不用重启。
+- **一次调用只发一条提醒。** 两条通道都开着时提醒由 `intent` 负责（它说得清意图和该用的工具），`form` 照常计数、记日志、维护自己的状态但不发消息；`intent` 关掉时 `form` 才发它那句通用提醒。
 
-**启发式检测：**
+**form 通道（字符串检测）：**
 
 - **shell 违规分六类**：
   - 列目录：`ls`、带路径的 `find`。
@@ -426,19 +428,17 @@ omp 从 `~/.omp/agent/extensions/` 往下只找一层：直接放的 `*.ts`、`<
   - 内联脚本：`node`、`bun`、`deno`、`python`、`ruby` 带 `-e` / `-c` / `--eval` / `-p` 的内联代码、`deno eval`，以及以 `-` 作为脚本参数从 stdin 读的脚本。不带 `-` 的 heredoc 或 `< script` 重定向不算。
 - **eval 违规**：Python 的 `Path.read_text`、`open` 读取、`glob` / `os.listdir` 等列目录，JS 的 `readFileSync`、`Bun.file`、`readdir`、`Bun.Glob` 等。按正则匹配，是启发式判断。
 - **按命令结构解析**：识别管道、分号、引号、heredoc、命令替换和重定向；跳过 `sudo`、`doas`、`su`、`ssh`；`/dev/*` 目标只对读、搜索、编辑、写文件豁免，列目录照样计数。管道的有效终点是 `wc` 时（`wc` 之后还可以接不读文件的 `tr`、`sort`、`uniq`、`head`、`tail`、`grep` 等），前面的列目录、读、搜索不算违规。
-- **节奏**：前 3 次违规只记录。之后每次有违规的调用发一条 steer 消息“你为什么不遵守system prompt。”并弹出 UI 警告，每个 context 最多 3 条。发满后停止检测，直到下一次 compaction（手动，或成功的自动 compaction）。
+- **节奏**：前 3 次违规只记录。之后每次有违规的调用发一条 steer 消息“你为什么不遵守system prompt。”并弹出 UI 警告，每个 context 最多 3 条。发满后停止检测，直到下一次 compaction（手动，或成功的自动 compaction）。`intent` 开着时照常计数和记日志，只是不发这句。
 - **状态**：存在 session custom entry `mouriya.omp.tool-policy-nag.state`。恢复会话、切换分支或跳转会话树时，从当前分支重建：分支上的 `compaction`、`reset_boundary`（`/clear`）、`branch_summary` 边界会清零，之后的状态照常恢复，所以切到一个已经发满的分支仍保持停止检测。
 
-**Jev 检测：**
+**intent 通道（意图检测）：**
 
-- **判定**：每个被检查的调用发一次 judge 请求，每类违规是请求里一个独立的是 / 否问题（`noul`），Jev 对每个问题分别给出“是”的概率，达到 `threshold` 就算违反这一类。
-  - shell 命令发 `{ tool, command, tty }`，问 9 类：列目录 / 找文件、读文件 / 归档 / 数据库 / 网页内容、搜索文件文本、修改已有文件、新建 / 覆盖文件、重命名 / 移动文件、在 shell 里跑内联 Python / JS 脚本、用文本工具做结构化代码搜索 / 改写、交互程序没有走 PTY。
-  - eval 代码发 `{ tool: "eval", language, code }`，问 5 类：读文件、列目录 / 找文件、搜索文件文本、改写并保存文件、跑 shell 命令或普通程序。
-  - 判据分两层。共享前言说明每条规则问的是这次调用真正执行的操作，不是长得像的那个词，并且只在内置工具够得着的范围内（本机路径，或列出的 URI scheme）成立：另一个程序的子命令或参数（`km ls actions`、`docker ps`、`gh pr list`、`aws s3 ls`）列举的是那个程序自己的资源，管道里的过滤器（`cmd | jq`、`cmd | grep x`、`cmd | sort`）处理的是内置工具产生不了的字节，两者都不算；跑在别的机器或容器里的命令（`ssh`、`docker exec`、`kubectl exec`、`qm guest exec`、`orb -m`）碰的是本机工具够不着的文件，对其中看起来像 `cat` / `ls` / `grep` / `sed -i` / `jq` 的写法一律答否（前言说明这条边界，“列目录 / 找文件”和“读文件”两类的问题里也各自写明），只有 PTY 一类例外（它问程序怎么跑，不问碰了哪些文件）。每个问题再写明这一类该用的内置工具和不算违规的情况：构建、测试、git、外部 CLI、计数和校验和、`sudo` 等一律不算；列目录、就地编辑、管道过滤和“用内联代码算出来再打印”都不算“读文件”；`sed -i` 不算“搜索”；重定向和 `tee` 不算“就地修改”，交给“新建 / 覆盖文件”那一类；“只打印就退出”的程序（启动 App、驱动浏览器或控制 CLI、构建 / 测试 / lint、`omp -p`）不算没有 PTY；eval 里把命令行交给 `tool.exec_command` / `tool.bash` 时，要看那条命令本身是不是内置工具覆盖的操作（是才算），其余 `tool.<name>` 调用不算“跑程序”。问题原文在扩展的 `jev.ts`（`SHELL_RULES` / `EVAL_RULES`）里。
-- **提醒**：一次调用只要违反任何一类，就发一条消息，逐条列出这次调用违反的每一类和应改用的工具，再附上这次调用的命令或代码；同时弹 UI 警告，列出各类违规的概率。消息里的工具名是底层工具（`exec_command`、`bash`、`bash_bg`），不是设备路径（`xd://exec_command`），所以经 `write` 写到设备的那条命令和直接调用得到同一条描述。不计数、不封顶，每个违规调用都提醒，也不读写启发式检测的状态。
+- **判定**：每个被检查的调用发一次 judge 请求，里面只有一个 `choice` 问题（不是每类一个是非题）：这次调用想让哪个内置工具做这件事。选项就是那件事该用的工具——`list`（列目录 / 找文件 → `read <dir>` / `glob`）、`read`（读文件内容）、`search`（搜文件文本 → `grep`）、`edit`、`write`、`move`、`eval`、`ast`、`pty`、`shell`（该走 `exec_command`）、`mixed`（一次调用里读写混在一起、副作用边界看不清）、`none`（真程序 / 外部 CLI / 构建 / 测试 / git，shell 本来就是对的）。是否违规按调用类型定：shell 调用只要不是 `none` 就是违规；eval 调用里 `eval` 和 `none` 都不算违规（eval 内核本来就是它的工具）。
+- **题目与案例**：问题正文和 12 个选项的判据在同目录的 `INTENT-policy.md` 里（frontmatter 是 `options.<选项>.{title,tool,rubric}`，正文是给 Jev 的说明）。每个 `rubric` 给出这一类的正面例子和反例，反例取自审出来的实际误报类（`km ls actions` 不是 `read` / `list`、`ssh host 'cat x'` 不是 `read`、`npm test > log` 不是 `write`、`curl -I` 不是 `read`、管道过滤器不算读、`ls | head` 是 `list` 等）。`title` 和 `tool` 是提醒里显示的中文意图名和该用的工具。每次调用都重读该文件，改它从下一次调用生效；文件缺失或解析不了时这条通道不提醒（每个进程警告一次）。
+- **提醒**：选中选项的概率达到 `threshold` 才提醒，一次调用最多一条：提醒里写「你这次 `exec_command` 调用属于『列目录 / 找文件』，应该用 `read <dir>` / `glob`，而不是这样绕出去。」再加这次调用的原文。不计数、不封顶。
 - **时机**：判定与工具调用并行，不阻塞命令，结果通常在调用结束后才到，所以消息以 `aside` 插到下一个 step 边界；会话已经空闲时开启新一轮。判定返回前会话切换、分支切换或树跳转时不发消息，只弹 info。
-- **失败**：模型找不到、不是 judgment API、没有凭据、请求出错或 90 秒超时时不提醒，也不退回启发式检测；同一原因每个进程警告一次，headless 只写日志。
-- **用量**：每个被检查的调用一次 judge 请求，消耗 Jev 额度，不计入会话用量。每次判定写一条 `Tool-policy Jev verdict` info 日志，含各类概率和判为违规的类别。
+- **失败**：模型找不到、不是 judgment API、没有凭据、请求出错或 90 秒超时时不提醒，也不退回字符串通道；同一原因每个进程警告一次，headless 只写日志。
+- **用量**：每个被检查的调用一次 judge 请求，消耗 Jev 额度，不计入会话用量。每次判定写一条 `Tool-policy intent verdict` info 日志，含选中的选项、概率、confidence 和是否触发。
 
 #### watchdog-agent
 
@@ -806,7 +806,7 @@ model: "(gpt-5|o3)"
 
 **提醒**：原生 todo 关掉后，`TodoTracker` 的提醒全部停止，`reminders.ts` 按原生逻辑重做，读 `todo.reminders`、`todo.remindersMax`、`todo.eager` 设置：
 
-- **停下时的提醒**：还有 pending / in_progress 项、模型以纯文字结束时，提醒继续。原生文字之外加上 goal 和每项的解释，以及缺解释的项。跳过的情况与原生相同：plan mode、上一条提醒之后还没调用过任何工具、超过次数上限、最后一条回复在问用户、还有后台任务。主会话用 `session_stop` 续上，次数按一次连续的续写链计；subagent 没有这个钩子，在 `agent_end` 后补一条提醒并唤醒，次数按最近一条用户消息之后已发的提醒计，属于近似实现。
+- **停下时的提醒**：还有 pending / in_progress 项、模型以纯文字结束时，提醒继续。原生文字之外加上 goal 和每项的解释，以及缺解释的项。跳过的情况与原生相同：plan mode、上一条提醒之后还没调用过任何工具、超过次数上限、最后一条回复在问用户、还有后台任务。主会话用 `session_stop` 续上，次数按一次连续的续写链计；subagent 没有这个钩子，在 `agent_end` 后补一条提醒并唤醒，次数按最近一条用户消息之后已发的提醒计，属于近似实现。被截断的结束（运行被中断或报错、以未完成的工具调用结束）OMP 既不跑自己的提醒也不发 `session_stop`，主会话改为在 `agent_end` 记下这次结束，推迟 10 秒补一条提醒并开启新一轮；期间起了新一轮、有排队消息，或输入框里已经有草稿时按人自己接管处理，不发。
 - **中途提醒**：连续 12 次成功的修改类工具调用（bash、eval、edit、write、ast_edit）之间没有调用 `todo` 时，在下一个 step 边界提醒一次，每轮最多 2 次，附 goal 的 objective。
 - **开局提醒**：`todo.eager` 为 `preferred` / `always` 时，首个合适的 prompt 前要求先建 todo；`always` 还会强制这一步调用 `todo`。本仓库没有打开（默认 `default`）。自动 compact 之后列表为空时再提醒一次。
 - **goal 模式**：OMP 原生 goal 模式开着时，把当前列表（含 goal 和解释）附进 goal 模式的上下文。
@@ -832,6 +832,7 @@ model: "(gpt-5|o3)"
 - print 模式（`omp -p`）下原生不发停下提醒，这里照发。
 - 不发出 OMP 的 `todo_reminder` 会话事件（没有发出接口），ACP 和 RPC 的订阅方收不到。
 - 续写走的是 OMP 的隐藏下一轮消息通道，不是原生的同一轮调度；别的扩展的 `session_stop` 续写先占用时，这条提醒不发，次数退回。
+- 原生对中断、报错、以工具调用结束的收尾一概不发停下提醒；这里在看门 10 秒后补一条，人接管（起了新一轮、有排队消息、输入框有草稿）就不发。
 - 中途提醒在 `turn_end` 计算，不是在 step 边界懒计算；compact 之后的开局提醒在下一次 prompt 开始时发，而不只在 OMP 的自动续写里；goal 模式的上下文每次请求重新附加，不固化进 goal 消息。
 - RPC 的 `set_todos` 只改内存，读取规则看不到它；collab 不同步会话 custom entry，所以 goal 和解释不会同步给客人。
 - `/vibe` 只把内置工具放进 vibe 模式的基础工具集，这个 `todo` 不在其中。

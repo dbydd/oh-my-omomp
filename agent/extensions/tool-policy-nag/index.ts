@@ -1,40 +1,52 @@
 /**
- * Watches main-session shell commands and eval code for operations the built-in
- * tools APPEND_SYSTEM.md assigns to the model: list, read, search, edit, write
- * and eval. `tool-policy-nag.json` (cwd copy first, then the one beside this
- * file) picks the detector, re-read at every watched call:
+ * Watches main-session shell commands and eval code for work the built-in
+ * tools own (`APPEND_SYSTEM.md`), and injects an attributed reminder when the
+ * shell or the eval kernel was used instead. Reminders only: no call is ever
+ * blocked, and a working call is left alone.
  *
- * - `{"detector": "heuristic"}` (also when no valid config exists): a command
- *   parser plus regexes. Ignoring the system prompt is one failure: after the
- *   first three hits, send at most three generic steer nags per context, then
- *   go quiet until a boundary that replaces the context (compaction, /clear,
- *   branch summary). Branch or tree navigation rebuilds the target branch's own
- *   state; it does not reset it.
- * - `{"detector": "jev", "judge": "<provider>/<model>", "threshold": 0.5}`:
- *   every watched call goes to a judgment-API model (Jev) as one request with
- *   one independent yes/no question per policy rule (SHELL_RULES / EVAL_RULES).
- *   Each call with a rule at or above `threshold` gets its own message listing
- *   every violated rule and the required tool; no counting, no cap. The verdict
- *   arrives after the call started, so the nag is an aside (a new turn when the
- *   session is already idle); a verdict that returns after a session move is
- *   only shown. A failed judge request warns once per reason and nags nothing;
- *   the heuristic is never a fallback.
+ * TWO LANES, configured side by side in `tool-policy-nag.json` (cwd copy first,
+ * then the one beside this file; re-read at every watched call, so edits apply
+ * to the next shell or eval call):
+ *
+ * - `form` — the deterministic string lane (`heuristic.ts`, `shell-parser.ts`):
+ *   parses the command, counts every operation a built-in tool covers, and
+ *   after the third hit injects at most three generic nudges per context, then
+ *   goes quiet until a boundary that replaces the context (compaction,
+ *   `/clear`, a branch summary). Branch and tree navigation rebuild the branch's
+ *   own state; it does not reset it.
+ * - `intent` — the intent lane (`intent.ts`): asks a judgment model one
+ *   `choice` question per watched call — what is this call trying to accomplish
+ *   and which built-in tool does that intent belong to — and injects a reminder
+ *   naming the intent and the required tool. The question, its options and
+ *   their cases come from the spec beside this extension
+ *   (`INTENT-*.md`), read per call. No counting, no cap: one reminder per
+ *   offending call. A failed judge request warns once per reason and reminds
+ *   nothing.
+ *
+ * DELIVERY IS SHARED. At most one reminder per watched call: when the intent
+ * lane is enabled it owns delivery, because its reminder names the intent and
+ * the tool; the form lane still counts, logs and keeps its state, and sends its
+ * generic nudge only when the intent lane is not enabled. Both lanes log their
+ * own verdicts.
+ *
  * Registers session lifecycle and tool_call hooks; appends counter entries to
- * the session branch and injects attributed user nags. Main sessions only.
+ * the session branch and injects attributed user reminders. Main sessions only.
  * Hook failures are logged and do not escape into omp.
  */
 import { type ExtensionAPI, type ExtensionContext, z } from "@oh-my-pi/pi-coding-agent";
 import { errorText } from "../_shared/errors.ts";
 import { type WatchedCall, watchedCallOf } from "./calls.ts";
-import { type JevDetector, loadDetector } from "./detector-config.ts";
+import { type IntentLane, type Lanes, loadLanes } from "./detector-config.ts";
 import { detectEvalViolations, detectShellViolations } from "./heuristic.ts";
-import { EVAL_RULES, type Flagged, jevNagText, judgeCall, SHELL_RULES } from "./jev.ts";
+import { intentReminder, intentViolation, JUDGE_TIMEOUT_MS, judgeIntent, loadIntentSpec } from "./intent.ts";
 
 const NAG_TEXT = "你为什么不遵守system prompt。";
 const STATE_ENTRY_TYPE = "mouriya.omp.tool-policy-nag.state";
 /** Fire on the hit that goes *past* three. */
 const HIT_THRESHOLD = 3;
 const MAX_NAGS_PER_CONTEXT = 3;
+/** The intent spec is read from beside this extension, not from the agent root. */
+const SPEC_DIR = import.meta.dir;
 
 type NagState =
 	| { readonly kind: "watching"; readonly hits: number; readonly nagsSent: number }
@@ -86,6 +98,7 @@ function heuristicCheck(
 	call: WatchedCall,
 	state: NagState,
 	commit: (next: NagState) => void,
+	deliver: boolean,
 ): void {
 	if (state.kind === "exhausted") return;
 	const violations = call.kind === "shell" ? detectShellViolations(call.command) : detectEvalViolations(call.language, call.code);
@@ -124,8 +137,10 @@ function heuristicCheck(
 		nagsSent,
 		maxNags: MAX_NAGS_PER_CONTEXT,
 		detectorArmed,
+		delivering: deliver,
 	});
 	commit(detectorArmed ? { kind: "watching", hits, nagsSent } : { kind: "exhausted", hits, nagsSent });
+	if (!deliver) return;
 	pi.sendUserMessage(NAG_TEXT, { deliverAs: "steer", attribution: "agent" });
 	ctx.ui.notify(
 		`Shell policy nag ${nagsSent}/${MAX_NAGS_PER_CONTEXT} sent for hit #${hits} (${programs.join(", ")}) — detector ${
@@ -146,9 +161,9 @@ function runForMainSession(pi: ExtensionAPI, ctx: ExtensionContext, handler: () 
 export default function toolPolicyNag(pi: ExtensionAPI): void {
 	let state: NagState = WATCHING;
 	const nestedDeviceCalls = new Set<string>();
-	/** Bumped by every session move; a Jev verdict from an older epoch is shown, never sent. */
+	/** Bumped by every session move; an intent verdict from an older epoch is shown, never sent. */
 	let epoch = 0;
-	/** Config and judge failures already reported, so a broken setup warns once per process. */
+	/** Config, spec and judge failures already reported, so a broken setup warns once per process. */
 	const warned = new Set<string>();
 
 	const commit = (next: NagState): void => {
@@ -175,41 +190,63 @@ export default function toolPolicyNag(pi: ExtensionAPI): void {
 		if (ctx.hasUI) ctx.ui.notify(text, "warning");
 	};
 
-	/** Runs beside the tool call; the verdict lands after it, so the nag goes out as an aside. */
-	const jevCheck = async (ctx: ExtensionContext, detector: JevDetector, call: WatchedCall): Promise<void> => {
+	/** Runs beside the tool call; the verdict lands after it, so the reminder goes out as an aside. */
+	const intentCheck = async (ctx: ExtensionContext, lane: IntentLane, call: WatchedCall): Promise<void> => {
 		const startedAt = epoch;
-		const rules = call.kind === "shell" ? SHELL_RULES : EVAL_RULES;
-		const result = await judgeCall(ctx, detector, call, rules);
-		switch (result.kind) {
+		const loaded = await loadIntentSpec(SPEC_DIR);
+		switch (loaded.kind) {
+			case "missing":
+				warnOnce(ctx, `tool-policy-nag: 意向 spec 缺失（${SPEC_DIR}/INTENT-*.md），意向通道不提醒`);
+				return;
+			case "invalid":
+				warnOnce(ctx, `tool-policy-nag: 意向 spec 无效（${loaded.reason}），意向通道不提醒`);
+				return;
+			case "found":
+				break;
+			default: {
+				const unreachable: never = loaded;
+				return unreachable;
+			}
+		}
+		const spec = loaded.spec;
+		const verdict = await judgeIntent(ctx, lane.judge, spec, call, AbortSignal.timeout(JUDGE_TIMEOUT_MS));
+		switch (verdict.kind) {
 			case "failed":
-				warnOnce(ctx, `tool-policy-nag: Jev 判断失败（${result.reason}）`);
+				warnOnce(ctx, `tool-policy-nag: 意向判定失败（${verdict.reason}）`);
 				return;
 			case "ok":
 				break;
 			default: {
-				const unreachable: never = result;
+				const unreachable: never = verdict;
 				return unreachable;
 			}
 		}
 		const tool = call.kind === "shell" ? call.tool : "eval";
-		const flagged: Flagged[] = [];
-		for (const rule of rules) {
-			const probability = result.probabilities[rule.id] ?? 0;
-			if (probability >= detector.threshold) flagged.push({ rule, probability });
-		}
-		pi.logger.info("Tool-policy Jev verdict", {
+		const violation = intentViolation(call, verdict.label);
+		const fired = violation && verdict.probability >= lane.threshold;
+		pi.logger.info("Tool-policy intent verdict", {
 			tool,
-			threshold: detector.threshold,
-			probabilities: result.probabilities,
-			flagged: flagged.map(({ rule }) => rule.id),
+			spec: spec.path,
+			threshold: lane.threshold,
+			choice: verdict.label,
+			probability: verdict.probability,
+			confidence: verdict.confidence,
+			options: spec.options.length,
+			violation,
+			fired,
 		});
-		if (flagged.length === 0) return;
-		const summary = `tool-policy-nag Jev：${tool} 违规 ${flagged.map(({ rule, probability }) => `${rule.id} ${probability.toFixed(2)}`).join(" · ")}`;
+		if (!fired) return;
+		const option = spec.options.find((candidate) => candidate.label === verdict.label);
+		if (option === undefined) return;
+		const summary = `tool-policy-nag 意向：${tool} → ${verdict.label} ${verdict.probability.toFixed(2)}（${option.title}）`;
 		if (epoch !== startedAt) {
 			if (ctx.hasUI) ctx.ui.notify(`${summary}；判断返回前会话已切换，未发送提醒`, "info");
 			return;
 		}
-		pi.sendUserMessage(jevNagText(call, flagged), ctx.isIdle() ? { attribution: "agent" } : { deliverAs: "aside", attribution: "agent" });
+		pi.sendUserMessage(
+			intentReminder(call, option),
+			ctx.isIdle() ? { attribution: "agent" } : { deliverAs: "aside", attribution: "agent" },
+		);
 		if (ctx.hasUI) ctx.ui.notify(summary, "warning");
 	};
 
@@ -232,21 +269,13 @@ export default function toolPolicyNag(pi: ExtensionAPI): void {
 			if (call === null) return;
 			// The device re-dispatches its payload as a nested tool call with the same id.
 			if (event.toolName === "write") nestedDeviceCalls.add(event.toolCallId);
-			const { detector, warnings } = loadDetector(ctx.cwd);
+			const { lanes, warnings }: { lanes: Lanes; warnings: readonly string[] } = loadLanes(ctx.cwd);
 			for (const warning of warnings) warnOnce(ctx, warning);
-			switch (detector.kind) {
-				case "heuristic":
-					heuristicCheck(pi, ctx, call, state, commit);
-					return;
-				case "jev":
-					void jevCheck(ctx, detector, call).catch((error) => {
-						pi.logger.warn("Tool-policy nag hook failed", { error: errorText(error) });
-					});
-					return;
-				default: {
-					const unreachable: never = detector;
-					return unreachable;
-				}
+			if (lanes.form !== null) heuristicCheck(pi, ctx, call, state, commit, lanes.intent === null);
+			if (lanes.intent !== null) {
+				void intentCheck(ctx, lanes.intent, call).catch((error) => {
+					pi.logger.warn("Tool-policy nag hook failed", { error: errorText(error) });
+				});
 			}
 		}),
 	);
