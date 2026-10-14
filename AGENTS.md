@@ -153,7 +153,7 @@ flowchart LR
   `agent/omp-config-update.ts` path, fail with "has no agent/omp-config-update.ts",
   and need one `/update-omp` to install the updater at its new path.
 - **Todo is an installed plugin, not local configuration source.** `install-plugins.sh`
-  declares `mouriya-s-lab/omp-todo-more`; normal plugin discovery supplies full/light
+  declares `oh-my-omp/omp-todo-more`; normal plugin discovery supplies full/light
   `todo` with native Todo still explicitly disabled. The updater preflights all
   source/file operations, installs missing plugins before writes, then requests
   OMP's npm catalog to confirm `omp-todo-more` is enabled, its manifest declares
@@ -484,21 +484,21 @@ exercised in a real omp session.
 - `install-plugins.sh` — declared plugin list: `pi-commandcode-provider`,
   `pi-package-search`, `pi-pretty-codeblocks`, `pi-schedule`, and
   the GitHub URLs `mouriya-s-lab/pi-bansos` (our fork of npm `pi-bansos`, carrying
-  fixes also submitted upstream to `mannnrachman/pi-bansos`), `mouriya-s-lab/omp-unified-exec`
+  fixes also submitted upstream to `mannnrachman/pi-bansos`), `oh-my-omp/omp-unified-exec`
   (our fork of `iamwrm/pi-unified-exec`, renamed, which skips the Pi-only compact codemode
   fix whose `createCodemodeExtension` import fails to link on OMP, uses Bun's native `Terminal`
   on macOS, Linux, and Windows under Bun, and loads `@homebridge/node-pty-prebuilt-multiarch`
   only under Node.js; its `fork-features/README.md` records the customizations and sync policy),
-  `Mouriya-Emma/omp-thinking-translator`
+  `oh-my-omp/omp-thinking-translator`
   (its runtime config is the portable agent-root `thinking-translator.json` above),
-  `mouriya-s-lab/omp-codex-image-gen`, and `mouriya-s-lab/omp-todo-more`
+  `oh-my-omp/omp-codex-image-gen`, and `oh-my-omp/omp-todo-more`
   (independent rich Todo, reminders/planning, read projection and native editing,
   with awaited Tern owner asset initialization). All unpinned: `omp install` resolves npm versions,
   and GitHub URLs track the default branch (re-run the same `omp install <url>` to update). An existing
   npm `pi-bansos` install must be removed with `omp plugin uninstall pi-bansos` before installing the fork URL,
   and an existing `pi-unified-exec` with `omp plugin uninstall pi-unified-exec` (both register the same tools).
   The former `pi-bro` plugin is now the local `agent/extensions/bro/`.
-  `mouriya-s-lab/omp-remote-build` is listed commented out and unquoted as an optional
+  `oh-my-omp/omp-remote-build` is listed commented out and unquoted as an optional
   plugin: not everyone needs remote build environments, and it depends on `omp-unified-exec`,
   Mutagen, the km CLI, Komodo Core/Periphery and an SSH-reachable build host. `/sync-omp-config`
   keeps commented entries commented even when the plugin is installed locally.

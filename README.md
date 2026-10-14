@@ -139,7 +139,7 @@ flowchart LR
 
 [omp-config-autoupdate](#omp-config-autoupdate) 扩展在 OMP 启动时运行更新器 `omp-config-update.ts auto`。默认关闭，用 `/omp-config-autoupdate on` 打开、`off` 关闭，开关只属于本机，见该扩展一节。仓库对托管项说了算：本机绕过仓库直接改了托管文件或托管字段，下次更新时会被覆盖。除此之外，本机自己的东西一律不动。
 
-1. **取仓库**：更新器在 `~/.omp/omp-config-src` 维护一份自己的浅克隆，从 `https://github.com/mouriya-s-lab/omp-config.git` 拉 `master` 分支（仓库的默认分支，写死在更新器的 `DEFAULT_BRANCH` 里）。这个目录存在但不是这个仓库的克隆时不碰它，直接报错。拉取失败（如断网，包括还没有克隆时的首次克隆失败）时这次不更新：克隆只是上次拉取时的副本，不能代替 GitHub 上的默认分支，下次启动再拉。
+1. **取仓库**：更新器在 `~/.omp/omp-config-src` 维护一份自己的浅克隆，从 `https://github.com/oh-my-omp/omp-config.git` 拉 `master` 分支（仓库的默认分支，写死在更新器的 `DEFAULT_BRANCH` 里）。克隆的 origin 还是仓库迁移前的地址 `https://github.com/mouriya-s-lab/omp-config.git` 时，先把它改到新地址再拉；这个目录存在但不是这个仓库的克隆时不碰它，直接报错。拉取失败（如断网，包括还没有克隆时的首次克隆失败）时这次不更新：克隆只是上次拉取时的副本，不能代替 GitHub 上的默认分支，下次启动再拉。
 2. **只在提交变化时应用**：新提交和 `<agent 目录>/.omp-config-applied` 记录的上次应用提交相同就什么都不做，所以没有新提交时，`/settings`、`/bansos` 改过的托管值不会被每次启动改回去。应用规则取自新提交里的 `omp-config-update.ts`，改了更新规则的提交按自己的规则应用。
 3. **规划与插件就绪**：先校验仓库里的所有结构化配置（含 `config-light.yml`）能解析成映射，再规划文件写入、迁移和删除；preflight 有错就不切换。然后补装缺失插件，再从 OMP owner catalog 核对独立 Todo 的 enabled、manifest entry 和实际入口文件。缺插件且不允许安装、安装失败、disabled、坏 entry 或退休对象冲突时，不写消费者、不删旧实现、不记完成。
 4. **写入与删除**：插件就绪后先移动，再依次写普通文件、JSON、`config.yml`，最后删除。Todo 切换的 move/write 阶段只要有错误，整个 delete 阶段都不执行，保留旧 reader/实现，已成功的部分写入如实报告、不回滚。每个文件先写同目录临时文件再 rename；普通目标是 symlink 时写到它指向的文件，symlink 保留。一般删除只按 git 记录的“上次应用的提交 → 新提交”计算：托管文件、结构化配置里仓库删掉的键，以及 `extensions` 条目；本机自己的键和字段保留，删完为空才删映射，整个结构化配置文件被删时本机文件不动。首次运行或旧提交不可读时，不做 git-derived 删除，但平铺迁移和插件就绪后的八路径 Todo 退休照常规划；退休仅 unlink 已知叶，不删除目录或链接 backing。
@@ -192,8 +192,8 @@ flowchart LR
 插件包是运行时状态，不进仓库（仓库只收 `pi-bansos` 的状态文件，见[手动迁移](#手动迁移)）。`install-plugins.sh` 声明插件列表，并对每一项执行 `omp install`：
 
 - npm：`pi-commandcode-provider`、`pi-package-search`、`pi-pretty-codeblocks`、`pi-schedule`。
-- GitHub：`mouriya-s-lab/pi-bansos`、`mouriya-s-lab/omp-unified-exec`、`mouriya-s-lab/omp-todo-more`、`Mouriya-Emma/omp-thinking-translator`、`mouriya-s-lab/omp-codex-image-gen`。
-- 可选，注释掉、默认不装：`mouriya-s-lab/omp-remote-build`，给每个 git worktree 在远端 Docker 主机上建 Mutagen 副本和 Komodo 管理的构建容器。不是谁都需要，而且依赖太多：`omp-unified-exec`、Mutagen、km CLI、Komodo Core/Periphery 和可 SSH 的构建主机，配置见它仓库的 README。需要时给该行加上单引号取消注释。
+- GitHub：`mouriya-s-lab/pi-bansos`、`oh-my-omp/omp-unified-exec`、`oh-my-omp/omp-todo-more`、`oh-my-omp/omp-thinking-translator`、`oh-my-omp/omp-codex-image-gen`。
+- 可选，注释掉、默认不装：`oh-my-omp/omp-remote-build`，给每个 git worktree 在远端 Docker 主机上建 Mutagen 副本和 Komodo 管理的构建容器。不是谁都需要，而且依赖太多：`omp-unified-exec`、Mutagen、km CLI、Komodo Core/Periphery 和可 SSH 的构建主机，配置见它仓库的 README。需要时给该行加上单引号取消注释。
 
 所有插件都不钉版本：npm 包由 OMP 解析当前版本，GitHub URL 跟随默认分支，重复执行可能升级插件。结果写进 `~/.omp/plugins/`（`package.json`、`bun.lock`、`node_modules/`、`omp-plugins.lock.json`）。脚本需要联网，会下载并加载第三方代码。
 
@@ -234,13 +234,13 @@ providers:
 
 ### todo-more
 
-[omp-todo-more](https://github.com/mouriya-s-lab/omp-todo-more) 是独立 OMP/Tern 插件，由安装列表声明并从普通 plugin discovery 加载，完整和轻量模式都使用它。原生 Todo 保持 `todo.enabled: false`；不能同时加载旧本地实现，也不靠同名工具最后加载覆盖。
+[omp-todo-more](https://github.com/oh-my-omp/omp-todo-more) 是独立 OMP/Tern 插件，由安装列表声明并从普通 plugin discovery 加载，完整和轻量模式都使用它。原生 Todo 保持 `todo.enabled: false`；不能同时加载旧本地实现，也不靠同名工具最后加载覆盖。
 
 - `todo` 保留 `init/start/done/rm/drop/block/unblock/append/view/explain`。goal 是 `{objective, measure, doneWhen}`，项是 `{title, explanation}`；任务按完整 title 寻址。工具说明、提醒、planning edit guard、normal/restricted `task:*` 行为由插件维护。
 - 在 OMP/Tern 输入 `/todo-more` 编辑 goal 或 explanation。Save 按当前分支只提交目标字段，保留最新 status/phase/blocker/order；删除标题不复活。Enter 换行、Tab/Shift+Tab 切换、Ctrl+Enter 保存，Escape/Cancel 丢弃；不替换宿主 `/todo`，不启动额外模型 turn。switch/branch/tree/shutdown 取消旧草稿。
 - 当前 session branch 的 `mouriya.omp.todo-more` snapshot 是状态记录，宿主 TodoTracker 和历史卡片只是投影/副本；reader 保持 native edits 标题联结和 empty barrier。同步提交确认 branch 接受，不等于磁盘 durable-write；正常保留以实际退出/resume 验证。
 - 配置侧 completion judge 只请求同步 `omp-todo-more:read` 投影，不导入插件内部模块；task log 只记录成功工具事件中的 goal-set，不是当前状态。
-- 插件 async factory 先等待 Tern owner 的正常复制安装和复查，再注册功能。matching ready/disabled 副本不重装；保留 disabled，linked 冲突不自动 unlink。无 Tern 时 ANSI 可用，不能据此声称 GUI 已启用。native UI、历史/提醒差异、read wire 和资产生命周期详见[插件 README](https://github.com/mouriya-s-lab/omp-todo-more#readme)。
+- 插件 async factory 先等待 Tern owner 的正常复制安装和复查，再注册功能。matching ready/disabled 副本不重装；保留 disabled，linked 冲突不自动 unlink。无 Tern 时 ANSI 可用，不能据此声称 GUI 已启用。native UI、历史/提醒差异、read wire 和资产生命周期详见[插件 README](https://github.com/oh-my-omp/omp-todo-more#readme)。
 
 更新器在独立插件就绪后，手动和自动模式都退休以下八个路径：
 

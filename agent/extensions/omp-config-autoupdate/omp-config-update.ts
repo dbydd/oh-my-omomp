@@ -13,7 +13,9 @@
 //          differs from the commit last applied to this agent dir
 //          (`<agent dir>/.omp-config-applied`). A failed fetch (offline)
 //          applies nothing: the clone is a copy of origin as of the last
-//          fetch, never a stand-in for it.
+//          fetch, never a stand-in for it. A clone of a previous repo
+//          location (PREVIOUS_REPO_URLS) is repointed to REPO_URL first;
+//          any other origin is left untouched and reported.
 //          The apply code is imported from the freshly fetched clone, so a
 //          commit that changes apply rules is applied by its own rules.
 //   apply  Run by /update-omp against a working checkout (`--source`).
@@ -102,7 +104,9 @@ import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-export const REPO_URL = "https://github.com/mouriya-s-lab/omp-config.git";
+export const REPO_URL = "https://github.com/oh-my-omp/omp-config.git";
+/** Origins of updater clones made before the repo moved to oh-my-omp; repointed to REPO_URL on the next fetch. */
+const PREVIOUS_REPO_URLS: readonly string[] = ["https://github.com/mouriya-s-lab/omp-config.git"];
 export const DEFAULT_BRANCH = "master";
 export const APPLIED_MARKER = ".omp-config-applied";
 
@@ -146,7 +150,7 @@ const RETIRED_LIST_ENTRIES: Readonly<Record<string, readonly string[]>> = {
 /** Where this script lives, relative to the agent dir (and to `agent/` in the repo). */
 const UPDATER_REL = "extensions/omp-config-autoupdate/omp-config-update.ts";
 
-const TODO_PLUGIN_URL = "https://github.com/mouriya-s-lab/omp-todo-more";
+const TODO_PLUGIN_URL = "https://github.com/oh-my-omp/omp-todo-more";
 const TODO_PLUGIN_NAME = "omp-todo-more";
 /** Exact legacy leaves; directories, interior links and neighboring host files are not retirement targets. */
 const TODO_RETIREMENTS: readonly string[] = [
@@ -1095,7 +1099,11 @@ function refreshClone(branch: string): string | undefined {
 		return undefined;
 	}
 	const origin = git(CLONE_DIR, ["remote", "get-url", "origin"]);
-	if (!origin.ok || origin.out.trim() !== REPO_URL) {
+	const originUrl = origin.ok ? origin.out.trim() : "";
+	if (PREVIOUS_REPO_URLS.includes(originUrl)) {
+		const repointed = git(CLONE_DIR, ["remote", "set-url", "origin", REPO_URL]);
+		if (!repointed.ok) throw new Error(`git remote set-url failed: ${repointed.err}`);
+	} else if (originUrl !== REPO_URL) {
 		throw new Error(`${CLONE_DIR} is not an updater clone of ${REPO_URL}; left untouched`);
 	}
 	const fetched = git(CLONE_DIR, ["fetch", "--quiet", "--depth", "1", "origin", branch]);
