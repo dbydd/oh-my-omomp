@@ -20,7 +20,7 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 |`agent/extensions/append-system-model/APPEND_SYSTEM_MODEL.md`|[append-system-model](#append-system-model) 按模型追加的系统提示词；属于本机，仓库不带|`~/.omp/agent/extensions/append-system-model/`|
 |`agent/config-light.yml`、`agent/APPEND_SYSTEM_LIGHT.md`、`agent/omp-light.ts`|轻量模式的配置覆盖、追加提示词（目前为空）、入口源码|`~/.omp/agent/`|
 |`agent/extensions/omp-config-autoupdate/omp-config-update.ts`|仓库 → 本机的更新器，[启动时自动更新](#启动时自动更新)和 `/update-omp` 共用；放在启动它的扩展目录里，是独立脚本，不是扩展模块|`~/.omp/agent/extensions/omp-config-autoupdate/`|
-|`agent/thinking-translator.json`|`omp-thinking-translator` 插件配置；翻译候选链优先使用 `futureppo-pool/grok-4.7`，其次 `futureppo-pool/deepseek-v4.1-flash`，其余模型按配置顺序排在后面|`~/.omp/agent/`|
+|`agent/thinking-translator.json`|[思考翻译](#思考翻译)插件的有序候选链与最低推理强度配置|`~/.omp/agent/`|
 |`agent/extensions/user-prompt-inject/PROMPT-INJECT-*.md`|[user-prompt-inject](#user-prompt-inject) 的模板：把用户原话注入 mentor 和 discussant|`~/.omp/agent/extensions/user-prompt-inject/`|
 |`agent/extensions/turn-judge/TURN-JUDGE-*.md`|[turn-judge](#turn-judge) 的判定配置：每轮结束后用 Jev 判断一个问题|`~/.omp/agent/extensions/turn-judge/`|
 |`agent/agents/`|subagent 定义；`README.txt` 记录编写陷阱|`~/.omp/agent/agents/`|
@@ -211,6 +211,26 @@ flowchart LR
 |`[已同步]`|脚本与本机一致|—|
 
 GitHub URL 的插件名按 URL 最后一段推断，仓库名和包名不同时分类可能有偏差，以 `omp plugin list` 的名称为准。
+
+### 思考翻译
+
+`omp-thinking-translator` 从 `~/.omp/agent/thinking-translator.json` 读取翻译候选链，每次请求从第一项开始，失败才尝试下一项；配置在下一条消息开始时重读。仓库链先用 `futureppo-pool/grok-4.7`（`minimal`），再用 `futureppo-pool/deepseek-v4.1-flash`（`low`），其余模型保持配置顺序。可用模型的 `effort` 显式取模型目录支持的最低等级；当前目录缺失的 `ministral-14b-latest` 保留并设为 `off`，不据此断言它的能力。
+
+写入 `effort` 不保证请求会携带推理参数。`futureppo-pool` 的自动发现兼容信息会省略 `reasoning_effort`，使用这两个模型时在本机 `models.yml` 的既有 provider 下加入逐模型覆盖，保留原有连接、凭据和 discovery：
+
+```yaml
+providers:
+  futureppo-pool:
+    modelOverrides:
+      grok-4.7:
+        compat:
+          supportsReasoningEffort: true
+      deepseek-v4.1-flash:
+        compat:
+          supportsReasoningEffort: true
+```
+
+`models.yml` 属于本机，不随配置仓库同步。修改 provider 兼容信息后启动新的 OMP 进程，运行 `/thinking-translator status` 核对候选顺序与强度，再触发实际思考翻译；真实请求应分别携带 `reasoning_effort: minimal` 和 `reasoning_effort: low`。只看到 status 中的强度不能证明上游收到了参数。
 
 ### todo-more
 

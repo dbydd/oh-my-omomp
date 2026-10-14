@@ -4,20 +4,23 @@
   "translatorModels": [
     {
       "provider": "futureppo-pool",
-      "id": "grok-4.7"
+      "id": "grok-4.7",
+      "effort": "minimal"
     },
     {
       "provider": "futureppo-pool",
-      "id": "deepseek-v4.1-flash"
+      "id": "deepseek-v4.1-flash",
+      "effort": "low"
     },
     {
       "provider": "futureppo-pool",
-      "id": "ministral-14b-latest"
+      "id": "ministral-14b-latest",
+      "effort": "off"
     },
     {
       "provider": "commandcode",
       "id": "inclusionai/ling-3.1-flash:free",
-      "effort": "low"
+      "effort": "minimal"
     },
     {
       "provider": "commandcode",
