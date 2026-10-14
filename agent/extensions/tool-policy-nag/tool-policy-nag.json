@@ -3,7 +3,6 @@
     "detector": "heuristic"
   },
   "intent": {
-    "judge": "commandcode/typesafe/jev",
     "threshold": 0.5
   },
   "risk": {

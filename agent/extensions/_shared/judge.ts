@@ -1,43 +1,50 @@
-import { type Api, isJudgmentApi, type Model, NativeJudge } from "@oh-my-pi/pi-ai";
-import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
-import { errorText } from "./errors.ts";
+import { createNativeJudge, isJudgmentApi, type Judge, type Model } from "@oh-my-pi/pi-ai";
+import { AgentRegistry, type ExtensionContext, resolveScopedModels } from "@oh-my-pi/pi-coding-agent";
 
-export type JudgeRef = { readonly provider: string; readonly modelId: string };
+export type JudgeOpen = { readonly kind: "ready"; readonly judge: Judge; readonly model: Model } | { readonly kind: "inactive" };
 
-export type JudgeModel = Model<Api>;
-
-export type JudgeOpen =
-	| { readonly kind: "ready"; readonly judge: NativeJudge; readonly model: JudgeModel }
-	| { readonly kind: "unavailable"; readonly reason: string };
+const JUDGE_SCOPE: Parameters<typeof resolveScopedModels>[0] = {
+	models: ["@judge"],
+	messages: [],
+	fileArgs: [],
+	unknownFlags: new Map<string, boolean | string>(),
+	unrecognizedFlags: [],
+	invalidFlagValues: [],
+};
 
 /**
- * A NativeJudge for `ref` with this session's credentials and headers. Never
- * throws. The model is matched by judgment API, not catalog kind: a custom
- * `models.yml` provider declared with `api: typesafe` keeps the default `chat`
- * kind unless the provider is named `typesafe`.
+ * Use the host's role parser and the calling session's live settings.
+ * ctx.models.resolve searches chat models only; the scope resolver accepts an
+ * all-kind registry view without recreating role parsing. Snapshot the native
+ * model so availability and execution agree after a role change. Credentials
+ * and headers are requested from the host only when a judgment executes.
  */
-export async function openNativeJudge(ctx: ExtensionContext, ref: JudgeRef, signal: AbortSignal): Promise<JudgeOpen> {
-	const label = `${ref.provider}/${ref.modelId}`;
-	const model = ctx.modelRegistry
-		.getAvailable("all")
-		.find((candidate) => candidate.provider === ref.provider && candidate.id === ref.modelId);
-	if (!model) return { kind: "unavailable", reason: `judge ${label} not found` };
-	if (!isJudgmentApi(model.api)) return { kind: "unavailable", reason: `judge ${label} has no judgment API (${model.api})` };
-	try {
-		const sessionId = ctx.sessionManager.getSessionId();
-		const apiKey = await ctx.modelRegistry.getApiKey(model, sessionId, { signal });
-		if (!apiKey) return { kind: "unavailable", reason: `judge ${label}: credentials unavailable` };
-		const headers = await ctx.modelRegistry.resolveModelHeaders(model, signal);
-		const judge = new NativeJudge({
-			apiKey: ctx.modelRegistry.resolver(model, sessionId),
-			api: model.api,
-			provider: model.provider,
-			model: model.id,
-			baseUrl: model.baseUrl,
-			headers,
-		});
-		return { kind: "ready", judge, model };
-	} catch (error) {
-		return { kind: "unavailable", reason: `judge ${label}: ${errorText(error)}` };
-	}
+export async function openNativeJudge(ctx: ExtensionContext): Promise<JudgeOpen> {
+	const session = AgentRegistry.global()
+		.list()
+		.find((ref) => ref.session?.sessionManager === ctx.sessionManager)?.session;
+	if (session == null) throw new Error("JUDGE: current OMP session is not registered");
+	const [resolved] = await resolveScopedModels(
+		JUDGE_SCOPE,
+		{
+			getAvailable: () => ctx.modelRegistry.getAvailable("all"),
+			getDiscoverableProviders: () => ctx.modelRegistry.getDiscoverableProviders(),
+			refresh: (mode, options) => ctx.modelRegistry.refresh(mode, options),
+		},
+		session.settings,
+	);
+	const model = resolved?.model;
+	if (model === undefined || !isJudgmentApi(model.api)) return { kind: "inactive" };
+	const sessionId = ctx.sessionManager.getSessionId();
+	const judge: Judge = {
+		label: `${model.provider}/${model.id}`,
+		async judge(request, options) {
+			const signal = options?.signal;
+			const apiKey = await ctx.modelRegistry.getApiKey(model, sessionId, { signal });
+			if (!apiKey) throw new Error(`judge ${model.provider}/${model.id}: credentials unavailable`);
+			const headers = await ctx.modelRegistry.resolveModelHeaders(model, signal);
+			return createNativeJudge(model, { apiKey: ctx.modelRegistry.resolver(model, sessionId), headers }).judge(request, options);
+		},
+	};
+	return { kind: "ready", judge, model };
 }

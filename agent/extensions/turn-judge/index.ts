@@ -1,5 +1,5 @@
 // ============================================================================
-// turn-judge — after every main-session turn, ask a native judge (Jev) one
+// turn-judge — after every main-session turn, ask OMP's native JUDGE one
 // question per `TURN-JUDGE-*.md` file about that turn, then either show the
 // verdict or type the configured prompt.
 // Registers input, session_switch/branch/tree, and message_end hooks; no tools
@@ -11,7 +11,6 @@
 //                  walking from cwd up to the git root.
 // Frontmatter (between `---` fences), one `key: value` per line; whole-line `#`
 // comments are skipped. Keys are lowercased.
-//   judge:   commandcode/typesafe/jev   # required: provider/model of a judgment-API model
 //   name:    甩锅                        # optional; defaults to the file label
 //   enabled: true                        # optional; only true/yes/on/1 keep it on
 //   maxChars: 30000                      # optional; history budget, see STATE
@@ -32,7 +31,7 @@
 // message's text (tool calls, tool results and thinking are left out). When it
 // exceeds `maxChars` characters, whole entries are dropped from the oldest end.
 //
-// OUTCOME. Jev answers one choice question with a probability per option.
+// OUTCOME. JUDGE answers one choice question with a probability per option.
 // Among options that carry a prompt, the one with the highest probability at or
 // above its threshold is triggered: its prompt is sent as a user message
 // (`attribution: "agent"`; idle → starts a turn, busy → follow-up). Otherwise
@@ -43,13 +42,15 @@
 // If the user sends a prompt or moves the session before the verdict returns,
 // the verdict is shown as info and nothing is typed.
 //
-// FAILURE POLICY. A failed or unavailable judge request shows a warning for
-// that turn; an invalid file warns once per process (per reason). Headless
-// sessions only log. Nothing blocks or changes the turn.
+// AVAILABILITY. No native JUDGE role: silently inactive. Role changes apply
+// on the next turn. A failed request shows a warning for that turn; an invalid
+// file warns once per process (per reason). Headless sessions only log.
+// Nothing blocks or changes the turn.
 // ============================================================================
 
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";
+import type { Judge } from "@oh-my-pi/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { errorText } from "../_shared/errors.ts";
 import { openNativeJudge } from "../_shared/judge.ts";
@@ -68,7 +69,6 @@ type JudgeOption = { readonly label: string; readonly criteria: string | null; r
 type TurnJudgeSpec = {
 	readonly name: string;
 	readonly filePath: string;
-	readonly judge: { readonly provider: string; readonly modelId: string };
 	readonly question: string;
 	readonly options: readonly JudgeOption[];
 	readonly maxChars: number;
@@ -151,9 +151,6 @@ function parseSpecFile(path: string): SpecParse {
 	if (!parsed) return { kind: "invalid", reason: "missing frontmatter" };
 	const { fields, body } = parsed;
 	if (fields.enabled !== undefined && !/^(true|yes|on|1)$/i.test(unquote(fields.enabled))) return { kind: "disabled" };
-	const judge = unquote(fields.judge ?? "");
-	const slash = judge.indexOf("/");
-	if (slash <= 0 || slash === judge.length - 1) return { kind: "invalid", reason: "judge must be provider/model" };
 	const question = body.trim();
 	if (question === "") return { kind: "invalid", reason: "empty body (the body is the question)" };
 	let maxChars = DEFAULT_MAX_CHARS;
@@ -171,7 +168,6 @@ function parseSpecFile(path: string): SpecParse {
 		spec: {
 			name: fields.name ? unquote(fields.name) : label,
 			filePath: path,
-			judge: { provider: judge.slice(0, slash), modelId: judge.slice(slash + 1) },
 			question,
 			options: options.options,
 			maxChars,
@@ -216,23 +212,12 @@ function fitHistory(lines: readonly HistoryLine[], maxChars: number): HistoryLin
 
 // --- judging --------------------------------------------------------------------
 
-async function runJudge(ctx: ExtensionContext, spec: TurnJudgeSpec, state: TurnState): Promise<JudgeResult> {
+async function runJudge(judge: Judge, spec: TurnJudgeSpec, state: TurnState): Promise<JudgeResult> {
 	const signal = AbortSignal.timeout(JUDGE_TIMEOUT_MS);
-	const opened = await openNativeJudge(ctx, spec.judge, signal);
-	switch (opened.kind) {
-		case "unavailable":
-			return { kind: "failed", reason: opened.reason };
-		case "ready":
-			break;
-		default: {
-			const unreachable: never = opened;
-			return unreachable;
-		}
-	}
 	try {
 		const criteria: Record<string, string | null> = {};
 		for (const option of spec.options) criteria[option.label] = option.criteria;
-		const result = await opened.judge.judge(
+		const result = await judge.judge(
 			{
 				state,
 				questions: { turn: { type: "choice", instructions: spec.question, criteria } },
@@ -286,12 +271,13 @@ export default function turnJudge(pi: ExtensionAPI): void {
 
 	const judgeOne = async (
 		ctx: ExtensionContext,
+		judge: Judge,
 		spec: TurnJudgeSpec,
 		history: readonly HistoryLine[],
 		reply: string,
 		startedAt: number,
 	): Promise<Report> => {
-		const result = await runJudge(ctx, spec, { 过去的记录: fitHistory(history, spec.maxChars), 本轮回复: reply });
+		const result = await runJudge(judge, spec, { 过去的记录: fitHistory(history, spec.maxChars), 本轮回复: reply });
 		switch (result.kind) {
 			case "failed":
 				return { kind: "warning", line: `turn-judge ${spec.name}：判断失败（${result.reason}）` };
@@ -333,7 +319,7 @@ export default function turnJudge(pi: ExtensionAPI): void {
 		epoch += 1;
 	});
 
-	pi.on("message_end", (event, ctx) => {
+	pi.on("message_end", async (event, ctx) => {
 		try {
 			if (ctx.agent.kind !== "main") return;
 			const message = event.message;
@@ -367,8 +353,10 @@ export default function turnJudge(pi: ExtensionAPI): void {
 			if (specs.length === 0) return;
 			const history = historyBefore(ctx, message.timestamp);
 			const startedAt = epoch;
+			const opened = await openNativeJudge(ctx);
+			if (opened.kind === "inactive") return;
 			// One notification per turn: consecutive UI notifications replace each other.
-			void Promise.all(specs.map((spec) => judgeOne(ctx, spec, history, reply, startedAt)))
+			void Promise.all(specs.map((spec) => judgeOne(ctx, opened.judge, spec, history, reply, startedAt)))
 				.then((reports) => {
 					const warnings = reports.flatMap((r) => (r.kind === "warning" ? [r.line] : []));
 					const infos = reports.flatMap((r) => (r.kind === "info" ? [r.line] : []));

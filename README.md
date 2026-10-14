@@ -22,7 +22,7 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 |`agent/extensions/omp-config-autoupdate/omp-config-update.ts`|仓库 → 本机的更新器，[启动时自动更新](#启动时自动更新)和 `/update-omp` 共用；放在启动它的扩展目录里，是独立脚本，不是扩展模块|`~/.omp/agent/extensions/omp-config-autoupdate/`|
 |`agent/thinking-translator.json`|[思考翻译](#思考翻译)插件的有序候选链与最低推理强度配置|`~/.omp/agent/`|
 |`agent/extensions/user-prompt-inject/PROMPT-INJECT-*.md`|[user-prompt-inject](#user-prompt-inject) 的模板：把用户原话注入 mentor 和 discussant|`~/.omp/agent/extensions/user-prompt-inject/`|
-|`agent/extensions/turn-judge/TURN-JUDGE-*.md`|[turn-judge](#turn-judge) 的判定配置：每轮结束后用 Jev 判断一个问题|`~/.omp/agent/extensions/turn-judge/`|
+|`agent/extensions/turn-judge/TURN-JUDGE-*.md`|[turn-judge](#turn-judge) 的判定配置：每轮结束后通过 OMP 的 JUDGE 角色判断一个问题|`~/.omp/agent/extensions/turn-judge/`|
 |`agent/agents/`|subagent 定义；`README.txt` 记录编写陷阱|`~/.omp/agent/agents/`|
 |`agent/extensions/`|本地扩展，每个扩展一个目录：`<名字>/index.ts` 是入口，同目录的其他 `.ts` 是它自己的模块，它自己的配置和模板也放在这里；`_shared/` 是多个扩展共用的代码。扩展配置 `lang-nag/lang-nag.json`、`input-polish/input-polish.json`、`tool-policy-nag/tool-policy-nag.json` 随更新器同步；`doc-polish/doc-polish.json` 属于本机，只作示例，见 [`/update-omp`](#update-omp仓库--本机)|`~/.omp/agent/extensions/`|
 |`agent/extensions-last/`|要在其他按路径加载的扩展之后执行的扩展，由 `config.yml` 的 `extensions` 末项显式加载；目前只有 [system-prompt-replace](#system-prompt-replace)，替换规则 `system-prompt-replace.json` 在它的目录里。`README.md` 只给仓库看，不同步|`~/.omp/agent/extensions-last/`|
@@ -64,11 +64,11 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 
 每次成功的 todo 修改都会被 `ctx-tasklog` 捕获；`ctx` 按这些事件重放任务的最终状态，形成不依赖模型自行总结的简短行事记录。主会话发生 compact 后，`ctx-tool` 会把这份记录连同 context 树注入新 context。这里的 `todo` 由独立插件 [omp-todo-more](#todo-more) 提供：`config.yml` 仍关掉原生 todo（`todo.enabled: false`），配置仓库不再复制其实现。每个列表带 goal 和各项 explanation，插件保留原生基础上的提醒，并恢复 `task:*` worker 的 todo；worker 定义同时要求每个切片维护自己的列表。日志与审查消费者各自消费公开契约，不导入插件 reader。
 
-**把非法工具调用当作整体偏离的信号。** [tool-policy-nag](#tool-policy-nag) 检测模型是否绕开内置工具，只提醒，不拦截命令。默认用命令解析器计数，超过阈值后发一句通用提醒；打开 Jev 检测后，每次调用由 Jev 逐类判定，把这次调用的全部违规逐条列出来。目标不是追求形式上完美的“古典”工具调用，而是在偏离扩散到其他规则之前及时校正。
+**把非法工具调用当作整体偏离的信号。** [tool-policy-nag](#tool-policy-nag) 检测模型是否绕开内置工具，只提醒，不拦截命令。OMP 的 JUDGE 角色可用且首选为原生判定模型时，意图通道自动参与，每次调用判断该用哪个工具；否则由字符串通道计数，超过阈值后发通用提醒。目标不是追求形式上完美的“古典”工具调用，而是在偏离扩散到其他规则之前及时校正。
 
-**用 watchdog 做独立的运行时审阅。** watchdog 作为第三方观察者自动读取 context，并按规则注入提醒；作用类似 Claude 的 `/advisor`，但目标、触发和投放方式更广。判定选项较少时，同一个 watchdog 可以改用 Jev 后端（[watchdog-agent](#watchdog-agent)）。
+**用 watchdog 做独立的运行时审阅。** watchdog 作为第三方观察者自动读取 context，并按规则注入提醒；作用类似 Claude 的 `/advisor`，但目标、触发和投放方式更广。判定选项较少时，可以声明选项改用 OMP 的原生 JUDGE 后端（[watchdog-agent](#watchdog-agent)）。
 
-**逐轮判定并直接纠正。** [turn-judge](#turn-judge) 在主会话每一轮结束后，用 Jev 按配置的问题判断这一轮，例如模型是不是在甩锅；对应选项的置信度达到阈值就直接输入预设的 prompt，否则只显示判定结果。
+**逐轮判定并直接纠正。** [turn-judge](#turn-judge) 在主会话每一轮结束后，通过 OMP 的原生 JUDGE 按配置的问题判断这一轮，例如模型是不是在甩锅；对应选项的置信度达到阈值就直接输入预设的 prompt，否则只显示判定结果。
 
 **让顾问看到用户原话。** mentor 和 discussant 只知道派它的 agent 告诉它的东西，只能顺着对方的转述给意见，成了回声放大器。[user-prompt-inject](#user-prompt-inject) 把根会话里用户自己写的 prompt 按模板注入它们的每次模型调用，让它们拿用户的目标和约束去核对对方的计划，而不是核对对方的转述。
 
@@ -385,10 +385,10 @@ harness 会把 `APPEND_SYSTEM.md` 和每个 agent 的 `description` 都注入主
 
 |扩展|作用|轻量|
 |---|---|---|
-|[tool-policy-nag](#tool-policy-nag)|发现用 shell/eval 代替内置工具时提醒；默认计数后发通用提醒，可改用 Jev 逐类判定并列出全部违规|否|
+|[tool-policy-nag](#tool-policy-nag)|发现用 shell/eval 代替内置工具时提醒；原生 JUDGE 可用时按意图提醒，否则计数后发通用提醒|否|
 |[watchdog-agent](#watchdog-agent)|按目标投放的第三方审查者|否|
 |[user-prompt-inject](#user-prompt-inject)|按模板把用户原话注入指定的 subagent|否|
-|[turn-judge](#turn-judge)|主会话每轮结束后用 Jev 判断这一轮，达到阈值就输入预设 prompt，否则显示判定|否|
+|[turn-judge](#turn-judge)|主会话每轮结束后用原生 JUDGE 判断这一轮，达到阈值就输入预设 prompt，否则显示判定|否|
 |[lang-nag](#lang-nag)|回复语言不对时，在下一条输入前加提醒|否|
 |[repo-rules](#repo-rules)|补读 `.claude/rules` 等 repo 级 rule 目录|是|
 |[append-system-model](#append-system-model)|按模型 / 提供商正则追加系统提示词|是|
@@ -428,7 +428,7 @@ omp 从 `~/.omp/agent/extensions/` 往下只找一层：直接放的 `*.ts`、`<
 |`config.ts`|`loadJsonConfig(文件名, schema, [ctx.cwd, import.meta.dir])`：cwd 下的副本优先，无效的副本跳过并记进 `skipped`|
 |`models.ts`|`resolveModelChain`、`findModel`、`splitLevel`：解析 `provider/id[:level]` 和逗号分隔的候选链，只查模型列表，不发请求|
 |`helper-session.ts`|`runHelperPrompt`：在内存辅助会话里做一次模型调用，不抛异常，固定传 `taskDepth: 1`|
-|`judge.ts`|`openNativeJudge`：按 judgment API 找到 Jev 这类模型并带上本会话的凭据|
+|`judge.ts`|`openNativeJudge`：使用当前会话的配置和 OMP 角色解析器选择 JUDGE 的具体模型，仅原生 judgment API 可用，凭据与请求头由宿主提供|
 |`spec-files.ts`|`discoverSpecFiles`、`parseFrontmatter`、`unquote`：查找和解析 `*-<标签>.md`（扩展目录，再从 cwd 往上到 git root 及各层 `.omp/`）|
 |`task-log.ts`|task log 的路径、格式与独立 `TaskLogGoal` 模型/解析/三行 formatter，`ctx-tool` 与 `ctx-tasklog` 共用；不依赖插件领域 reader|
 
@@ -451,22 +451,27 @@ omp 从 `~/.omp/agent/extensions/` 往下只找一层：直接放的 `*.ts`、`<
 
 ### 行为约束
 
+`turn-judge`、`tool-policy-nag` 的 intent 通道、`watchdog-agent` 的选项判定后端共用 OMP 的 **JUDGE 模型角色**，不各自设置 Jev 的 provider/model。只需在 OMP 的模型选择器中配置 JUDGE；这些已启用功能会在该角色首选可用候选是原生 judgment API 模型时自动参与。角色解析沿用 OMP 的候选顺序与默认值，凭据也从 OMP 取得，不另建模型配置。
+
+JUDGE 也能指向普通聊天或本地模型，但这里的选项概率需要原生判定：角色解析出的模型不是原生后端时，相关判定静默不运行；原生请求失败也不回退到聊天模型。每次触发重新取当前会话的角色配置，不缓存独立开关；OMP 实时重载角色配置后，下一次触发生效。同一次触发沿用解析出的具体模型，不因请求期间改角色而换后端。`enabled: false`、`intent: null` 和轻量模式的禁用设置仍优先，不因配置 JUDGE 而重新打开。
+
+
 #### tool-policy-nag
 
 `tool-policy-nag/` 只作用于主会话。它在 `tool_call` 阶段检查被监视的调用，只提醒，不拦截命令。三条通道各管一件**不同**的事，由同目录的 `tool-policy-nag.json` 分别开关，可以同时开着：
 
 - `form` — 字符串检测：命令解析器机械地数这次调用里有几个操作本该用内置工具。
-- `intent` — 意图检测：把这次调用整体交给 Jev，问它这次调用想干什么、这件事该用哪个内置工具。回答的是**工具路由**问题。
-- `risk` — 风险检测：不经 Jev、确定性地判断这次调用**能不能从这一行看出它会做什么**。这是和工具检测无关的另一件事：一条命令又长、牵涉的外部程序又多、还有会写入的步骤时，结果没法只从命令本身推出来。工具违规、风险、两者都有、两者都无，四种情况都能出现。
+- `intent` — 意图检测：把这次调用整体交给原生 JUDGE，问它这次调用想干什么、这件事该用哪个内置工具。回答的是**工具路由**问题。
+- `risk` — 风险检测：不经模型、确定性地判断这次调用**能不能从这一行看出它会做什么**。这是和工具检测无关的另一件事：一条命令又长、牵涉的外部程序又多、还有会写入的步骤时，结果没法只从命令本身推出来。工具违规、风险、两者都有、两者都无，四种情况都能出现。
 
 - **检查的调用**（三条通道相同）：`bash` / `bash_bg` 的命令；`exec_command` 的命令；经 `write` 写到 `xd://bash`、`xd://bash_bg`、`xd://exec_command` 的命令；`eval` 的 Python / JS 代码（风险通道只看 shell 命令）。工具名按底层工具算（`exec_command`），不是设备路径（`xd://exec_command`），所以同一条命令经设备写和直接调用得到同一条描述。
 - **配置** `tool-policy-nag.json`：
   - `form`：`{"detector": "heuristic"}` 打开字符串通道，`null` 关掉。
-  - `intent`：`{"judge": "commandcode/typesafe/jev", "threshold": 0.5}` 打开意图通道，仓库里的值；`threshold` 取 (0, 1]；`null` 关掉。
+  - `intent`：`{"threshold": 0.5}` 声明意图通道，仓库里的值；模型跟随 OMP 的 JUDGE 角色，原生后端可用后自动运行；`threshold` 取 (0, 1]；`null` 关掉，省略时也不开启。
   - `risk`：`{"minCommands": 4, "minChars": 600, "minPrograms": 3}` 打开风险通道，仓库里的值；`null` 关掉。三个阈值都是正整数：段数下限、字符数下限（满足其一即可）、以及不同外部程序数的下限。
-  - 两个旧块都没有时读旧形状：`{"detector": "heuristic"}` 等于只开 form，`{"detector": "jev", "judge": …, "threshold": …}` 等于只开 intent；没有 `risk` 块时不启用风险通道。
+  - 没有通道块时读单检测器形状：`{"detector": "heuristic"}` 等于只开 form，`{"detector": "jev", "threshold": …}` 等于只声明 intent；没有 `risk` 块时不启用风险通道。
   - 依次尝试 cwd 下和扩展目录下的文件，第一个存在且有效的生效；缺失或无效时试下一个，两个都不行就只开 form。无效的文件每个进程警告一次。每次检查调用时重读，改文件从下一次 shell / eval 调用生效，不用重启。
-- **两条工具通道一次调用只发一条提醒。** `form` 和 `intent` 都开着时提醒由 `intent` 负责（它说得清意图和该用的工具），`form` 照常计数、记日志、维护自己的状态但不发消息；`intent` 关掉时 `form` 才发它那句通用提醒。风险通道不受这条约束（风险提醒说的是另一件事，见下）。
+- **两条工具通道一次调用只发一条提醒。** `intent` 已声明、题目有效且启用、原生 JUDGE 可用时，提醒由 `intent` 负责，`form` 照常计数、记日志、维护自己的状态但不发消息；不满足这些条件时，由 `form` 发通用提醒。准备阶段异常会警告，不妨碍 form；原生判定请求失败不会再补发 form 提醒。风险通道在题目和 JUDGE 解析前运行，不受这条约束。
 
 **form 通道（字符串检测）：**
 
@@ -479,19 +484,19 @@ omp 从 `~/.omp/agent/extensions/` 往下只找一层：直接放的 `*.ts`、`<
   - 内联脚本：`node`、`bun`、`deno`、`python`、`ruby` 带 `-e` / `-c` / `--eval` / `-p` 的内联代码、`deno eval`，以及以 `-` 作为脚本参数从 stdin 读的脚本。不带 `-` 的 heredoc 或 `< script` 重定向不算。
 - **eval 违规**：Python 的 `Path.read_text`、`open` 读取、`glob` / `os.listdir` 等列目录，JS 的 `readFileSync`、`Bun.file`、`readdir`、`Bun.Glob` 等。按正则匹配，是启发式判断。
 - **按命令结构解析**：识别管道、分号、引号、heredoc、命令替换和重定向；跳过 `sudo`、`doas`、`su`、`ssh`；`/dev/*` 目标只对读、搜索、编辑、写文件豁免，列目录照样计数。管道的有效终点是 `wc` 时（`wc` 之后还可以接不读文件的 `tr`、`sort`、`uniq`、`head`、`tail`、`grep` 等），前面的列目录、读、搜索不算违规。
-- **节奏**：前 3 次违规只记录。之后每次有违规的调用发一条 steer 消息“你为什么不遵守system prompt。”并弹出 UI 警告，每个 context 最多 3 条。发满后停止检测，直到下一次 compaction（手动，或成功的自动 compaction）。`intent` 开着时照常计数和记日志，只是不发这句。
+- **节奏**：前 3 次违规只记录。之后每次有违规的调用发一条 steer 消息“你为什么不遵守system prompt。”并弹出 UI 警告，每个 context 最多 3 条。发满后停止检测，直到下一次 compaction（手动，或成功的自动 compaction）。intent 已声明、题目有效且启用、原生 JUDGE 可用时照常计数和记日志，只是不发这句。
 - **状态**：存在 session custom entry `mouriya.omp.tool-policy-nag.state`。恢复会话、切换分支或跳转会话树时，从当前分支重建：分支上的 `compaction`、`reset_boundary`（`/clear`）、`branch_summary` 边界会清零，之后的状态照常恢复，所以切到一个已经发满的分支仍保持停止检测。
 
 **intent 通道（意图检测）：**
 
 - **判定**：每个被检查的调用发一次 judge 请求，里面只有一个 `choice` 问题（不是每类一个是非题）：这次调用想让哪个内置工具做这件事。选项就是那件事该用的工具——`list`（列目录 / 找文件 → `read <dir>` / `glob`）、`read`（读文件内容）、`search`（搜文件文本 → `grep`）、`edit`、`write`、`move`、`eval`、`ast`、`pty`、`shell`（该走 `exec_command`）、`mixed`（一次调用重拼了多个内置工具的操作，没有单个工具能一次做完）、`none`（真程序 / 外部 CLI / 构建 / 测试 / git，shell 本来就是对的）。是否违规按调用类型定：shell 调用只要不是 `none` 就是违规；eval 调用里 `eval` 和 `none` 都不算违规（eval 内核本来就是它的工具）。这里只回答**工具路由**：调用有多长、串了多少东西、有没有风险，都不影响这个判断（那是风险通道的事）。
-- **题目与案例**：问题正文和 12 个选项的判据在同目录的 `INTENT-policy.md` 里（frontmatter 是 `options.<选项>.{title,tool,rubric}`，正文是给 Jev 的说明）。每个 `rubric` 给出这一类的正面例子和反例，反例取自审出来的实际误报类（`km ls actions` 不是 `read` / `list`、`ssh host 'cat x'` 不是 `read`、`npm test > log` 不是 `write`、`curl -I` 不是 `read`、管道过滤器不算读、`ls | head` 是 `list` 等）。`title` 和 `tool` 是提醒里显示的中文意图名和该用的工具。每次调用都重读该文件，改它从下一次调用生效；文件缺失或解析不了时这条通道不提醒（每个进程警告一次）。
+- **题目与案例**：问题正文和 12 个选项的判据在同目录的 `INTENT-policy.md` 里（frontmatter 是 `options.<选项>.{title,tool,rubric}`，正文是给 JUDGE 的说明）。每个 `rubric` 给出这一类的正面例子和反例，反例取自审出来的实际误报类（`km ls actions` 不是 `read` / `list`、`ssh host 'cat x'` 不是 `read`、`npm test > log` 不是 `write`、`curl -I` 不是 `read`、管道过滤器不算读、`ls | head` 是 `list` 等）。`title` 和 `tool` 是提醒里显示的中文意图名和该用的工具。每次调用都重读该文件，改它从下一次调用生效；文件缺失或解析不了时这条通道不提醒（每个进程警告一次）。
 - **提醒**：选中选项的概率达到 `threshold` 才提醒，一次调用最多一条：提醒里写「你这次 `exec_command` 调用属于『列目录 / 找文件』，应该用 `read <dir>` / `glob`，而不是这样绕出去。」再加这次调用的原文。不计数、不封顶。
 - **时机**：判定与工具调用并行，不阻塞命令，结果通常在调用结束后才到，所以消息以 `aside` 插到下一个 step 边界；会话已经空闲时开启新一轮。判定返回前会话切换、分支切换或树跳转时不发消息，只弹 info。
-- **失败**：模型找不到、不是 judgment API、没有凭据、请求出错或 90 秒超时时不提醒，也不退回字符串通道；同一原因每个进程警告一次，headless 只写日志。
-- **用量**：每个被检查的调用一次 judge 请求，消耗 Jev 额度，不计入会话用量。每次判定写一条 `Tool-policy intent verdict` info 日志，含选中的选项、概率、confidence 和是否触发。
+- **可用性与失败**：没有原生 JUDGE 时不发判定请求，由已启用的 form 通道照常提醒。原生后端可用后，凭据、请求或响应出错，以及 90 秒超时都不提醒，也不补发字符串提醒；同一原因每个进程警告一次，headless 只写日志。
+- **用量**：每个被检查的调用一次 judge 请求，消耗 JUDGE 后端额度，不计入会话用量。每次判定写一条 `Tool-policy intent verdict` info 日志，含选中的选项、概率、confidence 和是否触发。
 
-**risk 通道（风险检测，不经 Jev）：**
+**risk 通道（风险检测，不经模型）：**
 
 - **判据**（三条都满足才算）：① 规模——简单命令段数 ≥ `minCommands`，或整条命令字符数 ≥ `minChars`；② 牵涉面——去掉 shell 自己的管道件（`cd`、`echo`、`printf`、`export`、`source`、`test`、`mkdir` 等）后，不同的程序数 ≥ `minPrograms`，也就是这条命令大部分在跟别的软件打交道；③ 有写入——重定向 / `tee` / 就地编辑，或一个按本职会写的程序（`rm`、`cp`、`mv`、`chmod`、`dd`、`tar -c/-x`、`rsync`、`scp`、`make`、`install`、`patch`…），或一个只在特定子命令 / 参数下写的程序（`git add|commit|push|reset…`、`gh … create|delete|download|upload…`、`docker run|build|push|rm|exec…`、`kubectl apply|delete|exec…`、`orb push|create|delete…`、`npm|pnpm|yarn|bun install|add|…`、`tofu|terraform apply|destroy|state|init`、`curl -o|-O|-T|-d|-X POST`、`wget -O`）。子命令只取参数里前两个非 `-` 开头的词，所以引号里的 `fork=`、issue 标题里的词不会误判。
 - **只读不算风险**：一条只会读的命令是 intent 通道的事；只写自己产物的构建 / 设置命令也不触发（要求同时有读和写的日子已经过去——现在要求的是"长 + 程序多 + 有写入"）。
@@ -515,7 +520,7 @@ omp 从 `~/.omp/agent/extensions/` 往下只找一层：直接放的 `*.ts`、`<
 |`every`|被观察的 agent 累计多少条操作后运行一次，默认 30。每个工具调用算 1 条，每条非空文字回复算 1 条|
 |`scope`|`full`（默认，看整条分支）或 `window`（只看本 watchdog 上次运行之后的新消息）|
 |`model`、`tools`|聊天 reviewer 后端用，见下|
-|`judge`、`instructions`、`option.*`|Jev 后端用，见下|
+|`instructions`、`option.*`|原生 JUDGE 后端用，声明 `option.*` 即选择该后端，见下|
 
 **两种后端，二选一：**
 
@@ -523,19 +528,19 @@ omp 从 `~/.omp/agent/extensions/` 往下只找一层：直接放的 `*.ts`、`<
   - `model` 可带 `:effort`；缺省依次尝试 `@advisor`、`advisor`、`@slow` 角色，最后用会话模型。显式写了 `model` 但解析不到时跳过这次审阅，不回退。
   - `tools` 默认 `read` / `grep` / `glob`，只接受 read、grep、glob、ast_grep、web_search、edit、write、bash、eval。edit、write、bash、eval 会给 reviewer 真实的修改能力，按需授予。
   - 正文是审阅重点。reviewer 被要求回答 `PASS`，或带严重度的问题说明。回答首行以 `PASS`、`OK`、`LGTM`、`NONE` 开头算通过；其他非空回答都当作问题说明注入，没写严重度时按 `concern` 处理。
-- **Jev 判定**：`judge: <provider>/<model>`，指向 `api` 为 `typesafe` 或 `openrouter-decisions` 的模型，例如内置的 `typesafe/jev-latest`、`openrouter/~typesafe/jev-latest`，或在 `models.yml` 里自定义的 provider（`baseUrl` 指向兼容 `POST /v1/systemone` 的根地址，`api: typesafe`）。
-  - 必须同时写正文；不能与 `model`、`tools`、`note` 或 effort 后缀同用，否则跳过该文件并记 warning。
-  - Jev 只看按 `scope` 选出的 transcript 和正文准则，从作者声明的选项里选一个，不调工具、不写解释；注入的文字是该选项预先写好的 prompt。
-  - 按 judgment API 认模型，不按目录 kind（自定义 provider 的 kind 默认为 chat），也不会把 chat API 的同名模型当成 Jev。
-  - 模型不可用、鉴权失败、响应无效、选了未声明的选项或 90 秒超时，都不提醒，不当作通过，也不退回聊天 reviewer。
+- **原生 JUDGE 判定**：声明 `option.*`，模型跟随 OMP 的 JUDGE 角色，不再写 `judge: provider/model`。
+  - 必须同时写正文；不能与 `model`、`tools` 或 `note` 同用，否则跳过该文件并记 warning。
+  - 只看按 `scope` 选出的 transcript 和正文准则，从作者声明的选项里选一个，不调工具、不写解释；注入的文字是该选项预先写好的 prompt。
+  - 具体模型由 OMP 的角色解析器选择，按 judgment API 识别原生后端，不按 provider 名字或 catalog kind 猜测；不额外实现重试候选链。
+  - 没有原生 JUDGE 时静默跳过，配置好后下一次审阅自动可用。鉴权失败、响应无效、选了未声明的选项或 90 秒超时，都不提醒，不当作通过，也不退回聊天 reviewer。
 
-**Jev 选项。** 用扁平键声明。frontmatter 解析器会把键转成小写，所以标签只能是小写字母、数字、`_`、`-`；每个值占一行。
+**判定选项。** 用扁平键声明。frontmatter 解析器会把键转成小写，所以标签只能是小写字母、数字、`_`、`-`；每个值占一行。
 
 |键|说明|
 |---|---|
-|`instructions`|可选，交给 Jev 的判定说明；缺省为“只按正文准则判断 transcript 里最近的工作，不推断 transcript 以外的事实”|
-|`option.<标签>`|声明一个选项，值是交给 Jev 的判定标准；留空表示标签本身已足够说明。至少两个|
-|`option.<标签>.prompt`|Jev 选中该选项时注入的文字；不写就是静默选项（相当于通过）。至少一个选项要有|
+|`instructions`|可选，交给 JUDGE 的判定说明；缺省为“只按正文准则判断 transcript 里最近的工作，不推断 transcript 以外的事实”|
+|`option.<标签>`|声明一个选项，值是交给 JUDGE 的判定标准；留空表示标签本身已足够说明。至少两个|
+|`option.<标签>.prompt`|JUDGE 选中该选项时注入的文字；不写就是静默选项（相当于通过）。至少一个选项要有|
 |`option.<标签>.delivery`|可选，覆盖该选项的投放方式，取值同 `delivery`；只能用于有 prompt 的选项|
 
 注入的标签是 `<watchdog name=… severity=<选中的标签>>`。未知的 `option.*` 键、只写了 prompt / delivery 却没声明的选项、空 prompt，都会让整个文件被跳过并记 warning。
@@ -545,7 +550,6 @@ omp 从 `~/.omp/agent/extensions/` 往下只找一层：直接放的 `*.ts`、`<
 ```md
 ---
 target: main
-judge: typesafe/jev-latest
 delivery: aside
 option.pass: 最近的工作没有宣称已验证，或宣称时附了实际运行输出；证据不足时也选这个。
 option.concern: 最近的工作宣称已验证，但没有给出实际运行时证据。
@@ -562,18 +566,18 @@ option.blocker.delivery: steer
 - **计数**：每条 assistant 消息结束时累加该 watchdog 的计数。达到 `every` 就立即运行，不等本轮结束；运行期间 agent 照常工作。
 - **补跑**：本轮结束（`agent_end` 且不是 `willContinue`）时计数没到 `every` 但大于 0，就补跑一次；该 watchdog 正在运行时，等它跑完再补跑。
 - **transcript**：按 `scope` 取，`full` 为整条分支，`window` 为游标之后的消息。游标只在审查得出结论（通过或有问题）后推进，审查失败或超时时不动，下次运行会把这段重新审一遍。包含用户、assistant、工具调用与结果的文字，不截断，不含自己注入的 `<watchdog>` 消息。
-- **注入**：聊天 reviewer 不通过，或 Jev 选中带 prompt 的选项时，运行一结束就以 `<watchdog name=… severity=…>` 注入匹配的会话，时机按 `delivery`：`aside` 在运行中插到下一个 step 边界、空闲时开启新一轮；`steer` 打断当前运行；`followUp` 排到当前运行之后；`nextTurn` 先排队，等用户下一次真正输入（不是斜杠命令，也不是扩展发的消息）开始的那一轮，作为一条 custom 消息注入。subagent 没有用户输入，`nextTurn` 在它下一次触发 `before_agent_start` 的一轮注入；被 `write agent://<id>` 唤醒的续聊不触发它，提醒继续留在队列里。排队中的提醒只在内存里，会话重启或切换就丢失。
+- **注入**：聊天 reviewer 不通过，或原生 JUDGE 选中带 prompt 的选项时，运行一结束就以 `<watchdog name=… severity=…>` 注入匹配的会话，时机按 `delivery`：`aside` 在运行中插到下一个 step 边界、空闲时开启新一轮；`steer` 打断当前运行；`followUp` 排到当前运行之后；`nextTurn` 先排队，等用户下一次真正输入（不是斜杠命令，也不是扩展发的消息）开始的那一轮，作为一条 custom 消息注入。subagent 没有用户输入，`nextTurn` 在它下一次触发 `before_agent_start` 的一轮注入；被 `write agent://<id>` 唤醒的续聊不触发它，提醒继续留在队列里。排队中的提醒只在内存里，会话重启或切换就丢失。
 - **识别会话**：取宿主的 `ctx.agent`：`kind` 为 `main` 的是主会话；subagent 的名字取 `ctx.agent.name`（agent 定义名，如 `task:low`），id 取 `ctx.agent.id`（子会话文件名去掉 `.jsonl`）。没有会话文件（如 `omp -p --no-session`）的主会话同样识别为 `main`。
 - **封顶**：设置了 `maxPerContext` 时，每个 watchdog 在一个 context 里最多注入这么多条（`nextTurn` 排队时就计入），封顶后到下次压缩前不再运行审阅；不设就不限。提醒不做去重，审出来就发。每次压缩（手动或自动）后封顶计数清零；压缩不影响累计的操作条数、`window` 游标和正在进行的判定。
 - **状态恢复**：游标在每次审查得出结论后写进会话（custom entry `mouriya.omp.watchdog-agent.cursor`），跟随分支。会话启动或恢复、`session_switch`、分支切换和树跳转时从当前分支恢复：游标取该 watchdog 文件最后一条记录；封顶计数取上次压缩之后分支上已注入的该 watchdog 提醒条数；累计操作数取游标之后的操作数。还没返回的判定丢弃。
-- **失败**：模型不可用、审查报错或超时（聊天 reviewer 90 秒）、Jev 失败都不提醒，也不推进游标，不阻塞主轮次。超时前已经流出的半截文字不算结论。subagent 上的注入是尽力而为，只有执行器收走结果前会话被重新打开才生效。
-- **用量**：聊天 reviewer 用禁止加载扩展的内存会话，不会递归。Jev 的用量和估算费用只写扩展 info 日志，不计入会话用量。两种后端各自消耗额度。
+- **失败**：模型不可用、审查报错或超时（两种后端均为 90 秒）都不提醒，也不推进游标，不阻塞主轮次。超时前已经流出的半截文字不算结论。subagent 上的注入是尽力而为，只有执行器收走结果前会话被重新打开才生效。
+- **用量**：聊天 reviewer 用禁止加载扩展的内存会话，不会递归。原生 JUDGE 的用量和估算费用只写扩展 info 日志，不计入会话用量。两种后端各自消耗额度。
 
 **斜杠命令**（子命令、watchdog 名和范围都有补全）：
 
 |命令|作用|
 |---|---|
-|`/watchdog` 或 `/watchdog list`|列出成功解析的 watchdog 文件：当前是否生效、全局开关、本会话覆盖、目标、`every`、`scope`、后端和路径。读不了、没有 `target` 或 Jev 声明有误的文件不在列表里，会话加载时各记一条 warning|
+|`/watchdog` 或 `/watchdog list`|列出成功解析的 watchdog 文件：全局开关、本会话覆盖、目标、`every`、`scope`、后端和路径。`ON` 表示开关开启；`native @judge` 是否执行还取决于当前原生 JUDGE 可用性。读不了、没有 `target` 或选项声明有误的文件不在列表里，会话加载时各记一条 warning|
 |`/watchdog on\|off <name>` 或 `… <name> session`|只在本会话开启或关闭，不改文件。记录为会话自定义条目，恢复会话后仍然有效，并跟随会话分支；只能用于目标包含本会话的 watchdog|
 |`/watchdog on\|off <name> global`|改写该文件 frontmatter 里的 `enabled` 行（没有就加一行），对之后所有会话生效，并清除本会话对它的覆盖|
 |`/watchdog add <需求>`|让模型按需求起草一个新 watchdog，在对话里和用户对齐后写入项目或全局目录，见下|
@@ -654,7 +658,7 @@ option.blocker.delivery: steer
 
 #### turn-judge
 
-`turn-judge/` 在主会话每一轮结束后，按 `TURN-JUDGE-<标签>.md` 用 judgment API 模型（如 Jev）判断这一轮，每个文件问一个问题。带 prompt 的选项置信度达到阈值时，把这段 prompt 直接作为一条用户消息输入；否则弹 info 显示判定结果。和 [watchdog-agent](#watchdog-agent) 的 Jev 后端相比：它每轮判一次，不按操作数；发给 Jev 的只有用户输入和模型说的话；按选项的置信度阈值触发，不按 Jev 选中哪个选项；没触发时也显示判定结果。
+`turn-judge/` 在主会话每一轮结束后，按 `TURN-JUDGE-<标签>.md` 通过 OMP 的原生 JUDGE 判断这一轮，每个文件问一个问题。带 prompt 的选项置信度达到阈值时，把这段 prompt 直接作为一条用户消息输入；否则弹 info 显示判定结果。和 [watchdog-agent](#watchdog-agent) 的选项后端相比：它每轮判一次，不按操作数；发给 JUDGE 的只有用户输入和模型说的话；按选项的置信度阈值触发，不按选中了哪个选项；没触发时也显示判定结果。
 
 **文件位置**与 [watchdog-agent](#watchdog-agent) 相同：扩展目录（`~/.omp/agent/extensions/turn-judge/`）下的 `TURN-JUDGE-*.md`，或从 cwd 往上到 git root 每一层的 `<dir>/TURN-JUDGE-*.md`、`<dir>/.omp/TURN-JUDGE-*.md`，文件名不区分大小写。每个文件独立判定，各自一次请求。仓库带的配置随更新器同步；本机自己加的属于本机。
 
@@ -662,21 +666,19 @@ option.blocker.delivery: steer
 
 |字段|说明|
 |---|---|
-|`judge`（必填）|`provider/model`，必须是 judgment API 的模型，如 `commandcode/typesafe/jev`|
 |`name`|显示名，缺省取文件名里的标签|
 |`enabled`|默认 `true`；写了的话，只有 `true`、`yes`、`on`、`1`（不区分大小写，可带引号）算开启|
 |`maxChars`|过去的记录的字数上限，正整数，默认 30000|
-|`option.<标签>`|声明一个选项，值是交给 Jev 的判定标准，留空表示标签本身已足够说明。至少两个。标签可以用中文，不能含 `.` 或空白|
+|`option.<标签>`|声明一个选项，值是交给 JUDGE 的判定标准，留空表示标签本身已足够说明。至少两个。标签可以用中文，不能含 `.` 或空白|
 |`option.<标签>.prompt`|该选项触发时输入的 prompt；不写就只显示判定|
 |`option.<标签>.threshold`|写了 prompt 就必填，取 (0, 1]；该选项的概率达到或超过它才输入 prompt|
 
-正文是问题，原样交给 Jev。少于两个选项、只写了 prompt / threshold 却没声明选项、threshold 缺失或越界、`judge` 不是 `provider/model`、正文为空，都会让整个文件被跳过。
+正文是问题，原样交给 JUDGE。少于两个选项、只写了 prompt / threshold 却没声明选项、threshold 缺失或越界、正文为空，都会让整个文件被跳过。
 
 仓库的 `agent/extensions/turn-judge/TURN-JUDGE-甩锅.md` 问“模型是不是在甩锅？”，选项 `是` / `否`；`是` 的概率达到 0.5 时输入“你这一轮在甩锅：把本该你自己负责、自己做的事推给了用户。不要等我，接着把它做完。”：
 
 ```md
 ---
-judge: commandcode/typesafe/jev
 option.是:
 option.否:
 option.是.prompt: 你这一轮在甩锅：把本该你自己负责、自己做的事推给了用户。不要等我，接着把它做完。
@@ -687,23 +689,23 @@ option.是.threshold: 0.5
 
 **一轮**：主会话里模型自己结束（`stopReason: "stop"`）、有文字的 assistant 消息。被中断、出错、以工具调用结束的消息都不算；subagent 不判。
 
-**发给 Jev 的内容**：`{ 过去的记录: [{ 角色: "用户" | "模型", 内容 }], 本轮回复 }`。
+**发给 JUDGE 的内容**：`{ 过去的记录: [{ 角色: "用户" | "模型", 内容 }], 本轮回复 }`。
 
 - `过去的记录` 是当前分支上本轮之前的内容，按时间顺序：用户自己的输入（`attribution: "user"`、非 `synthetic`，所以扩展注入的消息不算）和每条 assistant 消息的文字。工具调用、工具结果、thinking 都不放。
-- 超过 `maxChars` 时从最早的一条起整条丢掉，不告诉 Jev。默认 30000 是因为离线测试里约 4 万字以上的 state 会被 Jev 返回 HTTP 400。
+- 超过 `maxChars` 时从最早的一条起整条丢掉，不向判定模型添加省略说明。默认 30000 保留了既有 Jev 后端的请求预算。
 - `本轮回复` 是这一轮最后那条消息的文字，不截断。
 
 **结果：**
 
 - 带 prompt 的选项里，概率达到自己阈值的，取概率最高的一个，把它的 prompt 以 `attribution: "agent"` 发出：会话空闲时开启新一轮，还在运行时排到本轮之后（follow-up）。
-- 其余文件弹 info：`turn-judge <name>：<Jev 选中的标签>（<每个选项的概率>）`。同一轮所有文件的 info 等这一轮的判定全部返回后合并成一条弹出，因为连续的 UI 通知会互相覆盖。
+- 其余文件弹 info：`turn-judge <name>：<JUDGE 选中的标签>（<每个选项的概率>）`。同一轮所有文件的 info 等这一轮的判定全部返回后合并成一条弹出，因为连续的 UI 通知会互相覆盖。
 - prompt 引起的那一轮照样会判，没有上限：判定一直达到阈值，就一直输入。
 - 判定返回前用户发了新输入，或会话切换、分支切换、树跳转时，本该输入的 prompt 不再输入，只在 info 里显示判定并注明未发送。
 - 文件每轮结束时重读，改文件从下一轮生效，不用重启。
 
-**失败**：模型找不到、不是 judgment API、没有凭据、请求出错或 90 秒超时，这一轮弹 warning，写明是哪个文件、什么原因。文件格式错误时跳过，同一文件同一原因每个进程只警告一次。headless 只写日志。都不阻塞也不改动这一轮。
+**可用性与失败**：没有原生 JUDGE 时静默不运行，不报缺少模型；配置好后下一轮自动判定。原生后端已可用，但凭据、请求或响应出错，或 90 秒超时，这一轮弹 warning，写明是哪个文件、什么原因。文件格式错误时跳过，同一文件同一原因每个进程只警告一次。headless 只写日志。都不阻塞也不改动这一轮。
 
-**用量**：每轮每个文件一次 judge 请求，各自消耗 Jev 额度，不计入会话用量。
+**用量**：每轮每个文件一次 judge 请求，各自消耗 JUDGE 后端额度，不计入会话用量。
 
 #### lang-nag
 
