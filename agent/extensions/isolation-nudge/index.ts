@@ -27,13 +27,24 @@ import { type ExtensionAPI, type ExtensionContext, z } from "@oh-my-pi/pi-coding
 import { errorText } from "../_shared/errors.ts";
 
 /**
- * `task:*` workers and user-tagged model agents (`m1`, `m2`, … — the bundled
- * task template) hold write tools. An omitted `agent` is counted as a writer
- * conservatively, without resolving the caller's actual default (for
- * `task:mid`/`low`/`free` it is the read-only mentor). `discuss:*` and
- * `mentor:*` are read-only by definition.
+ * `task:*` workers, the lane agents (`labor`, `engineer`, …) and user-tagged
+ * model agents (`m1`, `m2`, … — the bundled task template) hold write tools.
+ * An omitted `agent` is counted as a writer conservatively, without resolving
+ * the caller's actual default; every lane lists itself first in `spawns`, so
+ * that default writes too.
  */
-const isWriter = (agent: string | undefined): boolean => agent === undefined || /^task(?::|$)/.test(agent) || /^m\d+$/.test(agent);
+const LANE_WRITERS: Record<string, true> = {
+	labor: true,
+	engineer: true,
+	theorist: true,
+	philosopher: true,
+	"fusion-worker": true,
+	"fusion-deepthink": true,
+	"fusion-hierarchical": true,
+	"fusion-flattened": true,
+};
+const isWriter = (agent: string | undefined): boolean =>
+	agent === undefined || /^task(?::|$)/.test(agent) || /^m\d+$/.test(agent) || LANE_WRITERS[agent] === true;
 
 /** One spawn as the model wrote it. */
 const taskItemSchema = z

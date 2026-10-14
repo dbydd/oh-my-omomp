@@ -3,7 +3,7 @@
     "detector": "heuristic"
   },
   "intent": {
-    "judge": "commandcode/typesafe/jev",
+    "judge": "magpie-decisions/group/decider",
     "threshold": 0.5
   },
   "risk": {

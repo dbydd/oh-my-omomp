@@ -1,5 +1,5 @@
 /**
- * Completion judge for `task:low` / `task:mid` / `task:free` subagents. It runs
+ * Completion judge for lane subagents (`labor`, `engineer`, …). It runs
  * inside the subagent's own session and intercepts a terminal `yield` when
  * that run has a structured yield tool. Unstructured task runs have no yield
  * to intercept. A fast model compares the assignment (the `task` prompt the
@@ -45,11 +45,20 @@ import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry
 import { errorText } from "../_shared/errors.ts";
 import { textOf } from "../_shared/messages.ts";
 
-const MODEL = "openai-codex/gpt-6-sol";
+const MODEL = "magpie/group/fusion-flattened";
 const EFFORT = THINKING_EFFORTS.find((effort) => effort === "low");
 if (EFFORT === undefined) throw new Error("Host thinking efforts do not include low");
 const DEADLINE_MS = 25_000;
-const JUDGED_AGENTS: Record<string, true> = { "task:low": true, "task:free": true, "task:mid": true };
+const JUDGED_AGENTS: Record<string, true> = {
+	labor: true,
+	engineer: true,
+	theorist: true,
+	philosopher: true,
+	"fusion-worker": true,
+	"fusion-deepthink": true,
+	"fusion-hierarchical": true,
+	"fusion-flattened": true,
+};
 const TOOL_CALL_WINDOW = 50;
 const ARGS_CHAR_LIMIT = 800;
 const RESULT_CHAR_LIMIT = 800;

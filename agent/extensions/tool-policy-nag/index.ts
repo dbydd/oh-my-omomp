@@ -47,7 +47,7 @@ import { intentReminder, intentViolation, JUDGE_TIMEOUT_MS, judgeIntent, loadInt
 import { inspectRisk, riskReminder } from "./risk.ts";
 
 const NAG_TEXT = "你为什么不遵守system prompt。";
-const STATE_ENTRY_TYPE = "mouriya.omp.tool-policy-nag.state";
+const STATE_ENTRY_TYPE = "dbydd.omp.tool-policy-nag.state";
 /** Fire on the hit that goes *past* three. */
 const HIT_THRESHOLD = 3;
 const MAX_NAGS_PER_CONTEXT = 3;
@@ -288,7 +288,7 @@ export default function toolPolicyNag(pi: ExtensionAPI): void {
 				if (finding !== null) {
 					pi.logger.warn("Tool-policy risk", { limits: lanes.risk, ...finding });
 					pi.sendUserMessage(
-						riskReminder(call.command, finding),
+						riskReminder(call.tool, call.command, finding),
 						ctx.isIdle() ? { attribution: "agent" } : { deliverAs: "aside", attribution: "agent" },
 					);
 					if (ctx.hasUI) {

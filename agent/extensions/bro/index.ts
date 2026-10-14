@@ -64,8 +64,7 @@ function buildDefaultPrompt(response: string, mode: BroMode): string {
 // --- configuration ----------------------------------------------------------
 
 const ENV_MODEL = process.env.PI_BRO_MODEL?.trim();
-const DEFAULT_MODEL =
-	"commandcode/deepseek/deepseek-v4.1-flash,google-antigravity/gemini-2.5-flash-lite,commandcode/google/gemini-3.5-flash-lite";
+const DEFAULT_MODEL = "magpie/group/fusion-flattened";
 const PROMPT_FILE = join(import.meta.dir, "bro-prompt.md");
 const SETTINGS_FILE = join(import.meta.dir, "bro-settings.json");
 const LOADING_TEXT = "Simplifying for my bro…";

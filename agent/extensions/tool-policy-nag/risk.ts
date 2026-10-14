@@ -256,9 +256,9 @@ export function inspectRisk(command: string, limits: RiskConfig): RiskFinding | 
 }
 
 /** The risk, why it is one, and the call itself. */
-export function riskReminder(command: string, finding: RiskFinding): string {
+export function riskReminder(tool: string, command: string, finding: RiskFinding): string {
 	return [
-		`你这次 \`exec_command\` 调用有 ${finding.commands} 段命令、${finding.chars} 字符，牵涉 ${finding.programs.length} 个外部程序（${finding.programs
+		`你这次 \`${tool}\` 调用有 ${finding.commands} 段命令、${finding.chars} 字符，牵涉 ${finding.programs.length} 个外部程序（${finding.programs
 			.slice(0, 8)
 			.map((program) => `\`${program}\``)
 			.join(

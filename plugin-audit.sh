@@ -2,12 +2,12 @@
 # plugin-audit.sh — 对比 install-plugins.sh 的历史插件名与本机已装插件。
 #
 # 扫描范围：仅 install-plugins.sh 这一个脚本，提交范围 BASE..HEAD（含 BASE）。
-# BASE 固定为版本号/git-ref 被清理成裸包名之后的第一个提交，早于它的带
-# `@version` / `#sha` 的历史不参与，避免把同一插件的旧钉版当成不同插件。
+# BASE 是本仓库的 fork 点（上游 oh-my-omp/omp-config 的最后一个提交）：上游那段
+# 插件列表属于别人的机器，不参与本仓库的漂移比较。
 # 归一后直接与 `omp plugin list --json` 对比并给出分类结论，无需再人工跑一遍。
 set -euo pipefail
 
-BASE="5974c4fa2f237b951befa935d45d8cd8efd5d30e"
+BASE="9658fe6f88625eb9b17eeca822fc86001da4618f"
 SCRIPT="install-plugins.sh"
 
 command -v omp >/dev/null 2>&1 || { printf '%s\n' 'omp 不在 PATH' >&2; exit 1; }

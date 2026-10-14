@@ -16,6 +16,7 @@ plugins/node_modules/
 plugins/.cache/
 node_modules/
 bun.lock
+.omp/hindsight/
 
 
 # Credential-bearing and generated files

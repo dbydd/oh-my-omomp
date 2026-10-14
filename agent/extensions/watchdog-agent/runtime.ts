@@ -109,7 +109,7 @@ type WatchdogState = {
 };
 
 /** Session-scoped switch for one watchdog file, persisted as a custom session entry. */
-const OVERRIDE_ENTRY_TYPE = "mouriya.omp.watchdog-agent.override";
+const OVERRIDE_ENTRY_TYPE = "dbydd.omp.watchdog-agent.override";
 type SessionOverride = { readonly filePath: string; readonly enabled: boolean | null };
 
 function parseOverride(data: unknown): SessionOverride | null {
@@ -133,7 +133,7 @@ function overridesFromBranch(entries: ReadonlyArray<unknown>): Map<string, boole
 }
 
 /** Window cursor of one watchdog file, persisted after each review that reaches a verdict. */
-const CURSOR_ENTRY_TYPE = "mouriya.omp.watchdog-agent.cursor";
+const CURSOR_ENTRY_TYPE = "dbydd.omp.watchdog-agent.cursor";
 type CursorEntry = { readonly filePath: string; readonly cursor: number };
 
 /** Cursors in effect on the given branch: the last entry per file wins. */

@@ -1,6 +1,17 @@
 extensions:
   - ~/.omp/agent/extensions-last/system-prompt-replace/index.ts
 setupVersion: 2
+modelRoles:
+  task: magpie/group/fusion-worker
+  slow: magpie/group/philosopher
+  plan: magpie/group/theorist
+  advisor: magpie/group/fusion-deepthink
+  smol: magpie/group/labor
+  tiny: magpie/group/labor
+  memory: magpie/group/labor
+  commit: magpie/group/labor
+  vision: magpie/group/flash-vibe
+  default: magpie/group/fusion-hierarchical
 dev:
   autoqaConsent: denied
 composer:
@@ -15,27 +26,18 @@ task:
   eager: preferred
   maxRuntimeMs: 0
   disabledAgents:
-    - task
     - scout
-    - sonic
     - reviewer
     - security-reviewer
   agentModelOverrides:
-    discuss:divergent: "anthropic/claude-opus-5-5:medium, openai-codex/gpt-5.6-luna:max"
-    discuss:steady: openai-codex/gpt-5.6-sol:medium
-    mentor:default: "openai-codex/gpt-5.6-sol:high, openai-codex/gpt-5.6-luna:max"
-    task:high: anthropic/claude-opus-5-5:high
-    task:mid: openai-codex/gpt-6-1-sol:high
-    task:low: openai-codex/gpt-5.6-luna:max
-    task:free: "bansos/muse-spark-1.3-contributor:xhigh, opencode-go/muse-spark-1.3-contributor:xhigh, openai-codex/gpt-6-luna:max"
-    sonic: openai-codex/gpt-6-luna:max
-    task: openai-codex/gpt-6-luna:max
+    sonic: magpie/group/labor
+    task: magpie/group/fusion-worker
   agentPrewalk:
     {}
   isolation:
     enabled: true
   enableLsp: false
-  enableEffort: false
+  enableEffort: true
   maxConcurrency: 64
   maxEffort: high
 fetch:
@@ -58,36 +60,6 @@ codexResets:
   autoRedeem: "no"
 lsp:
   enabled: false
-retry:
-  fallbackChains:
-    web:
-      - web/perplexity
-      - google/gemini-2.5-flash
-      - anthropic/claude-haiku-4-5
-      - xai/grok-4.5
-      - web/zai
-      - web/exa
-      - web/tinyfish
-      - web/jina
-      - web/kagi
-      - web/tavily
-      - web/firecrawl
-      - web/brave
-      - web/kimi
-      - web/parallel
-      - web/synthetic
-      - web/searxng
-      - web/startpage
-      - web/duckduckgo
-      - web/ecosia
-      - web/google
-      - web/mojeek
-      - web/public
-      - google-antigravity/gemini-2.5-flash
-      - openai-codex/gpt-5.6
-      - openai-codex/gpt-5.5
-      - xai-oauth/grok-4.5
-      - web/ollama
 inlineToolDescriptors: "on"
 tools:
   xdevDocs: inline
@@ -97,7 +69,14 @@ eval:
   tools:
     enabled: false
 edit:
-  mode: hashline
+  mode: apply_patch
+computer:
+  enabled: true
+bashInterceptor:
+  enabled: true
+python:
+  kernelMode: session
+  interpreter: ""
 readLineNumbers: true
 textVerbosity: high
 expandThinkingBlocks: true

@@ -1,25 +1,10 @@
 {
-  "enabled": true,
+  "enabled": false,
   "targetLanguage": "Simplified Chinese",
   "translatorModels": [
     {
-      "provider": "futureppo-pool",
-      "id": "ministral-14b-latest"
-    },
-    {
-      "provider": "commandcode",
-      "id": "inclusionai/ling-3.1-flash:free",
-      "effort": "low"
-    },
-    {
-      "provider": "commandcode",
-      "id": "poolside/laguna-s-2.1-free",
-      "effort": "minimal"
-    },
-    {
-      "provider": "commandcode",
-      "id": "stealth/glyph-cluster:free",
-      "effort": "minimal"
+      "provider": "magpie",
+      "id": "group/fusion-flattened"
     }
   ],
   "trace": false

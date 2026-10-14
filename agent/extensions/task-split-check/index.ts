@@ -11,12 +11,13 @@
  * item is flagged by any check the whole call is blocked with the reasons of
  * every flagging check. Checks differ only in their definition:
  *
- * - `split`: main session `task` calls, items for `task:low` / `task:free` /
- *   `task:mid`; does the item cover more than one topic. A prompt that got a
- *   verdict passes unchanged the second time, so the main agent can force an
- *   item it judges to be one topic.
+ * - `split`: main session `task` calls, items for a leaf or mid-tier lane
+ *   (`labor`, `engineer`, `theorist`, `philosopher`, `fusion-worker`,
+ *   `fusion-deepthink`); does the item cover more than one topic. A prompt that
+ *   got a verdict passes unchanged the second time, so the main agent can force
+ *   an item it judges to be one topic.
  * - `report-limit`: every session, `task` and `fork_task`, every task-series
- *   item (`task:*`, or `agent` omitted); does the dispatch cap the length of
+ *   item (a lane name, or `agent` omitted); does the dispatch cap the length of
  *   the worker's report. No re-dispatch bypass — the cap must go and long
  *   reports go to a file; only `false` prompts are remembered, to skip asking
  *   again.
@@ -34,7 +35,7 @@ import { type ExtensionAPI, type ExtensionContext, z } from "@oh-my-pi/pi-coding
 import { errorText } from "../_shared/errors.ts";
 import { textOf } from "../_shared/messages.ts";
 
-const MODEL = "openai-codex/gpt-6-sol";
+const MODEL = "magpie/group/fusion-flattened";
 const EFFORT = THINKING_EFFORTS.find((effort) => effort === "medium");
 if (EFFORT === undefined) throw new Error("task-split-check: host does not recognize medium reasoning effort");
 const DEADLINE_MS = 25_000;
@@ -82,7 +83,16 @@ type Check = {
 	readonly reason: (labels: string) => string;
 };
 
-const SPLIT_AGENTS: Record<string, true> = { "task:low": true, "task:free": true, "task:mid": true };
+/** Leaf and mid-tier lanes; the two top routers fan out by design, so they are exempt. */
+const SPLIT_AGENTS: Record<string, true> = {
+	task: true,
+	labor: true,
+	engineer: true,
+	theorist: true,
+	philosopher: true,
+	"fusion-worker": true,
+	"fusion-deepthink": true,
+};
 
 const CHECKS: readonly Check[] = [
 	{
