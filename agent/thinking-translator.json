@@ -4,6 +4,14 @@
   "translatorModels": [
     {
       "provider": "futureppo-pool",
+      "id": "grok-4.7"
+    },
+    {
+      "provider": "futureppo-pool",
+      "id": "deepseek-v4.1-flash"
+    },
+    {
+      "provider": "futureppo-pool",
       "id": "ministral-14b-latest"
     },
     {
