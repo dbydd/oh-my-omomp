@@ -1,151 +1,153 @@
-# 配置检查（CI）
+# Configuration check (CI)
 
-本节点设计 omp-config 的配置检查：在一次性环境里安装最新 omp，用仓库自己的更新器应用配置，再用免费模型跑真实 session，把 omp 和扩展打印的故障与警告去重后逐个报告出来。同一个 workflow 另有一个 `code` job，跑 `bun install` 和 `bun run check`（Biome 格式与 lint、`tsc --noEmit`），它的规则在仓库 `AGENTS.md` 的代码规范一节，不属于本节点。
+English | [简体中文](README.zh-CN.md)
 
-- **拥有**：检查运行的阶段、诊断的判据与分类、免费模型和影子模型的接入、workflow 的触发事件与权限。
-- **不拥有**：配置项本身的规则（仓库 `README.md`）；更新器写什么、删什么（`agent/extensions/omp-config-autoupdate/omp-config-update.ts` 头注释）；各扩展的行为（`README.md`「本地扩展」）。
-- **非目标**：让模型执行任务或调用工具；验证付费 helper 的判定（`task-split-check`、`task-completion-judge`）；TUI 专属行为；拦截合并（不设 branch protection）。
-- **输入**：仓库工作区（被检查对象），npm 上的 `@oh-my-pi/pi-coding-agent`，`install-plugins.sh` 声明的插件，Kilo 网关的匿名免费模型。
+This node designs omp-config's configuration check: in a throwaway environment it installs the latest omp, applies the config with the repository's own updater, runs real sessions on a free model, and reports the faults and warnings that omp and the extensions print, deduplicated, one by one. The same workflow has another job, `code`, which runs `bun install` and `bun run check` (Biome formatting and lint, `tsc --noEmit`); its rules are in the code conventions section of the repository's `AGENTS.md` and are not part of this node.
 
-实现：`ci/check.ts`（检查运行），`.github/workflows/config-check.yml`（触发；其中的 `omp-session` job）。
+- **Owns**: the stages of a check run, the criteria and classification of diagnostics, how the free model and shadow models are wired in, and the workflow's trigger events and permissions.
+- **Does not own**: the rules of the config items themselves (the repository's `README.md`, Chinese version `README.zh-CN.md`); what the updater writes and deletes (the header comment of `agent/extensions/omp-config-autoupdate/omp-config-update.ts`); the behavior of each extension (`README.md`, "Local extensions").
+- **Non-goals**: having the model carry out tasks or call tools; verifying the verdicts of paid helpers (`task-split-check`, `task-completion-judge`); TUI-only behavior; blocking merges (no branch protection).
+- **Inputs**: the repository working tree (the thing checked), `@oh-my-pi/pi-coding-agent` on npm, the plugins declared in `install-plugins.sh`, and the Kilo gateway's anonymous free model.
 
-## 问题
+Implementation: `ci/check.ts` (the check run) and `.github/workflows/config-check.yml` (triggers; its `omp-session` job).
 
-### 域性质
+## Problem
 
-以下性质由隔离 HOME 中的实测得出（omp 18.8.7，Linux amd64 与 macOS arm64，2026-10-10）。
+### Domain properties
 
-1. **omp 不用退出码表达配置故障。** 扩展 import 抛错、`session_start` 或 `before_agent_start` 抛错、system-prompt-replace 规则找不到目标，进程都以 0 退出。故障只出现在三处：stderr（如 `Failed to load extension …`、`system-prompt-replace: … found no target …`），RPC 的 `extension_error` 事件，`$HOME/.omp/logs/omp.<date>.<pid>.log` 中 `warn` / `error` 级记录。
-2. **一部分故障要真实模型请求才出现。** `before_agent_start` 只在 prompt 被准备时运行，而 omp 在此之前检查模型凭据；没有可用模型时，启动类检查走不到这些钩子。
-3. **配置引用的模型都要付费凭据。** `task.agentModelOverrides`、`extensions/lang-nag/lang-nag.json`、`extensions/input-polish/input-polish.json`、`thinking-translator.json` 引用 openai-codex、anthropic、opencode-go、bansos 的模型；CI 没有这些凭据，引用它们的 helper 会自己报“模型不可用”。
-4. **Kilo 网关的 `:free` 模型允许匿名调用、不计费**（kilo.ai 文档：每 IP 每小时 200 次）。`nvidia/nemotron-3-ultra-550b-a55b:free` 能处理完整配置的 system prompt（约 2 万 token）。同期实测：配置里的 `bansos` 免费 Muse 与 Zen big-pickle 返回 429 `FreeUsageLimitError`；`opencode-go` 按官方价目收费；Kilo `cohere/north-mini-code:free` 对完整配置的请求返回 422。
-5. **仓库公开。** 来自 fork 的 PR 代码不可信，fork PR 的 workflow 拿不到 secret。
+The following properties come from measurements in an isolated HOME (omp 18.8.7, Linux amd64 and macOS arm64, 2026-10-10).
 
-### 需求
+1. **omp does not report config faults through its exit code.** An extension import that throws, a `session_start` or `before_agent_start` that throws, or a system-prompt-replace rule that finds no target all exit the process with 0. Faults show up in only three places: stderr (such as `Failed to load extension …` or `system-prompt-replace: … found no target …`), RPC `extension_error` events, and `warn` / `error` records in `$HOME/.omp/logs/omp.<date>.<pid>.log`.
+2. **Some faults appear only with a real model request.** `before_agent_start` runs only when a prompt is prepared, and omp checks model credentials before that; without a usable model, startup-only checks never reach these hooks.
+3. **Every model the config references needs paid credentials.** `task.agentModelOverrides`, `extensions/lang-nag/lang-nag.json`, `extensions/input-polish/input-polish.json` and `thinking-translator.json` reference models of openai-codex, anthropic, opencode-go and bansos; CI has none of these credentials, and helpers referencing them report "model unavailable" on their own.
+4. **The Kilo gateway's `:free` models allow anonymous calls at no charge** (kilo.ai docs: 200 per IP per hour). `nvidia/nemotron-3-ultra-550b-a55b:free` handles the full config's system prompt (about 20k tokens). Measured at the same time: the free `bansos` Muse in the config and Zen big-pickle returned 429 `FreeUsageLimitError`; `opencode-go` charges by its official price list; Kilo `cohere/north-mini-code:free` returned 422 for the full config's request.
+5. **The repository is public.** PR code from forks is untrusted, and workflows for fork PRs get no secrets.
 
-- **R1**：push 到 `master`、每个 PR、每天定时、手动触发时，各运行一次检查。
-- **R2**：配置有任一故障或警告时检查为红，每个不同的故障给出一次原文和出现位置；没有时为绿。
-- **R3**：免费模型不可用时检查也为红，但报告标明“配置未验证”，与配置故障分开。
-- **R4**：不使用任何 secret；`GITHUB_TOKEN` 只读。
-- **R5**：只报告，不阻止合并（操作员 2026-10-10 裁决）。
+### Requirements
 
-## 定义
+- **R1**: run one check on every push to `master`, every PR, a daily schedule and manual dispatch.
+- **R2**: when the config has any fault or warning the check is red, giving the original text and location of each distinct fault once; otherwise it is green.
+- **R3**: when the free model is unavailable the check is also red, but the report says "config not verified", kept apart from config faults.
+- **R4**: no secrets are used; `GITHUB_TOKEN` is read-only.
+- **R5**: it only reports and does not block merges (operator decision, 2026-10-10).
 
-- **检查运行**：`bun ci/check.ts` 的一次执行。它在新建的临时根目录里创建 HOME、`PI_CODING_AGENT_DIR=$HOME/.omp/agent`、`BUN_INSTALL` 和 `TMPDIR`，结束时删除整个根目录。它不读写运行者真实的 `~/.omp`、`~/.pi`、`~/.claude`。
-- **诊断**：检查运行收集到的一条故障或警告。每条诊断有一个阶段和一个类别：
-  - `config`：配置或扩展造成，或无法排除是它们造成；
-  - `environment`：omp 本身装不上；
-  - `provider`：免费模型服务失败（HTTP 408、429、5xx，或连接、DNS 错误）。
-- **发现**：类别相同、归一化文本相同的全部诊断合成的一条记录。归一化把临时根目录下的 HOME 换成 `~`、其余临时路径换成 `<tmp>`，并去掉模块缓存参数 `?mtime=…`。发现的标识是“类别 + 归一化文本”的 SHA-256 前 12 位十六进制；不同运行、不同机器上，类别和归一化文本都相同时得到同一个标识，故障文字里还有别的变动部分时标识会变。
-- **免费模型**：`models.yml` 中的 provider `ci-free`，直连 Kilo 网关，`auth: none`。检查的主模型与全部 `modelRoles` 都是它。
-- **影子模型**：检查运行在 `models.yml` 中为配置引用的每个 `provider/model` 登记的同名条目（`auth: none`，`api: openai-completions`）。它的请求发往本机回环上的影子代理，代理把请求里的模型名换成免费模型后转发给 Kilo。配置因此不经修改就能在没有付费凭据的机器上解析并调用它引用的模型。
-- **主机噪声**：由 CI 主机自身状况或 CI 自己的模型设置引起、与仓库配置无关的日志 `warn`，在 `ci/check.ts` 的 `HOST_LOG_WARNINGS` 中逐条列出，每条写明它对应的事实。
+## Definitions
 
-## 架构
+- **Check run**: one execution of `bun ci/check.ts`. It creates HOME, `PI_CODING_AGENT_DIR=$HOME/.omp/agent`, `BUN_INSTALL` and `TMPDIR` inside a newly created temporary root and deletes the whole root at the end. It never reads or writes the runner's real `~/.omp`, `~/.pi` or `~/.claude`.
+- **Diagnostic**: one fault or warning collected by a check run. Every diagnostic has a stage and a category:
+  - `config`: caused by the config or extensions, or cannot be ruled out as caused by them;
+  - `environment`: omp itself cannot be installed;
+  - `provider`: the free model service failed (HTTP 408, 429, 5xx, or connection or DNS errors).
+- **Finding**: one record combining all diagnostics with the same category and the same normalized text. Normalization replaces the HOME under the temporary root with `~`, other temporary paths with `<tmp>`, and removes the module cache parameter `?mtime=…`. A finding's id is the first 12 hex characters of the SHA-256 of "category + normalized text"; across runs and machines, the same category and normalized text give the same id, and the id changes when the fault text has other varying parts.
+- **Free model**: the provider `ci-free` in `models.yml`, connected directly to the Kilo gateway with `auth: none`. It is the check's main model and every `modelRoles` entry.
+- **Shadow model**: the same-named entry the check run registers in `models.yml` for every `provider/model` the config references (`auth: none`, `api: openai-completions`). Its requests go to a shadow proxy on the local loopback, which swaps the model name in the request for the free model and forwards it to Kilo. The config can therefore resolve and call the models it references, unmodified, on a machine without paid credentials.
+- **Host noise**: log `warn`s caused by the CI host's own situation or by CI's own model settings, unrelated to the repository's config; each is listed in `HOST_LOG_WARNINGS` in `ci/check.ts` with the fact it corresponds to.
 
-### 检查运行的阶段
+## Architecture
+
+### Stages of a check run
 
 ```mermaid
 flowchart LR
-  install["安装 omp latest"] --> apply["更新器 apply（含插件）"]
-  apply --> models["写 models.yml 与 modelRoles<br/>启动影子代理"]
-  models --> full["完整模式 session<br/>omp --mode rpc"]
-  full --> light["轻量模式 session<br/>omp-light --mode rpc"]
-  light --> logs["读 omp 日志"]
-  logs --> report["报告与退出码"]
+  install["install latest omp"] --> apply["updater apply (with plugins)"]
+  apply --> models["write models.yml and modelRoles<br/>start the shadow proxy"]
+  models --> full["full-mode session<br/>omp --mode rpc"]
+  full --> light["light-mode session<br/>omp-light --mode rpc"]
+  light --> logs["read omp logs"]
+  logs --> report["report and exit code"]
 ```
 
-|阶段|做什么|产生的诊断|
+|Stage|What it does|Diagnostics produced|
 |---|---|---|
-|install|`bun install -g @oh-my-pi/pi-coding-agent@${OMP_VERSION:-latest}`，`omp --version`|失败为 `environment`，检查就此结束|
-|apply|`bun agent/extensions/omp-config-autoupdate/omp-config-update.ts apply --source <仓库> --agent-dir … --json`|stderr 每行；JSON 报告的 `errors`；`pluginsMissing` 每项；没有 JSON 报告|
-|models|写 `models.yml`（免费模型 + 影子模型），把 `config.yml` 的 `modelRoles` 设为免费模型|无|
-|full session、light session|RPC 模式启动，等 `ready` 后发一条 prompt，保持 stdin 直到 `prompt_result`，再关闭并等进程退出|见下方判据|
-|omp 日志|读 `$HOME/.omp/logs/*.log` 的 `warn`、`error` 记录|不属于主机噪声的每条记录|
+|install|`bun install -g @oh-my-pi/pi-coding-agent@${OMP_VERSION:-latest}`, `omp --version`|Failure is `environment`, and the check ends there|
+|apply|`bun agent/extensions/omp-config-autoupdate/omp-config-update.ts apply --source <repository> --agent-dir … --json`|Every stderr line; the JSON report's `errors`; every `pluginsMissing` entry; a missing JSON report|
+|models|Writes `models.yml` (free model + shadow models) and sets `config.yml`'s `modelRoles` to the free model|None|
+|full session, light session|Start in RPC mode, send one prompt after `ready`, keep stdin open until `prompt_result`, then close and wait for the process to exit|See the criteria below|
+|omp logs|Read the `warn` and `error` records in `$HOME/.omp/logs/*.log`|Every record that is not host noise|
 
-`modelRoles` 是更新器不写的本机字段（`LOCAL_CONFIG_FIELDS`）。检查运行像一台机器那样设置它，因此不改变被检查的托管配置。
+`modelRoles` is a machine-local field the updater does not write (`LOCAL_CONFIG_FIELDS`). The check run sets it the way a machine would, so the managed config being checked is not changed.
 
-### 诊断判据
+### Diagnostic criteria
 
-session 阶段的每一项都是一条诊断：
+Each of the following in a session stage is a diagnostic:
 
-- stderr 的每一个非空行；
-- stdout 上不是 JSON 的行（扩展直接打印会破坏 RPC 协议）；
-- 每个 `extension_error` 事件；
-- prompt 被拒绝（`response.success: false`），或 `prompt_result.status` 不是 `completed`；
-- assistant 回复 `stopReason` 为 `error` 或 `aborted`：符合 R3 条件的记为 `provider`，其余记为 `config`；
-- 回复来自免费模型以外的 provider 或模型；
-- 没有任何 assistant 回复，或超过 300 秒未结束；
-- 进程退出码非 0。
+- every non-empty stderr line;
+- stdout lines that are not JSON (an extension printing directly breaks the RPC protocol);
+- every `extension_error` event;
+- a rejected prompt (`response.success: false`), or a `prompt_result.status` other than `completed`;
+- an assistant reply with `stopReason` `error` or `aborted`: recorded as `provider` when it meets R3's condition, otherwise as `config`;
+- a reply from a provider or model other than the free model;
+- no assistant reply at all, or not finished within 300 seconds;
+- a non-zero process exit code.
 
-免费模型失败会连带产生别的诊断，它们也记为 `provider`：session 中所有失败回复都符合 R3 条件时，该 session 的 `prompt_result` 未完成和非零退出；omp 日志记录的 `error` 或 `errorMessage` 字段是免费模型服务失败（连接、DNS、超时、限流、5xx）时，该记录。影子代理收到上游 HTTP 400 及以上的响应时，记一条 `provider` 诊断。
+A free model failure brings other diagnostics with it, and those are recorded as `provider` too: when every failed reply in a session meets R3's condition, that session's unfinished `prompt_result` and non-zero exit; when the `error` or `errorMessage` field of an omp log record is a free model service failure (connection, DNS, timeout, rate limit, 5xx), that record. When the shadow proxy receives an upstream response of HTTP 400 or above, it records one `provider` diagnostic.
 
-同一个故障会在多处出现：完整模式和轻量模式各打印一次，omp 日志里再记一次。报告不逐条列诊断，而是按发现列出，每条发现写明标识、类别、各阶段出现次数和归一化文本。为让同一故障的不同表述得到同一标识，有两条规则：
+The same fault appears in several places: printed once each in full and light mode, and recorded once more in the omp log. The report does not list diagnostics one by one but by finding, each with its id, category, per-stage counts and normalized text. Two rules give different wordings of the same fault the same id:
 
-- omp 日志中上下文只有 `path`、`error` 两个字段的记录，按 omp 在 stderr 上的格式写成 `<message> <path>: <error>`。
-- omp 会把过长的 stderr 行截断并以 `…` 结尾。截断行去掉 `…` 后（截断点落在绝对路径中时，再去掉这段路径）恰好是一条完整文本的前缀时，并入那条发现；有多条候选时不合并。
+- An omp log record whose context has only the two fields `path` and `error` is written in omp's stderr format, `<message> <path>: <error>`.
+- omp truncates overlong stderr lines and ends them with `…`. When a truncated line, with `…` removed (and, when the cut falls inside an absolute path, with that path removed too), is exactly a prefix of one complete text, it merges into that finding; with several candidates it does not merge.
 
-主机噪声同样按归一化文本合并，并注明次数。
+Host noise is merged by normalized text in the same way, with counts.
 
-检查运行的退出码按诊断的类别判定，不受合并影响：有 `config` 或 `environment` 诊断时为 1；只有 `provider` 诊断时为 2；没有诊断时为 0。报告写到 stdout 和 `$GITHUB_STEP_SUMMARY`，在 GitHub Actions 中每条发现另发一条 `::error` annotation，标题是发现的标识和类别。
+The check run's exit code follows the diagnostics' categories, unaffected by merging: 1 when there are `config` or `environment` diagnostics; 2 when there are only `provider` diagnostics; 0 when there are none. The report goes to stdout and `$GITHUB_STEP_SUMMARY`, and in GitHub Actions every finding also emits an `::error` annotation titled with the finding's id and category.
 
-### 生命周期
+### Lifecycle
 
 ```mermaid
 flowchart TB
-  subgraph job["GitHub Actions job（ubuntu-24.04，30 分钟上限）"]
-    subgraph run["检查运行（临时根目录）"]
-      omp["omp 安装（BUN_INSTALL）"]
-      agent["agent 目录与插件（HOME）"]
-      proxy["影子代理（127.0.0.1 随机端口）"]
-      full["完整模式 omp 进程"]
-      light["轻量模式 omp 进程"]
+  subgraph job["GitHub Actions job (ubuntu-24.04, 30-minute limit)"]
+    subgraph run["check run (temporary root)"]
+      omp["omp install (BUN_INSTALL)"]
+      agent["agent directory and plugins (HOME)"]
+      proxy["shadow proxy (127.0.0.1, random port)"]
+      full["full-mode omp process"]
+      light["light-mode omp process"]
     end
   end
 ```
 
-|部件|开始|结束|
+|Part|Starts|Ends|
 |---|---|---|
-|检查运行|`bun ci/check.ts` 启动，`mkdtemp` 建根目录|报告写完后删除根目录（`CI_KEEP_ROOT=1` 时保留）|
-|影子代理|安装开始前启动|检查运行的 `finally` 中停止|
-|omp session 进程|阶段开始时 spawn|`prompt_result` 后关闭 stdin、进程退出；300 秒未结束时 SIGKILL|
+|Check run|`bun ci/check.ts` starts and creates the root with `mkdtemp`|The root is deleted after the report is written (kept when `CI_KEEP_ROOT=1`)|
+|Shadow proxy|Started before installation begins|Stopped in the check run's `finally`|
+|omp session process|Spawned when the stage starts|After `prompt_result`, stdin is closed and the process exits; SIGKILL when not finished within 300 seconds|
 
-### 决定
+### Decisions
 
-- **用 GitHub-hosted runner，不用 GARM。** 因为域性质 5：fork PR 的代码不能接触 homelab mesh。所需端点（npm、GitHub、Kilo）都在公网。重审条件：检查需要访问私网服务。
-- **免费模型选 Kilo `nvidia/nemotron-3-ultra-550b-a55b:free`。** 因为域性质 4，其余候选或额度耗尽、或收费、或拒绝完整配置的请求。代价：GitHub runner 的出口 IP 是共享的，每小时 200 次的额度可能已被别人用完，此时检查以退出码 2 结束（R3）。重审条件：该模型下线，或出现频繁的 429。可用 `CI_FREE_MODEL`、`CI_FREE_BASE_URL` 换模型而不改代码。
-- **影子模型而不是配置覆盖。** 替代方案是用 `--config` overlay 把 `task.agentModelOverrides` 等改成免费模型。它会改动被检查的配置，使检查验证的是 overlay，而不是仓库。影子模型只改机器本地的 `models.yml`，配置原样运行。代价：影子列表由 `ci/check.ts` 从 `config.yml` 和 JSON sidecar 中读出；扩展源码里硬编码的模型（如 `task-split-check` 的 `openai-codex/gpt-6-sol`）不在列表里。它们只在调用 `task` 等工具时才被请求，检查的 prompt 只要求文字回复；这些 helper 缺凭据时按各自规则放行，属于覆盖边界之外。
-- **始终安装最新 omp。** 操作员裁决：机器通过 `omp update` 跟随最新版，检查也跟随。代价：上游的变化会让与之无关的提交也变红；这类红是真实的兼容性问题，比如 system-prompt-replace 规则的目标被上游删掉。可用 `OMP_VERSION` 在本地复现指定版本。
-- **插件不钉版本。** 与 `install-plugins.sh` 一致：检查装的就是机器会装的。
-- **stderr 每行都是诊断；日志只排除主机噪声。** 扩展警告不设白名单，因为一条被放行的警告就是一个被接受的缺陷，应当修配置或开 issue。主机噪声只覆盖与配置无关的事实：没有本地模型服务器；没有 D-Bus；技能描述压缩时免费模型输出被截断（`Model stopped: length`）——`modelRoles` 是本机字段，CI 把所有角色绑到会推理的免费模型上，它偶尔用完 omp 给这项后台任务的输出预算（同一配置 10 次运行中出现 1 次），机器上实际用哪个模型由各机器自己的 `modelRoles` 决定。
+- **GitHub-hosted runners, not GARM.** Because of domain property 5: fork PR code must not touch the homelab mesh. Every endpoint needed (npm, GitHub, Kilo) is on the public internet. Revisit when: the check needs to reach private services.
+- **The free model is Kilo `nvidia/nemotron-3-ultra-550b-a55b:free`.** Because of domain property 4, the other candidates had exhausted quotas, charged, or rejected the full config's request. Cost: GitHub runners share egress IPs, so the 200-per-hour quota may already be used up by others, and the check then ends with exit code 2 (R3). Revisit when: the model is retired, or 429s become frequent. `CI_FREE_MODEL` and `CI_FREE_BASE_URL` switch models without code changes.
+- **Shadow models rather than a config overlay.** The alternative is a `--config` overlay changing `task.agentModelOverrides` and the like to the free model. That would alter the config being checked, so the check would verify the overlay instead of the repository. Shadow models change only the machine-local `models.yml`, and the config runs as it is. Cost: `ci/check.ts` reads the shadow list from `config.yml` and the JSON sidecars; models hard-coded in extension source (such as `task-split-check`'s `openai-codex/gpt-6-sol`) are not in the list. They are only requested when tools such as `task` are called, while the check's prompt asks only for a text reply; when these helpers lack credentials they pass by their own rules, outside the coverage boundary.
+- **Always install the latest omp.** Operator decision: machines follow the latest version through `omp update`, so the check does too. Cost: upstream changes can turn unrelated commits red; that red is a real compatibility problem, such as upstream deleting the target of a system-prompt-replace rule. `OMP_VERSION` reproduces a specific version locally.
+- **Plugins are not pinned.** Consistent with `install-plugins.sh`: the check installs what a machine would install.
+- **Every stderr line is a diagnostic; logs exclude only host noise.** Extension warnings have no allowlist, because an allowed warning is an accepted defect that should be fixed in the config or tracked in an issue. Host noise covers only facts unrelated to the config: no local model server; no D-Bus; free model output truncated during skill description compression (`Model stopped: length`) — `modelRoles` is a machine-local field, CI binds every role to a reasoning free model, and that model occasionally exhausts the output budget omp gives this background task (1 in 10 runs of the same config); which model a machine actually uses is decided by its own `modelRoles`.
 
-### 触发与权限
+### Triggers and permissions
 
-`.github/workflows/config-check.yml`：
+`.github/workflows/config-check.yml`:
 
-- 事件：`push` 到 `master`、`pull_request`、每天 03:17 UTC 的 `schedule`、`workflow_dispatch`。不使用 `pull_request_target`。
-- 权限：`contents: read`；checkout 不保留凭据（`persist-credentials: false`）；不引用任何 secret。
-- 并发：同一事件、同一 ref 的新运行取消旧运行。
-- Actions 按提交 SHA 固定版本；Bun 取最新版。
+- Events: `push` to `master`, `pull_request`, a daily `schedule` at 03:17 UTC, `workflow_dispatch`. `pull_request_target` is not used.
+- Permissions: `contents: read`; checkout keeps no credentials (`persist-credentials: false`); no secrets are referenced.
+- Concurrency: a new run for the same event and ref cancels the old one.
+- Actions are pinned by commit SHA; Bun takes the latest version.
 
-## 覆盖边界
+## Coverage boundary
 
-检查覆盖：仓库配置能被更新器应用（结构化文件可解析、插件可安装）；完整模式和轻量模式下全部本地扩展与插件能加载；一次真实 prompt 期间 `session_start`、`before_agent_start`、`context` 等钩子不报错；system-prompt-replace 规则全部找到目标；配置引用的模型在影子模型下可解析。
+The check covers: the repository config can be applied by the updater (structured files parse, plugins install); every local extension and plugin loads in full and light mode; hooks such as `session_start`, `before_agent_start` and `context` raise no errors during one real prompt; every system-prompt-replace rule finds its target; and the models the config references resolve under shadow models.
 
-检查不覆盖：
+The check does not cover:
 
-- 工具调用与 subagent 派发路径（`fork_task`、`todo-more` 的 `todo` 及其提醒、`isolation-nudge`、`task-split-check`、`task-completion-judge`、`ctx` 等工具的行为）；
-- 付费模型本身的可用性和凭据；
-- TUI 专属行为（`input-polish` 的按键与 overlay，`omp-thinking-translator` 的渲染，`bro` 的 overlay）；
-- 自动更新的联网路径（`auto`、`/omp-config-autoupdate run`）和维护命令（`/update-omp`、`/sync-omp-config`、`/migrate-omp-keys`）；
-- Windows 的 `omp-light.cmd`。
+- tool calls and subagent dispatch paths (the behavior of tools such as `fork_task`, `todo-more`'s `todo` and its reminders, `isolation-nudge`, `task-split-check`, `task-completion-judge` and `ctx`);
+- the availability and credentials of the paid models themselves;
+- TUI-only behavior (`input-polish`'s keys and overlay, `omp-thinking-translator`'s rendering, `bro`'s overlay);
+- the networked path of automatic update (`auto`, `/omp-config-autoupdate run`) and the maintenance commands (`/update-omp`, `/sync-omp-config`, `/migrate-omp-keys`);
+- `omp-light.cmd` on Windows.
 
-## 本地复现
+## Local reproduction
 
 ```bash
-bun ci/check.ts                      # 与 CI 相同的检查；只写临时目录
-OMP_VERSION=18.8.7 bun ci/check.ts   # 指定 omp 版本
-CI_KEEP_ROOT=1 bun ci/check.ts       # 保留临时根目录以便排查
+bun ci/check.ts                      # the same check as CI; writes only temporary directories
+OMP_VERSION=18.8.7 bun ci/check.ts   # a specific omp version
+CI_KEEP_ROOT=1 bun ci/check.ts       # keep the temporary root for debugging
 ```
 
-需要 Bun、git 和公网访问。
+Needs Bun, git and public internet access.

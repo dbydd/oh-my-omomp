@@ -6,6 +6,7 @@ this machine, not inferred from docs. Harness references: omp://task-agent-disco
 omp://tools/task.md, omp://tools/wait.md
 
 This file is .txt on purpose. See item 13.
+Simplified Chinese version: README.zh-CN.txt (same items, kept in step with this file).
 
 
 1. No `spawns` key means the child holds a `task` tool that can never spawn anything

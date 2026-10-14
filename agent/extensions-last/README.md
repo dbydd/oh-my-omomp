@@ -1,22 +1,24 @@
 # extensions-last
 
-这里的扩展必须在其他按路径加载的扩展之后执行，所以不放进 `extensions/`，而是由 `config.yml` 的 `extensions` 按路径加载，并且写在列表的最后一项。每个扩展一个目录，入口是 `<名字>/index.ts`，自己的配置放在同一目录；`config.yml` 里写的是 `index.ts` 的完整路径（写文件路径而不是目录，加载方式与平铺时相同，`disabledExtensions` 按名字过滤不到它）。共享代码从 `../../extensions/_shared/` 导入。
+English | [简体中文](README.zh-CN.md)
 
-## 加载顺序
+The extensions here must run after every other path-loaded extension, so they are not placed in `extensions/`; instead `config.yml`'s `extensions` loads them by path, as the last entry of the list. Each extension is one directory with `<name>/index.ts` as its entry and its own config in the same directory; `config.yml` holds the full path of `index.ts` (a file path rather than the directory, so it loads as it did when flat, and `disabledExtensions` cannot filter it by name). Shared code is imported from `../../extensions/_shared/`.
 
-`before_agent_start` 的 handler 按加载顺序串行执行，每个拿到前一个返回的 system prompt；同一路径只在第一次出现时加载。并非所有事件都串行，例如 `session_shutdown` 的 handler 并发执行。
+## Load order
 
-1. native 发现：`~/.omp/agent/extensions/`，以及 `settings.json` 的 `extensions` 列出的 TS/JS 模块（不管有没有 `config.yml`；其中的扩展包根目录只在没有 `config.yml` 时读）
+`before_agent_start` handlers run serially in load order, each receiving the system prompt the previous one returned; a path loads only at its first occurrence. Not every event is serial: `session_shutdown` handlers, for example, run concurrently.
+
+1. Native discovery: `~/.omp/agent/extensions/`, plus the TS/JS modules listed in `settings.json`'s `extensions` (whether or not `config.yml` exists; its extension package roots are read only when there is no `config.yml`)
 2. hooks
-3. 插件扩展
-4. `-e` 参数
-5. `config.yml` 的 `extensions`，按列表顺序
-6. OMP 内置的 inline 扩展：SDK 传入的扩展、autoresearch、`.omp/tools/` 等自定义工具的包装
+3. Plugin extensions
+4. `-e` arguments
+5. `config.yml`'s `extensions`, in list order
+6. OMP's built-in inline extensions: SDK-supplied extensions, autoresearch, the wrapper for custom tools such as `.omp/tools/`
 
-第 6 步仍在这里的扩展之后执行；其中 autoresearch 在 `/autoresearch` 模式下会改写 system prompt。
+Step 6 still runs after the extensions here; autoresearch rewrites the system prompt in `/autoresearch` mode.
 
-`extensions/` 目录内部不排序，顺序取决于 native glob 的遍历结果，不是目录名顺序。这里的目录如果放进 `extensions/`，会在第 1 步加载，`config.yml` 里指向同一路径的条目会被当成重复而丢弃。
+There is no ordering inside `extensions/`: the order is whatever the native glob walk returns, not directory-name order. A directory from here placed in `extensions/` would load in step 1, and the `config.yml` entry pointing at the same path would be dropped as a duplicate.
 
-轻量模式下，`config-light.yml` 把 `extensions` 覆盖成空列表，排除这里的扩展；`omp-light` 再用 `-e` 把本机 `config.yml` 里不在 `extensions-last/` 下的条目（如 `~/.claude`）传回去。
+In light mode, `config-light.yml` overrides `extensions` with an empty list, excluding the extensions here; `omp-light` then passes the entries of the machine's `config.yml` that are not under `extensions-last/` (such as `~/.claude`) back with `-e`.
 
-本文件不会被加载，也不同步：仓库 → 本机的更新器（启动时自动更新和 `/update-omp`）与 `/sync-omp-config` 只同步扩展目录里的 `*.ts` 和结构化配置 `system-prompt-replace/system-prompt-replace.json`。
+This file and `README.zh-CN.md` are never loaded and never synced: the repo → machine updater (automatic update at startup and `/update-omp`) and `/sync-omp-config` sync only the `*.ts` in extension directories and the structured config `system-prompt-replace/system-prompt-replace.json`.

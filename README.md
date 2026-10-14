@@ -1,222 +1,223 @@
 # omp-config
 
-Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程场景定制。这里不是 `~/.omp` 的完整备份：数据库、会话、缓存、日志、锁文件和凭据都不进仓库。
+English | [简体中文](README.zh-CN.md)
 
-- [仓库内容](#仓库内容)
-- [快速上手](#快速上手)
-- [设计思路](#设计思路)
-- [同步与迁移](#同步与迁移)
-- [轻量模式](#轻量模式)
-- [Subagent 体系](#subagent-体系)
-- [本地扩展](#本地扩展)
-- [维护须知](#维护须知)
+The reviewable, portable part of an Oh My Pi (OMP) configuration, tuned for heavy programming work. This is not a full backup of `~/.omp`: databases, sessions, caches, logs, lock files and credentials never enter the repository.
 
-## 仓库内容
+- [Repository contents](#repository-contents)
+- [Quick start](#quick-start)
+- [Design](#design)
+- [Sync and migration](#sync-and-migration)
+- [Light mode](#light-mode)
+- [Subagent system](#subagent-system)
+- [Local extensions](#local-extensions)
+- [Maintenance notes](#maintenance-notes)
 
-|路径|内容|本机位置|
+## Repository contents
+
+|Path|Content|Location on the machine|
 |---|---|---|
-|`agent/config.yml`|OMP 配置、UI 行为、subagent 模型绑定|`~/.omp/agent/`|
-|`agent/APPEND_SYSTEM.md`|完整模式的追加系统提示词|`~/.omp/agent/`|
-|`agent/extensions/append-system-model/APPEND_SYSTEM_MODEL.md`|[append-system-model](#append-system-model) 按模型追加的系统提示词；属于本机，仓库不带|`~/.omp/agent/extensions/append-system-model/`|
-|`agent/config-light.yml`、`agent/APPEND_SYSTEM_LIGHT.md`、`agent/omp-light.ts`|轻量模式的配置覆盖、追加提示词（目前为空）、入口源码|`~/.omp/agent/`|
-|`agent/extensions/omp-config-autoupdate/omp-config-update.ts`|仓库 → 本机的更新器，[启动时自动更新](#启动时自动更新)和 `/update-omp` 共用；放在启动它的扩展目录里，是独立脚本，不是扩展模块|`~/.omp/agent/extensions/omp-config-autoupdate/`|
-|`agent/thinking-translator.json`|[思考翻译](#思考翻译)插件的有序候选链与最低推理强度配置|`~/.omp/agent/`|
-|`agent/extensions/user-prompt-inject/PROMPT-INJECT-*.md`|[user-prompt-inject](#user-prompt-inject) 的模板：把用户原话注入 mentor 和 discussant|`~/.omp/agent/extensions/user-prompt-inject/`|
-|`agent/extensions/turn-judge/TURN-JUDGE-*.md`|[turn-judge](#turn-judge) 的判定配置：每轮结束后通过 OMP 的 JUDGE 角色判断一个问题|`~/.omp/agent/extensions/turn-judge/`|
-|`agent/agents/`|subagent 定义；`README.txt` 记录编写陷阱|`~/.omp/agent/agents/`|
-|`agent/extensions/`|本地扩展，每个扩展一个目录：`<名字>/index.ts` 是入口，同目录的其他 `.ts` 是它自己的模块，它自己的配置和模板也放在这里；`_shared/` 是多个扩展共用的代码。扩展配置 `lang-nag/lang-nag.json`、`input-polish/input-polish.json`、`tool-policy-nag/tool-policy-nag.json` 随更新器同步；`doc-polish/doc-polish.json` 属于本机，只作示例，见 [`/update-omp`](#update-omp仓库--本机)|`~/.omp/agent/extensions/`|
-|`agent/extensions-last/`|要在其他按路径加载的扩展之后执行的扩展，由 `config.yml` 的 `extensions` 末项显式加载；目前只有 [system-prompt-replace](#system-prompt-replace)，替换规则 `system-prompt-replace.json` 在它的目录里。`README.md` 只给仓库看，不同步|`~/.omp/agent/extensions-last/`|
-|`pi/agent/pi-bansos-relay-state.json`|`pi-bansos` 插件状态|`~/.pi/agent/`|
-|`install-plugins.sh`、`plugin-audit.sh`|插件安装、插件漂移检查|—|
-|`.omp/commands/`|三个维护命令的完整规则|—|
-|`ci/`、`.github/workflows/config-check.yml`|配置检查（CI）：脚本、设计与判据见 `ci/README.md`|—|
-|`package.json`、`biome.json`、`tsconfig.json`|开发工具：`bun run check` 做格式、lint 和类型检查，规范见[目录结构与开发规范](#目录结构与开发规范)|—|
+|`agent/config.yml`|OMP config, UI behavior, subagent model bindings|`~/.omp/agent/`|
+|`agent/APPEND_SYSTEM.md`|Appended system prompt for full mode|`~/.omp/agent/`|
+|`agent/extensions/append-system-model/APPEND_SYSTEM_MODEL.md`|Per-model appended system prompt for [append-system-model](#append-system-model); belongs to the machine, the repository ships none|`~/.omp/agent/extensions/append-system-model/`|
+|`agent/config-light.yml`, `agent/APPEND_SYSTEM_LIGHT.md`, `agent/omp-light.ts`|Light mode's config overlay, appended prompt (currently empty) and launcher source|`~/.omp/agent/`|
+|`agent/extensions/omp-config-autoupdate/omp-config-update.ts`|The repo → machine updater, shared by [automatic update at startup](#automatic-update-at-startup) and `/update-omp`; it sits in the directory of the extension that starts it and is a standalone script, not an extension module|`~/.omp/agent/extensions/omp-config-autoupdate/`|
+|`agent/thinking-translator.json`|Ordered candidate chain and lowest reasoning effort for the [thinking translation](#thinking-translation) plugin|`~/.omp/agent/`|
+|`agent/extensions/user-prompt-inject/PROMPT-INJECT-*.md`|Templates for [user-prompt-inject](#user-prompt-inject): inject the user's own words into the mentor and discussants|`~/.omp/agent/extensions/user-prompt-inject/`|
+|`agent/extensions/turn-judge/TURN-JUDGE-*.md`|Judge configs for [turn-judge](#turn-judge): after each turn, ask one question through OMP's JUDGE role|`~/.omp/agent/extensions/turn-judge/`|
+|`agent/agents/`|Subagent definitions; `README.txt` records authoring pitfalls|`~/.omp/agent/agents/`|
+|`agent/extensions/`|Local extensions, one directory each: `<name>/index.ts` is the entry, the other `.ts` files in the directory are its own modules, and its own config and templates live there too; `_shared/` holds code shared by several extensions. The extension configs `lang-nag/lang-nag.json`, `input-polish/input-polish.json` and `tool-policy-nag/tool-policy-nag.json` are synced by the updater; `doc-polish/doc-polish.json` belongs to the machine and is only an example, see [`/update-omp`](#update-omp-repo--machine)|`~/.omp/agent/extensions/`|
+|`agent/extensions-last/`|Extensions that must run after every other path-loaded extension, loaded explicitly as the last `extensions` entry of `config.yml`; currently only [system-prompt-replace](#system-prompt-replace), whose rules `system-prompt-replace.json` sit in its directory. `README.md` and `README.zh-CN.md` there are repo-only and not synced|`~/.omp/agent/extensions-last/`|
+|`pi/agent/pi-bansos-relay-state.json`|`pi-bansos` plugin state|`~/.pi/agent/`|
+|`install-plugins.sh`, `plugin-audit.sh`|Plugin installation and plugin drift check|—|
+|`.omp/commands/`|Full rules of the three maintenance commands|—|
+|`ci/`, `.github/workflows/config-check.yml`|The configuration check (CI): script, design and criteria in `ci/README.md`|—|
+|`package.json`, `biome.json`, `tsconfig.json`|Dev tooling: `bun run check` runs formatting, lint and type checks; conventions in [Layout and development conventions](#layout-and-development-conventions)|—|
 
-## 快速上手
+## Quick start
 
-以下命令都在仓库根目录启动 OMP 后执行。
+Run all of the following after starting OMP at the repository root.
 
-**新机器：**
+**A new machine:**
 
-1. 执行 [`/update-omp`](#update-omp仓库--本机)：把配置写进本机（包括 [omp-config-autoupdate](#omp-config-autoupdate) 扩展和它目录里的更新器 `omp-config-update.ts`），安装 `omp-light`，补装缺少的插件。
-2. 要在 OMP 里用 Claude Code 的 skills、rules、commands 等时，在本机 `~/.omp/agent/config.yml` 的 `extensions` 开头加一项 `~/.claude`。OMP 把它当扩展包根目录，加载其中的 `skills/`、`rules/`、`commands/`、`hooks/` 等。这一项属于本机：更新器保留，`/sync-omp-config` 不写回仓库，`omp-light` 也加载它，见[两个方向共同的规则](#两个方向共同的规则)。没有 `~/.claude` 的机器不要加，否则每次启动都报加载失败。
-3. 重启 OMP。追加提示词、扩展和插件都在启动时加载。
-4. 需要每次启动都从 GitHub 默认分支[自动更新](#启动时自动更新)时，执行 `/omp-config-autoupdate on`（默认关闭），从下次启动起生效；之后就不用再手动执行 `/update-omp`。
-5. 按[迁移后检查](#迁移后检查)确认结果。
-6. 需要沿用旧机器的供应商登录时，在旧机器上执行 [`/migrate-omp-keys <新机器>`](#凭据迁移migrate-omp-keys-target)。
+1. Run [`/update-omp`](#update-omp-repo--machine): it writes the config to the machine (including the [omp-config-autoupdate](#omp-config-autoupdate) extension and the updater `omp-config-update.ts` in its directory), installs `omp-light` and installs any missing plugins.
+2. To use Claude Code's skills, rules, commands and so on in OMP, add `~/.claude` at the start of `extensions` in the machine's `~/.omp/agent/config.yml`. OMP treats it as an extension package root and loads its `skills/`, `rules/`, `commands/`, `hooks/` and the like. The entry belongs to the machine: the updater keeps it, `/sync-omp-config` does not write it back to the repository, and `omp-light` loads it too, see [Rules shared by both directions](#rules-shared-by-both-directions). Do not add it on a machine without `~/.claude`, or every start reports a load failure.
+3. Restart OMP. Appended prompts, extensions and plugins are all loaded at startup.
+4. To [update automatically](#automatic-update-at-startup) from the GitHub default branch at every start, run `/omp-config-autoupdate on` (off by default); it applies from the next start, and `/update-omp` is no longer needed by hand.
+5. Confirm the result with [Post-migration checks](#post-migration-checks).
+6. To keep the provider logins of an old machine, run [`/migrate-omp-keys <new machine>`](#credential-migration-migrate-omp-keys-target) on the old machine.
 
-**本机改了配置，要收回仓库：** 先执行 `/sync-omp-config check` 查看差异，再执行 [`/sync-omp-config`](#sync-omp-config本机--仓库) 写入仓库，并提交、推送。自动更新开着时，默认分支一有新提交，下次启动就会用仓库版本覆盖本机的托管项，没收回仓库的改动会丢失。
+**The machine's config changed and should go back into the repository:** run `/sync-omp-config check` to see the differences, then [`/sync-omp-config`](#sync-omp-config-machine--repo) to write them into the repository, and commit and push. With automatic update on, the next start after a new commit on the default branch overwrites the machine's managed items with the repository's version, and changes not brought back into the repository are lost.
 
-## 设计思路
+## Design
 
-### 定位
+### Scope
 
-- 不是 ultracode 式的大型任务求解器，这类需求由其他插件实现。
-- 完整 prompt 不考虑简单小任务。措辞一放松，模型就会逃避困难模式，所以 prompt 基本不给退路。附带的定制对小任务也没多大用处。小任务用[轻量模式](#轻量模式)。
+- This is not an ultracode-style solver for large tasks; other plugins cover that.
+- The full prompt does not cater to small, simple tasks. As soon as the wording relaxes, models dodge the demanding mode, so the prompt leaves almost no way out. The bundled customizations are of little use for small tasks either. Use [light mode](#light-mode) for small tasks.
 
-### 约束模型行为
+### Constraining model behavior
 
-这套约束不假设模型会稳定遵循 system prompt。实际使用中，以 Claude 为首的模型会选择性执行其中的规则；一旦开始绕开工具调用规范，其他约束（包括 `CLAUDE.md` 和 `*.rule.md`）也往往一起失效。仓库因此同时约束副作用、检测偏离，并在运行时补充提醒。
+These constraints do not assume that a model follows the system prompt reliably. In practice, models led by Claude follow its rules selectively; once they start bypassing the tool-call conventions, the other constraints (including `CLAUDE.md` and `*.rule.md`) tend to fail with them. The repository therefore constrains side effects, detects drift and adds reminders at runtime, all at once.
 
-**用 hashline edit 约束副作用。** hashline edit 要求先读取当前文件，再明确指定编辑范围；写操作因此绑定到已经观察过的快照，而不是依赖模型确信自己的一次性命令不会出错。这能降低并发修改后的误写和覆盖风险。具体规范见 `agent/APPEND_SYSTEM.md` 的 `# Tool Call`。
+**Constrain side effects with hashline edit.** A hashline edit must first read the current file and then name the edit range explicitly; a write is thus bound to a snapshot that was actually observed, instead of relying on the model's confidence that its one-shot command cannot go wrong. This lowers the risk of miswrites and overwrites after concurrent changes. The rules are in `# Tool Call` of `agent/APPEND_SYSTEM.md`.
 
-**在完整模式中，把 todo 与 ctx 作为一套联合工具。** todo 负责维护任务生命周期；模型在普通结束路径上停下而 todo 尚未完成时，todo 会要求 agent 继续（原生 TodoTracker 的提醒，现由 [todo-more](#todo-more) 照原生逻辑实现），因此不必靠 loop 反复注入 prompt。它也会减少因小挫折而过早询问用户：最后一条回复是在问用户问题时，提醒不催；其余情况下，还有 pending / in_progress 项就继续由 agent 处理。等待外部回复时显式标 blocked，是本仓库 prompt 的要求，不是提醒的判断条件。自动继续存在误判风险，但这里选择承担这项风险，而不是频繁中断操作员。
+**In full mode, treat todo and ctx as one combined tool set.** todo maintains the task lifecycle; when the model stops on an ordinary end path while the todo is not finished, todo makes the agent continue (the native TodoTracker reminder, now implemented by [todo-more](#todo-more) following the native logic), so no loop has to inject prompts again and again. It also reduces asking the user too early after a small setback: when the last reply asks the user a question, the reminder does not push; otherwise, as long as pending / in_progress items remain, the agent keeps going. Marking an item blocked while waiting for an outside answer is a requirement of this repository's prompt, not a condition the reminder checks. Automatic continuation can misjudge, and here we choose to take that risk rather than interrupt the operator often.
 
-每次成功的 todo 修改都会被 `ctx-tasklog` 捕获；`ctx` 按这些事件重放任务的最终状态，形成不依赖模型自行总结的简短行事记录。主会话发生 compact 后，`ctx-tool` 会把这份记录连同 context 树注入新 context。这里的 `todo` 由独立插件 [omp-todo-more](#todo-more) 提供：`config.yml` 仍关掉原生 todo（`todo.enabled: false`），配置仓库不再复制其实现。每个列表带 goal 和各项 explanation，插件保留原生基础上的提醒，并恢复 `task:*` worker 的 todo；worker 定义同时要求每个切片维护自己的列表。日志与审查消费者各自消费公开契约，不导入插件 reader。
+Every successful todo change is captured by `ctx-tasklog`; `ctx` replays those events into the final task state, giving a short work record that does not depend on the model summarizing itself. After the main session compacts, `ctx-tool` injects that record, together with the context tree, into the new context. `todo` here comes from the independent plugin [omp-todo-more](#todo-more): `config.yml` still turns native todo off (`todo.enabled: false`), and the config repository no longer copies its implementation. Every list carries a goal and an explanation per item; the plugin keeps the native reminders and restores todo for `task:*` workers, whose definitions also require each slice to keep its own list. The log and review consumers each consume a public contract and do not import the plugin's reader.
 
-**把非法工具调用当作整体偏离的信号。** [tool-policy-nag](#tool-policy-nag) 检测模型是否绕开内置工具，只提醒，不拦截命令。OMP 的 JUDGE 角色可用且首选为原生判定模型时，意图通道自动参与，每次调用判断该用哪个工具；否则由字符串通道计数，超过阈值后发通用提醒。目标不是追求形式上完美的“古典”工具调用，而是在偏离扩散到其他规则之前及时校正。
+**Treat an illegal tool call as a signal of overall drift.** [tool-policy-nag](#tool-policy-nag) detects whether the model bypasses the built-in tools; it only reminds and never blocks a command. When OMP's JUDGE role is available and its first choice is a native judgment model, the intent lane joins automatically and judges for every call which tool should have been used; otherwise the string lane counts and sends a generic reminder past a threshold. The aim is not formally perfect "classical" tool calls but correcting drift before it spreads to other rules.
 
-**用 watchdog 做独立的运行时审阅。** watchdog 作为第三方观察者自动读取 context，并按规则注入提醒；作用类似 Claude 的 `/advisor`，但目标、触发和投放方式更广。判定选项较少时，可以声明选项改用 OMP 的原生 JUDGE 后端（[watchdog-agent](#watchdog-agent)）。
+**Use a watchdog for independent runtime review.** A watchdog reads the context automatically as a third-party observer and injects reminders by rule; it works like Claude's `/advisor`, with broader targets, triggers and delivery. When a judgment has few options, the options can be declared to use OMP's native JUDGE backend instead ([watchdog-agent](#watchdog-agent)).
 
-**逐轮判定并直接纠正。** [turn-judge](#turn-judge) 在主会话每一轮结束后，通过 OMP 的原生 JUDGE 按配置的问题判断这一轮，例如模型是不是在甩锅；对应选项的置信度达到阈值就直接输入预设的 prompt，否则只显示判定结果。
+**Judge every turn and correct directly.** After each main-session turn, [turn-judge](#turn-judge) judges that turn through OMP's native JUDGE against configured questions, for example whether the model is passing the buck; when the matching option's confidence reaches its threshold it types the preset prompt, otherwise it only shows the verdict.
 
-**让顾问看到用户原话。** mentor 和 discussant 只知道派它的 agent 告诉它的东西，只能顺着对方的转述给意见，成了回声放大器。[user-prompt-inject](#user-prompt-inject) 把根会话里用户自己写的 prompt 按模板注入它们的每次模型调用，让它们拿用户的目标和约束去核对对方的计划，而不是核对对方的转述。
+**Let advisors see the user's own words.** The mentor and discussants know only what the agent that spawned them tells them, so they can only advise along that agent's retelling and become echo amplifiers. [user-prompt-inject](#user-prompt-inject) injects the prompts the user wrote in the root session into every model call they make, through a template, so they check the other agent's plan against the user's goals and constraints rather than against the retelling.
 
-**单独补偿语言设置丢失。** Claude 的 server compact 之后，重新注入的 system prompt 可能没有恢复语言约束。[lang-nag](#lang-nag) 因此独立检查回复语言，并在下一次输入前补充提醒；它不改写已经发出的回复。
+**Compensate separately for a lost language setting.** After Claude's server-side compact, the re-injected system prompt may not restore the language constraint. [lang-nag](#lang-nag) therefore checks the reply language on its own and adds a reminder before the next input; it never rewrites a reply that was already sent.
 
-**把最终回复当作唯一的交付物。** 用户看不到思考、读过的文件、工具结果和 subagent 的汇报，只看到最后一条回复，所以回复的正文要用有主语的完整句子，第一次出现的对象先说明它是什么，每条结论旁边写出支撑它的观察，内容只要有结构就画图、不要打比方。完整规则见 `agent/APPEND_SYSTEM.md` 的 `# The user sees only the final reply`。
+**Treat the final reply as the only deliverable.** The user sees neither the thinking nor the files read, tool results or subagent reports, only the last reply. Its prose therefore uses complete sentences with explicit subjects, says what each item is when it first appears, writes the supporting observation next to every conclusion, and draws a figure whenever content has structure instead of reaching for analogies. The full rules are in `# The user sees only the final reply` of `agent/APPEND_SYSTEM.md`.
 
-### Context 管理
+### Context management
 
-**把 context 视为意图状态。** context 不只是文件内容，还包含需求、取舍、已确认的事实，以及与人类对齐过的意图。compact 会压缩这些信息，所以长程任务中的每次 compact 都是高损耗操作，应尽量避免。
+**Treat the context as intent state.** The context is not just file contents; it also holds requirements, trade-offs, confirmed facts and intent aligned with the human. Compaction squeezes all of that, so every compact in a long task is a lossy operation to avoid as far as possible.
 
-不能用同样有损的手段换取表面上的 context 节省：
+Do not buy an apparent context saving with means that are just as lossy:
 
-- 用 grep 代替完整阅读，会让片面信息固化成错误认识。
-- 把许多操作拼成一次长 bash，会扩大副作用并降低失败时的可判断性。
-- 外部命令的输出量可能失控；例如 git 分支经过多轮迭代后可达数百条，但直接用 `head` 或 `tail` 截断同样会丢失关键证据。
+- Grepping instead of reading in full hardens partial information into wrong beliefs.
+- Chaining many operations into one long bash widens side effects and makes failures harder to diagnose.
+- External command output can explode; a git branch list, for example, can reach hundreds of entries after many iterations, yet cutting it with `head` or `tail` loses key evidence just the same.
 
-应优先使用工具自带的分页和默认排序，在控制输出规模的同时保留可追溯的读取边界。
+Prefer the tools' own paging and default ordering, which keep output size under control while preserving a traceable read boundary.
 
-**把可丢弃的工作放进 subagent context。** subagent 的 context 是可抛弃的工作分支；重要结论和证据通过 subagent IRC 返回，由主 agent 整理并写回自己的 context。这样丢弃的是执行过程，不是任务意图。
+**Put disposable work in subagent contexts.** A subagent's context is a disposable working branch; important conclusions and evidence come back over subagent IRC, and the main agent distills them into its own context. What gets discarded is the execution, not the task intent.
 
-**由意图负责人写文档和核心代码。** 代码任务中，文档和核心代码是设计意图的主要载体，因此每一层的当前负责人必须亲自完成，不能把设计责任下放给 worker。完整规则见 `agent/APPEND_SYSTEM.md` 的 `# Operating stance`。
+**The owner of the intent writes the documents and the core code.** In a coding task, documents and core code are the main carriers of design intent, so each level's current owner must write them personally and must not push design responsibility down to a worker. The full rules are in `# Operating stance` of `agent/APPEND_SYSTEM.md`.
 
-**需要完整背景时 fork context。** 即使超过 150 万字的纯设计材料能够一次装入 context，也不适合让一个会话承担全部实现。把现有 context fork 给 subagent，可以让它聚焦局部任务，同时保留文件之外、已经与人类对齐的意图；这正是 `fork_task` 对原有 `task` 的补充（[fork-task](#fork-task)）。如果主 context 最终仍发生 compact，ctx 联合链路会把 context 树和由 todo 重放得到的任务记录强制注入压缩后的会话；它恢复的是已记录的进度，不是假定压缩能够无损保留原始意图。
+**Fork the context when the full background is needed.** Even if more than 1.5 million characters of pure design material fit into one context, one session should not carry the entire implementation. Forking the existing context to a subagent lets it focus on a local task while keeping intent that lives outside the files and was already aligned with the human; this is what `fork_task` adds to the original `task` ([fork-task](#fork-task)). If the main context still compacts in the end, the ctx chain forces the context tree and the task record replayed from todo into the compacted session; it restores recorded progress and does not assume that compaction preserves the original intent losslessly.
 
-### Subagent 分档
+### Subagent tiers
 
-模型的代码生成能力不等于整体判断力、规划能力或约束遵循能力。有些模型不适合由人类直接驱动，却能在边界明确的切片中成为高效 worker；task 分档据此区分成本与所需可信度。各档 `description` 写明模型档次、成本、可信度和不接的工作，让主 agent 按成本和可信度选档，而不是按任务难度选（见 [Subagent 体系](#subagent-体系)）。
+A model's code generation is not the same as its overall judgment, planning or rule-following. Some models are unsuitable for a human to drive directly yet make efficient workers on well-bounded slices; the task tiers separate cost from the trust required accordingly. Each tier's `description` states the model class, cost, trust and the work it refuses, so the main agent picks a tier by cost and trust rather than by task difficulty (see [Subagent system](#subagent-system)).
 
-低阶模型还可能在工作未完成时直接交付。[task-completion-judge](#task-completion-judge) 在这类 worker 交付前检查完成度；[task-split-check](#task-split-check) 推动每次派发只覆盖一个主题，以降低验收和核对成本。
+Low-tier models may also deliver before the work is finished. [task-completion-judge](#task-completion-judge) checks completion before such a worker delivers; [task-split-check](#task-split-check) pushes each dispatch to cover a single topic, lowering the cost of acceptance and review.
 
-### 其余扩展
+### Other extensions
 
-其余扩展大多是补丁，或是对某个工具的补充，可有可无。
+The remaining extensions are mostly patches, or additions to a particular tool, and are optional.
 
-## 同步与迁移
+## Sync and migration
 
 ```mermaid
 flowchart LR
-  gh -->|"OMP 启动时自动更新（需打开开关）"| local["本机 ~/.omp/agent 与 ~/.pi/agent"]
-  repo["omp-config 工作区"] -->|"/update-omp"| local
+  gh -->|"automatic update at OMP start (switch must be on)"| local["machine ~/.omp/agent and ~/.pi/agent"]
+  repo["omp-config working tree"] -->|"/update-omp"| local
   local -->|"/sync-omp-config"| repo
-  repo -->|"推送、合并"| gh
-  gh -->|"自动更新 / /update-omp 安装入口"| light["omp 所在目录的 omp-light"]
-  gh -->|"补装缺失插件"| plugins["~/.omp/plugins"]
-  local -->|"/migrate-omp-keys"| remote["远端 agent.db 的凭据表"]
+  repo -->|"push, merge"| gh
+  gh -->|"automatic update / /update-omp install the entry"| light["omp-light beside omp"]
+  gh -->|"install missing plugins"| plugins["~/.omp/plugins"]
+  local -->|"/migrate-omp-keys"| remote["credential table of the remote agent.db"]
 ```
 
-仓库 → 本机有三条路：`/update-omp` 应用当前工作区；打开[启动时自动更新](#启动时自动更新)后，每次启动从 GitHub 默认分支更新；`/omp-config-autoupdate run` 不管开关，立即从默认分支更新一次。三个维护命令在仓库根目录启动 OMP 后执行，完整规则见 `.omp/commands/` 下的同名文件。
+There are three repo → machine paths: `/update-omp` applies the current working tree; with [automatic update at startup](#automatic-update-at-startup) on, every start updates from the GitHub default branch; `/omp-config-autoupdate run` updates once from the default branch right away, whatever the switch says. The three maintenance commands run after starting OMP at the repository root; their full rules are in the files of the same name under `.omp/commands/`.
 
-|命令|方向|写入|加 `check`|
+|Command|Direction|Writes|With `check`|
 |---|---|---|---|
-|`/update-omp`|仓库工作区 → 本机|本机配置、`omp-light` 入口、缺失的插件|只报告差异，不写入|
-|`/sync-omp-config`|本机 → 仓库|只写仓库，完整模式会提交并推送|只报告差异，不写入|
-|`/migrate-omp-keys <target>`|本机 → 远端主机|覆盖远端凭据|—|
+|`/update-omp`|Repository working tree → machine|Machine config, the `omp-light` entry, missing plugins|Reports differences only, writes nothing|
+|`/sync-omp-config`|Machine → repository|Only the repository; full mode commits and pushes|Reports differences only, writes nothing|
+|`/migrate-omp-keys <target>`|Machine → remote host|Overwrites the remote credentials|—|
 
-### 两个方向共同的规则
+### Rules shared by both directions
 
-- **结构化配置按字段处理。** `config.yml`、`thinking-translator.json`、`extensions-last/system-prompt-replace/system-prompt-replace.json`、`extensions/lang-nag/lang-nag.json`、`extensions/input-polish/input-polish.json`、`extensions/tool-policy-nag/tool-policy-nag.json`、`pi-bansos-relay-state.json` 都按字段比对，只改有差异的字段。`/sync-omp-config` 写仓库时只改这些行，不整文件覆盖，也不重新序列化。仓库 → 本机由更新器写入：合并结果与仓库文件完全一致时原样复制仓库文件，否则重新序列化整个文件（键的顺序不变，格式可能与原文件不同）。两端都必须能解析：YAML 用 `Bun.YAML.parse`，JSON 用 `JSON.parse`。
-- **扩展目录里只有代码和仓库带的模板归仓库**：`extensions/<名字>/*.ts`、`extensions-last/<名字>/*.ts`、`extensions/user-prompt-inject/PROMPT-INJECT-*.md`、`extensions/turn-judge/TURN-JUDGE-*.md`，加上上面的结构化配置。同一目录里的其他文件属于本机，两个方向都不碰：`bro-settings.json`、`bro-prompt.md`、`omp-config-autoupdate.json`、`doc-polish.json`、`APPEND_SYSTEM_MODEL.md`、`WATCHDOG-*.md`，以及本机自己写的模板。Todo 的八个退休路径不再收回或作为普通模块写入，范围见 [todo-more](#todo-more)。
-- **`config.yml` 的本机字段两个方向都不动**，例如 `modelRoles`、`theme`、`compaction.thresholdTokens`，完整列表是更新器 `omp-config-update.ts` 的 `LOCAL_CONFIG_FIELDS`。
-- **`config.yml` 的 `extensions` 由仓库和本机共用**（更新器的 `MACHINE_LIST_FIELDS`）：仓库列表里的条目归仓库，仓库列表里没有的条目（如 `~/.claude`）归本机。更新器把本机条目留在仓库条目前面，所以 `extensions-last/` 下的扩展仍是最后一项；`/sync-omp-config` 不把本机条目写回仓库。仓库删掉自己的条目时，自动更新照常删掉它（见下面的“删除”）。
-- **本机的 `settings.json` 不迁移。** OMP 对它的 `extensions` 分两种处理：当作扩展包根目录（从中加载 skills、rules、commands 等）时，本机有 `config.yml` 就不读它；当作 TS/JS 扩展模块时，不管有没有 `config.yml` 都照样加载其中的条目。
-- **应用托管的扩展两个方向都跳过**：首行为 `// @orca-managed-pi-extension`，或任意位置含 `marker: _otty`。以标记为准，不看文件名。这类文件（如 `orca-*.ts`、`otty-integration.ts`）由 Orca、Otty 自己安装和改写。
-- **运行时文件不迁移**：`*.db*`、WAL、`*.lock`、`models.yml`（含 API key）、`commandcode-models.json`（本机生成）、`last-changelog-version`、`sessions/`、`terminal-sessions/`、`blobs/`、`cache/`、日志，以及自动更新的记录 `.omp-config-applied`。
+- **Structured configs are handled field by field.** `config.yml`, `thinking-translator.json`, `extensions-last/system-prompt-replace/system-prompt-replace.json`, `extensions/lang-nag/lang-nag.json`, `extensions/input-polish/input-polish.json`, `extensions/tool-policy-nag/tool-policy-nag.json` and `pi-bansos-relay-state.json` are compared field by field, and only differing fields change. When `/sync-omp-config` writes the repository it edits only those lines; it never overwrites the whole file or re-serializes it. Repo → machine is written by the updater: when the merged result equals the repository file exactly, the repository file is copied as is; otherwise the whole file is re-serialized (key order kept, formatting may differ from the original). Both sides must parse: YAML with `Bun.YAML.parse`, JSON with `JSON.parse`.
+- **Inside an extension directory, only code and the templates the repository ships belong to the repository**: `extensions/<name>/*.ts`, `extensions-last/<name>/*.ts`, `extensions/user-prompt-inject/PROMPT-INJECT-*.md`, `extensions/turn-judge/TURN-JUDGE-*.md`, plus the structured configs above. Every other file in those directories belongs to the machine and neither direction touches it: `bro-settings.json`, `bro-prompt.md`, `omp-config-autoupdate.json`, `doc-polish.json`, `APPEND_SYSTEM_MODEL.md`, `WATCHDOG-*.md`, and the machine's own templates. Todo's eight retired paths are no longer synced back or written as ordinary modules; see [todo-more](#todo-more) for the list.
+- **`config.yml`'s machine-local fields are left alone in both directions**, for example `modelRoles`, `theme`, `compaction.thresholdTokens`; the full list is `LOCAL_CONFIG_FIELDS` in the updater `omp-config-update.ts`.
+- **`config.yml`'s `extensions` is shared by the repository and the machine** (`MACHINE_LIST_FIELDS` in the updater): entries in the repository's list belong to the repository, entries it does not have (such as `~/.claude`) belong to the machine. The updater keeps machine entries ahead of the repository's, so the extension under `extensions-last/` is still the last entry; `/sync-omp-config` does not write machine entries back to the repository. When the repository removes one of its own entries, automatic update removes it as usual (see "Deletion" below).
+- **The machine's `settings.json` is not migrated.** OMP handles its `extensions` in two ways: as extension package roots (loading skills, rules, commands and so on from them), it is not read when the machine has a `config.yml`; as TS/JS extension modules, its entries load whether or not a `config.yml` exists.
+- **App-managed extensions are skipped in both directions**: a first line of `// @orca-managed-pi-extension`, or `marker: _otty` anywhere in the file. The marker decides, not the file name. Such files (for example `orca-*.ts`, `otty-integration.ts`) are installed and rewritten by Orca and Otty themselves.
+- **Runtime files are not migrated**: `*.db*`, WAL, `*.lock`, `models.yml` (contains API keys), `commandcode-models.json` (generated on the machine), `last-changelog-version`, `sessions/`, `terminal-sessions/`, `blobs/`, `cache/`, logs, and the automatic update's record `.omp-config-applied`.
 
-### 启动时自动更新
+### Automatic update at startup
 
-[omp-config-autoupdate](#omp-config-autoupdate) 扩展在 OMP 启动时运行更新器 `omp-config-update.ts auto`。默认关闭，用 `/omp-config-autoupdate on` 打开、`off` 关闭，开关只属于本机，见该扩展一节。仓库对托管项说了算：本机绕过仓库直接改了托管文件或托管字段，下次更新时会被覆盖。除此之外，本机自己的东西一律不动。
+The [omp-config-autoupdate](#omp-config-autoupdate) extension runs the updater `omp-config-update.ts auto` when OMP starts. It is off by default; `/omp-config-autoupdate on` turns it on and `off` turns it off, and the switch belongs to the machine alone, see that extension's section. The repository wins on managed items: a managed file or managed field edited on the machine behind the repository's back is overwritten by the next update. Everything else on the machine is left alone.
 
-1. **取仓库**：更新器在 `~/.omp/omp-config-src` 维护一份自己的浅克隆，从 `https://github.com/oh-my-omp/omp-config.git` 拉 `master` 分支（仓库的默认分支，写死在更新器的 `DEFAULT_BRANCH` 里）。克隆的 origin 还是仓库迁移前的地址 `https://github.com/mouriya-s-lab/omp-config.git` 时，先把它改到新地址再拉；这个目录存在但不是这个仓库的克隆时不碰它，直接报错。拉取失败（如断网，包括还没有克隆时的首次克隆失败）时这次不更新：克隆只是上次拉取时的副本，不能代替 GitHub 上的默认分支，下次启动再拉。
-2. **只在提交变化时应用**：新提交和 `<agent 目录>/.omp-config-applied` 记录的上次应用提交相同就什么都不做，所以没有新提交时，`/settings`、`/bansos` 改过的托管值不会被每次启动改回去。应用规则取自新提交里的 `omp-config-update.ts`，改了更新规则的提交按自己的规则应用。
-3. **规划与插件就绪**：先校验仓库里的所有结构化配置（含 `config-light.yml`）能解析成映射，再规划文件写入、迁移和删除；preflight 有错就不切换。然后补装缺失插件，再从 OMP owner catalog 核对独立 Todo 的 enabled、manifest entry 和实际入口文件。缺插件且不允许安装、安装失败、disabled、坏 entry 或退休对象冲突时，不写消费者、不删旧实现、不记完成。
-4. **写入与删除**：插件就绪后先移动，再依次写普通文件、JSON、`config.yml`，最后删除。Todo 切换的 move/write 阶段只要有错误，整个 delete 阶段都不执行，保留旧 reader/实现，已成功的部分写入如实报告、不回滚。每个文件先写同目录临时文件再 rename；普通目标是 symlink 时写到它指向的文件，symlink 保留。一般删除只按 git 记录的“上次应用的提交 → 新提交”计算：托管文件、结构化配置里仓库删掉的键，以及 `extensions` 条目；本机自己的键和字段保留，删完为空才删映射，整个结构化配置文件被删时本机文件不动。首次运行或旧提交不可读时，不做 git-derived 删除，但平铺迁移和插件就绪后的八路径 Todo 退休照常规划；退休仅 unlink 已知叶，不删除目录或链接 backing。
-5. **从平铺布局迁移**（自动更新和 `/update-omp` 都做，规则在更新器文件头的 RELOCATIONS）：本机还有平铺的 `extensions/<名字>.ts`、而仓库带了 `extensions/<名字>/index.ts` 时，删掉平铺文件，否则同一个扩展会加载两次（`ctx-post-compact-hint.ts` 由 `ctx-tool/` 取代）；平铺文件是应用托管的就报错，不删。根目录旧的更新器 `omp-config-update.ts` 也删掉，由 `extensions/omp-config-autoupdate/` 里的取代。结构化配置从旧位置（如 `extensions/lang-nag.json`、根目录的 `system-prompt-replace.json`）读出本机的值，合并写到新位置后删掉旧文件，本机自己加的键保留。根目录的本机数据（`APPEND_SYSTEM_MODEL.md`、`bro-prompt.md`、`bro-settings.json`、`omp-config-autoupdate.json`、`WATCHDOG-*.md`、本机自己写的 `PROMPT-INJECT-*.md` / `TURN-JUDGE-*.md`）和 `extensions/doc-polish.json` 在新位置空着时改名移进各自的扩展目录；新位置已有文件时留在原处并在报告里说明；symlink 不移动。仓库带的模板（现在或上次应用的提交里有的）旧副本直接删掉。`config.yml` 的 `extensions` 里旧的 `~/.omp/agent/extensions-last/system-prompt-replace.ts` 条目删掉。
+1. **Fetch the repository.** The updater keeps its own shallow clone in `~/.omp/omp-config-src` and fetches the `master` branch from `https://github.com/oh-my-omp/omp-config.git` (the repository's default branch, fixed in the updater's `DEFAULT_BRANCH`). When the clone's origin is still the pre-move address `https://github.com/mouriya-s-lab/omp-config.git`, it is repointed to the new address before fetching; when the directory exists but is not a clone of this repository, it is left alone and an error is reported. When the fetch fails (for example offline, including a failed first clone when there is no clone yet) nothing is updated this time: the clone is only a copy from the last fetch and cannot stand in for the default branch on GitHub; the next start fetches again.
+2. **Apply only when the commit changed.** When the new commit equals the last applied commit recorded in `<agent dir>/.omp-config-applied`, nothing happens, so without a new commit, managed values changed through `/settings` or `/bansos` are not reverted at every start. The apply rules come from the `omp-config-update.ts` in the new commit, so a commit that changes the update rules is applied by its own rules.
+3. **Plan and get plugins ready.** First every structured config in the repository (including `config-light.yml`) must parse to a mapping; then file writes, relocations and deletions are planned, and a preflight error stops the switch. Then missing plugins are installed, and the independent Todo's enablement, manifest entry and actual entry file are confirmed against OMP's owner catalog. A missing plugin that may not be installed, a failed install, a disabled plugin, a bad entry or a retirement-target conflict means no consumer is written, no old implementation is deleted and nothing is recorded as done.
+4. **Write and delete.** Once plugins are ready, moves come first, then plain files, JSON, `config.yml`, and finally deletions. Any error in the move/write phase of the Todo switch skips the whole delete phase and keeps the old reader/implementation; writes that already succeeded are reported truthfully and not rolled back. Every file is written to a temp file in the same directory first and then renamed; when an ordinary target is a symlink, the file it points to is written and the symlink kept. General deletions are computed only from git's "last applied commit → new commit": managed files, keys the repository removed from a structured config, and `extensions` entries; the machine's own keys and fields are kept, a mapping is deleted only when it ends up empty, and when a whole structured config file is deleted the machine's file is left alone. On the first run or when the old commit cannot be read there are no git-derived deletions, but the flat-layout relocations and the eight-path Todo retirement after the plugin is ready are still planned; retirement only unlinks known leaves and never deletes a directory or a link's backing.
+5. **Relocate from the flat layout** (both automatic update and `/update-omp` do this; the rules are RELOCATIONS in the updater's header). When the machine still has a flat `extensions/<name>.ts` while the repository ships `extensions/<name>/index.ts`, the flat file is deleted, or the same extension would load twice (`ctx-post-compact-hint.ts` is replaced by `ctx-tool/`); a flat file that is app-managed is reported as an error and not deleted. The old updater `omp-config-update.ts` at the agent root is deleted too, replaced by the one in `extensions/omp-config-autoupdate/`. Structured configs read the machine's values from their old location (such as `extensions/lang-nag.json` or the root `system-prompt-replace.json`), merge them into the new location and delete the old file, keeping keys the machine added. The machine's own data at the root (`APPEND_SYSTEM_MODEL.md`, `bro-prompt.md`, `bro-settings.json`, `omp-config-autoupdate.json`, `WATCHDOG-*.md`, the machine's own `PROMPT-INJECT-*.md` / `TURN-JUDGE-*.md`) and `extensions/doc-polish.json` are renamed into their extension directories when the new location is free; when a file already sits there they stay in place and the report says so; symlinks are not moved. Old copies of templates the repository ships (in the current or last applied commit) are simply deleted. The old `~/.omp/agent/extensions-last/system-prompt-replace.ts` entry in `config.yml`'s `extensions` is removed.
 
-   装着旧更新器（还在根目录）的机器，自动更新会去拉取结果的 `agent/omp-config-update.ts` 找新更新器，找不到就报 `has no agent/omp-config-update.ts`，什么都不应用。这样的机器要在仓库里手动执行一次 `/update-omp`，装上新位置的更新器，之后自动更新恢复正常。
-6. **插件**：`install-plugins.sh` 声明缺失项，由 `omp install` 在文件 ops 之前补装，从不卸载或顺手升级。一般按依赖列表比较；Todo 另外以 OMP catalog 的包身份和入口确认接管就绪，不能用 dependency 字符串代替。
-7. **轻量入口**：和 `/update-omp` 一样，把 `omp-light` 装到 PATH 上 `omp` 所在的目录。
-8. **记录与错误**：没有任何错误才把新提交写进 `.omp-config-applied`；有错误保持旧记录，下次启动重试。进入 Todo 切换后 IO 失败，报告实际部分结果与 `Cutover incomplete; do not restart OMP`；未修复的失败重跑即使本轮没有新变化也保留这项警告。先修复并重跑完整更新，不把混合状态当成可安全重启的成功迁移。
+   On a machine whose installed updater predates the move (still at the agent root), automatic update looks for the new updater at `agent/omp-config-update.ts` in the fetched commit, fails with `has no agent/omp-config-update.ts` and applies nothing. Such a machine needs one manual `/update-omp` in the repository to install the updater at its new location; automatic update then works again.
+6. **Plugins.** Entries declared in `install-plugins.sh` but missing are installed with `omp install` before the file operations; nothing is ever uninstalled or upgraded in passing. In general the comparison is against the dependency list; Todo additionally confirms handover readiness through the package identity and entry in OMP's catalog, which a dependency string cannot replace.
+7. **Light entry.** Like `/update-omp`, it installs `omp-light` into the directory of `omp` on PATH.
+8. **Record and errors.** Only an error-free run writes the new commit into `.omp-config-applied`; with errors the old record stays and the next start retries. An IO failure after the Todo switch has begun reports the actual partial result and `Cutover incomplete; do not restart OMP`; rerunning an unfixed failure keeps that warning even when this round made no new change. Fix the cause and rerun the full update first; do not treat a mixed state as a migration that is safe to restart on.
 
+What is left alone:
 
-不动的东西：
+- Keys in `config.yml` that the repository does not have, and machine-local fields; `extensions` entries that are not in the repository's list and that the repository did not just delete; keys that only the machine has in a structured config. A machine-local field missing on the machine is not filled in from the repository; when the repository turns the parent key of a machine-local field into a non-mapping value, the machine's mapping is kept. The exception: when the repository turns one of its own keys from a mapping into a scalar, the repository wins and keys the machine added under that mapping go with it.
+- Files outside the managed set: extra extensions, agents and templates on the machine, the machine's files inside extension directories (initialization items such as `doc-polish/doc-polish.json`, `bro-settings.json`, switch files), and runtime state.
+- App-managed files: the marker is checked before every overwrite and deletion, structured configs included.
+- Field-merged configs the machine cannot parse (the seven structured configs listed above): they are not overwritten and an error is reported; with preflight errors the whole switch does not run. `config-light.yml` is copied whole like an ordinary file, so a broken machine copy is simply overwritten.
 
-- `config.yml` 里仓库没有的键和本机字段，`extensions` 里仓库列表没有、也不是仓库刚删掉的条目，结构化配置里只有本机才有的键。本机字段即使本机没有，也不从仓库补；仓库把本机字段的上级键改成非映射值时，本机的映射保留。例外：仓库把自己的某个键从映射改成标量时以仓库为准，本机在这个映射下加的键随之消失。
-- 托管范围以外的文件：本机多出来的扩展、agent、模板，扩展目录里属于本机的文件（`doc-polish/doc-polish.json` 等初始化项、`bro-settings.json`、开关文件），运行时状态。
-- 应用托管的文件：每次覆盖和删除前都检查标记，结构化配置也一样。
-- 本机解析不了的按字段合并配置（上面列出的七个结构化配置）：不覆盖并报告错误；preflight 有错误时整次不执行切换。`config-light.yml` 按普通文件整份复制，本机那份坏了会被直接覆盖。
+**Concurrency.** The updater serializes "fetch + apply" with the lock directory `~/.omp/omp-config-update.lock`; other OMP processes starting at the same time and `/update-omp` skip when they cannot take the lock. The lock records the holder's pid: a lock whose holder has exited is stale and can be taken over; a process only releases a lock it holds.
 
-**并发**：更新器用锁目录 `~/.omp/omp-config-update.lock` 把“拉取 + 应用”串行化，同时启动的其他 OMP 和 `/update-omp` 拿不到锁就跳过。锁里记着持有者的 pid：持有进程已经退出的锁视为残留，可以抢占；进程只释放自己持有的锁。
+**When changes take effect.** The update lands while the current session is running. `config.yml` hot-reloads, and changes to its `extensions` / `disabledExtensions` immediately suspend or resume extensions this process already loaded; `APPEND_SYSTEM_MODEL.md`, `system-prompt-replace.json`, `TURN-JUDGE-*.md`, `tool-policy-nag.json`, `PROMPT-INJECT-*.md` and `agents/` apply from the next prompt, the next turn, the next shell / eval call or the next dispatch. `APPEND_SYSTEM.md`, extension code changes (including extension files deleted or moved during relocation), new extensions and plugins wait for the next start; when such changes landed and the update had no error, the notification reminds you to restart. In other words, one session may briefly run new data with old extension code; after a restart they agree.
 
-**生效时机**：更新在当前会话运行期间落地。`config.yml` 实时重载，其中 `extensions` / `disabledExtensions` 的改动会立即停用或恢复本进程已经加载过的扩展；`APPEND_SYSTEM_MODEL.md`、`system-prompt-replace.json`、`TURN-JUDGE-*.md`、`tool-policy-nag.json`、`PROMPT-INJECT-*.md`、`agents/` 从下一条 prompt、下一轮、下一次 shell / eval 调用或下一次派发开始生效。`APPEND_SYSTEM.md`、扩展代码的改动（包括迁移时删掉或移动的扩展文件）、新增的扩展和插件要到下次启动；有这类改动且更新没有出错时，通知会提醒重启。也就是说，同一个会话里可能暂时是新数据配旧扩展代码，重启后一致。
+**Notifications.** With changes and no error, one info notification states which commit it updated to and how many files were written, moved and deleted and how many plugins were installed, with a restart reminder when needed; with errors, a single warning shows the first error and no restart reminder (partial writes may already have landed; use `/omp-config-autoupdate run` for the detailed report). Already up to date, a failed fetch and a held lock are only logged. Headless mode shows no notification and only logs. The notification is a summary; the detailed report of `/omp-config-autoupdate run` lists only that run's own result: after an update applied successfully at startup, `run` only reports up to date; after an apply error at startup (no `.omp-config-applied` written), `run` applies again and lists every item, see [omp-config-autoupdate](#omp-config-autoupdate). A fetch that keeps failing produces no reminder at startup; use `run` to see the git error.
 
-**通知**：有改动且没有出错时弹一条 info，说明更新到哪个提交、写了几个、移动了几个、删了几个、补装了几个插件，需要时提醒重启；有错误时只弹一条 warning，给出第一条错误，不带重启提醒（部分写入可能已经落地，用 `/omp-config-autoupdate run` 看详细报告）。已是最新、拉取失败、锁被占用这三种情况只写日志。headless 模式不弹通知，只写日志。通知只给汇总；`/omp-config-autoupdate run` 的详细报告只列它自己那次运行的结果：启动时已成功应用的更新，再 `run` 只会报告已是最新；启动时应用出错（不写 `.omp-config-applied`）时，`run` 会重新应用并逐条列出，见 [omp-config-autoupdate](#omp-config-autoupdate)。一直拉取失败时启动不会提醒，用 `run` 看 git 报错。
+### `/update-omp`: repo → machine
 
-### `/update-omp`：仓库 → 本机
+One manual update from the working tree (unpushed changes included): `bun agent/extensions/omp-config-autoupdate/omp-config-update.ts apply --source .`, with the same write rules as automatic update. Use it when the working tree rather than the GitHub default branch should be applied, for example to install the updater on a new machine for the first time or to try unpushed changes on the machine first. Differences from automatic update:
 
-用工作区（含未推送的改动）手动更新一次：`bun agent/extensions/omp-config-autoupdate/omp-config-update.ts apply --source .`，写入规则与自动更新相同。要应用的是工作区而不是 GitHub 默认分支时用它，例如新机器首次安装更新器、想先在本机试用未推送的改动。和自动更新的差别：
+- Apart from the flat-layout relocations and the finite eight-path Todo retirement after the plugin is ready, it deletes no files and no structured-config keys: the working tree has no "last applied commit" to compare with.
+- It does not rewrite `.omp-config-applied`. With automatic update on, the next start overwrites the manually applied content whenever the default branch's commit differs from the record; once the changes are pushed and merged, a restart brings both sides in line.
+- It finds `[卸载候选]` (uninstall candidates) with `./plugin-audit.sh` and uninstalls them after asking; the updater installs missing plugins.
+- Machine initialization items are left alone when they exist; when missing, it first asks whether to create them and with what content, and without confirmation skips them and says so in the report: `extensions/doc-polish/doc-polish.json` and `commandcode-models.json`, which [commandcode-model-spec](#commandcode-model-spec) depends on. Automatic update never creates them.
 
-- 除了“从平铺布局迁移”和插件就绪后的有限八路径 Todo 退休，不删文件，也不删结构化配置里的键：工作区没有“上次应用的提交”可以对比。
-- 不改写 `.omp-config-applied`。自动更新开着时，下次启动只要默认分支的提交与记录不同，就会覆盖手动应用的内容；改动推送并合并后再启动，两边就一致了。
-- 用 `./plugin-audit.sh` 找出 `[卸载候选]`，询问后卸载；缺失的插件由更新器补装。
-- 本机初始化项已存在就不动，缺失时先问用户是否创建、内容填什么，没确认就跳过并在报告里说明：`extensions/doc-polish/doc-polish.json`、[commandcode-model-spec](#commandcode-model-spec) 依赖的 `commandcode-models.json`。自动更新从不创建它们。
+It reports actual writes, moves, deletions, plugin installs and uninstalls, and items skipped while awaiting confirmation. It reminds you to restart only when there is no error and `restartNeeded` is set; when the switch has errors, fix them and rerun first, and do not restart into a mixed state. Manual update does not change the applied marker. In a running session, `pi-bansos-relay-state.json` takes effect at the next session start or the next change through `/bansos`.
 
-报告实际写入、移动、删除、装卸插件与等待确认的跳过项。只有无错误且 `restartNeeded` 时提醒重启；切换有错误时先修复并重跑，不重启混合状态。手动更新不改 applied marker。`pi-bansos-relay-state.json` 在已运行的会话里要到下次会话启动，或下一次用 `/bansos` 修改时才生效。
+### `/sync-omp-config`: machine → repo
 
-### `/sync-omp-config`：本机 → 仓库
+It only reads the machine and never writes `~/.omp`, `~/.pi`, the `omp` install directory, PATH or shell config; the machine's file mtimes stay unchanged.
 
-只读本机，不写 `~/.omp`、`~/.pi`、`omp` 安装目录、PATH 或 shell 配置，本机文件的 mtime 前后不变。
+- **Scope**: the root `config.yml`, `APPEND_SYSTEM.md`, `thinking-translator.json`, the three light-mode assets, `agents/`, the files inside extension directories that belong to the repository (see [Rules shared by both directions](#rules-shared-by-both-directions); the updater is among them), and `~/.pi/agent/pi-bansos-relay-state.json`. This matches the updater's managed set. `config.yml`'s machine-local fields and the machine's `extensions` entries are not written back to the repository.
+- **Not synced back**: the `omp-light`, `omp-light.ts` and `omp-light.cmd` installed beside `omp` (the three light-mode items are taken only from `~/.omp/agent`); files inside extension directories that belong to the machine; `.omp-config-applied`; the eight retired paths of [todo-more](#todo-more), which are never candidates even when an old machine still has them.
+- When the machine is still on the flat layout (a `.ts` named after one of this repository's extensions directly under `extensions/`), it stops and asks for `/update-omp` to migrate first: comparing against the flat layout would misread the repository's whole set of extension directories as deleted on the machine. The excluded retired Todo paths do not trigger this flat-layout check.
+- When the machine has no `pi-bansos-relay-state.json` (settings were never changed through `/bansos`), that does not count as "deleted on the machine"; the repository stays as it is.
+- When the dependencies in `~/.omp/plugins/package.json` disagree with `install-plugins.sh`, the plugin list in the script is rewritten: URL/Git dependencies are kept as they are, npm dependencies lose their version; commented-out optional plugins stay commented, see [Plugins](#plugins).
+- After writing the repository it verifies: plain files are `cmp`-identical to the machine's, structured configs agree field by field except for machine-local fields, YAML/JSON parse, `bun run check` passes, the repository contains no plaintext credentials (`sk-`, `ghp_`, overlong `apiKey:` values), and `git status --short` shows no runtime files or installed entries.
+- Full mode finally commits and pushes with the commit message `chore: sync snapshot with local omp config`.
 
-- **范围**：根目录的 `config.yml`、`APPEND_SYSTEM.md`、`thinking-translator.json`、轻量模式三项资产、`agents/`，扩展目录里归仓库的文件（见[两个方向共同的规则](#两个方向共同的规则)，更新器也在其中），以及 `~/.pi/agent/pi-bansos-relay-state.json`。与更新器的托管范围一致。`config.yml` 的本机字段和 `extensions` 的本机条目不写回仓库。
-- **不收回**：安装到 `omp` 旁边的 `omp-light`、`omp-light.ts`、`omp-light.cmd`（轻量模式三项只从 `~/.omp/agent` 取）；扩展目录里属于本机的文件；`.omp-config-applied`；[todo-more](#todo-more) 的八个退休路径，即使旧机器仍有它们也不进入收回候选。
-- 本机还是平铺布局（`extensions/` 下直接有本仓库扩展同名的 `.ts`）时直接停下，要求先执行 `/update-omp` 迁移：拿平铺布局比对会把仓库的整套扩展目录误判为本机已删除。已排除的退休 Todo 路径不触发这项旧布局检查。
-- 本机没有 `pi-bansos-relay-state.json`（从没用 `/bansos` 改过设置）时，不算“本机已删除”，仓库保持原样。
-- `~/.omp/plugins/package.json` 的依赖和 `install-plugins.sh` 不一致时，重写脚本里的插件列表：URL/Git 依赖原样保留，npm 依赖去掉版本号；注释掉的可选插件保持注释，见[插件](#插件)。
-- 写入仓库后校验：普通文件与本机 `cmp` 一致，结构化配置除本机字段外逐字段一致，YAML/JSON 能解析，`bun run check` 通过，仓库里没有明文凭据（`sk-`、`ghp_`、超长的 `apiKey:` 值），`git status --short` 里没有运行时文件或已安装入口。
-- 完整模式最后提交并推送，commit message 为 `chore: sync snapshot with local omp config`。
+### Plugins
 
-### 插件
+Plugin packages are runtime state and stay out of the repository (the repository only keeps `pi-bansos`'s state file, see [Manual migration](#manual-migration)). `install-plugins.sh` declares the plugin list and runs `omp install` for each entry:
 
-插件包是运行时状态，不进仓库（仓库只收 `pi-bansos` 的状态文件，见[手动迁移](#手动迁移)）。`install-plugins.sh` 声明插件列表，并对每一项执行 `omp install`：
+- npm: `pi-commandcode-provider`, `pi-package-search`, `pi-pretty-codeblocks`, `pi-schedule`.
+- GitHub: `mouriya-s-lab/pi-bansos`, `oh-my-omp/omp-unified-exec`, `oh-my-omp/omp-todo-more`, `oh-my-omp/omp-thinking-translator`, `oh-my-omp/omp-codex-image-gen`.
+- Optional, commented out and not installed by default: `oh-my-omp/omp-remote-build`, which gives every git worktree a Mutagen replica and a Komodo-managed build container on a remote Docker host. Not everyone needs it, and it has many dependencies: `omp-unified-exec`, Mutagen, the km CLI, Komodo Core/Periphery and an SSH-reachable build host; its configuration is in that repository's README. To use it, wrap the line in single quotes to uncomment it.
 
-- npm：`pi-commandcode-provider`、`pi-package-search`、`pi-pretty-codeblocks`、`pi-schedule`。
-- GitHub：`mouriya-s-lab/pi-bansos`、`oh-my-omp/omp-unified-exec`、`oh-my-omp/omp-todo-more`、`oh-my-omp/omp-thinking-translator`、`oh-my-omp/omp-codex-image-gen`。
-- 可选，注释掉、默认不装：`oh-my-omp/omp-remote-build`，给每个 git worktree 在远端 Docker 主机上建 Mutagen 副本和 Komodo 管理的构建容器。不是谁都需要，而且依赖太多：`omp-unified-exec`、Mutagen、km CLI、Komodo Core/Periphery 和可 SSH 的构建主机，配置见它仓库的 README。需要时给该行加上单引号取消注释。
+No plugin is pinned: OMP resolves the current version of npm packages, GitHub URLs track the default branch, and rerunning may upgrade plugins. The result goes into `~/.omp/plugins/` (`package.json`, `bun.lock`, `node_modules/`, `omp-plugins.lock.json`). The script needs the network and downloads and loads third-party code.
 
-所有插件都不钉版本：npm 包由 OMP 解析当前版本，GitHub URL 跟随默认分支，重复执行可能升级插件。结果写进 `~/.omp/plugins/`（`package.json`、`bun.lock`、`node_modules/`、`omp-plugins.lock.json`）。脚本需要联网，会下载并加载第三方代码。
+`pi-bansos` is the `mouriya-s-lab` fork, whose fixes were also submitted upstream. When the machine already has the npm `pi-bansos`, run `omp plugin uninstall pi-bansos` before installing the fork.
 
-`pi-bansos` 用的是 `mouriya-s-lab` 的 fork，其中的修复也提交给了上游。本机已经装了 npm 版 `pi-bansos` 时，要先 `omp plugin uninstall pi-bansos`，再装 fork。
+`omp-unified-exec` is the `oh-my-omp` fork of `iamwrm/pi-unified-exec` and provides `exec_command`, `write_stdin` and related tools. From 0.12.1 upstream imports pi's `createCodemodeExtension` directly; OMP has no codemode, so plugin validation fails and it cannot be installed. The fork skips that display optimization when the host lacks the export and renames the package to `omp-unified-exec`. On Bun 1.4 and later, TTY is implemented by Bun's native `Terminal`, one backend for macOS, Linux and Windows; only under Node.js is `@homebridge/node-pty-prebuilt-multiarch` loaded on demand. The list of customizations and the sync policy are in the fork's `fork-features/README.md`. When the machine has `pi-unified-exec`, run `omp plugin uninstall pi-unified-exec` before installing the fork: both register tools of the same name.
 
-`omp-unified-exec` 是 `mouriya-s-lab` 对 `iamwrm/pi-unified-exec` 的 fork，提供 `exec_command`、`write_stdin` 等工具。上游 0.12.1 起直接导入 pi 的 `createCodemodeExtension`，OMP 没有 codemode，插件校验失败、装不上；fork 改成宿主没有这个导出时跳过这项显示优化，并把包名改成 `omp-unified-exec`。在 Bun 1.4 及以上版本中，TTY 由 Bun 原生 `Terminal` 实现，macOS、Linux、Windows 共用同一后端；在 Node.js 中才按需加载 `@homebridge/node-pty-prebuilt-multiarch`。定制清单和同步方式记在 fork 仓库的 `fork-features/README.md`。本机装着 `pi-unified-exec` 时，要先 `omp plugin uninstall pi-unified-exec`，再装 fork：两者注册同名工具。
+`./plugin-audit.sh` is read-only: it collects every plugin that appeared in `install-plugins.sh` since the base commit `5974c4fa`, compares them with `omp plugin list` and classifies them. It takes all single-quoted text inside `plugins=( … )` and does not skip comment lines: an optional plugin's comment line is only treated as unregistered because it has no quotes, so the `omp-remote-build` line deliberately has none and counts as `[保留]` (keep) even when installed. It reads only committed versions (`git show <commit>:install-plugins.sh`, with "current list" taken from `HEAD`), whereas `./install-plugins.sh` runs the file in the working tree, so commit a changed plugin list before running the audit. Repo → machine handles the categories like this:
 
-`./plugin-audit.sh` 只读，从基准提交 `5974c4fa` 起收集 `install-plugins.sh` 里出现过的插件，和 `omp plugin list` 对比后分类。它取 `plugins=( … )` 里所有单引号括起的文字，不跳过注释行：可选插件的注释行不带引号才不会被当成已登记，所以 `omp-remote-build` 那行刻意不加引号，本机装了也归 `[保留]`。它读的都是已提交的版本（`git show <commit>:install-plugins.sh`，“当前列表”取 `HEAD`），而 `./install-plugins.sh` 运行的是工作区里的文件，所以改了插件列表要先提交再跑 audit。仓库 → 本机按分类处理：
-
-|分类|含义|处理|
+|Category|Meaning|Handling|
 |---|---|---|
-|`[安装]`|脚本要求、本机缺失|更新器补装（自动更新和 `/update-omp` 都会）。一般按 `~/.omp/plugins/package.json` 判断：GitHub 比去掉 `#ref` 的 URL，npm 比包名；Todo 用 owner catalog 的 `omp-todo-more` 身份与实际 entry 确认就绪，已安装的 ref/URL 写法不同不会因此升级|
-|`[卸载候选]`|从脚本删掉了，本机还装着|只有 `/update-omp` 处理：询问后 `omp plugin uninstall <name>`；自动更新从不卸载|
-|`[保留]`|用户自己装的，脚本从没登记过|不动|
-|`[已同步]`|脚本与本机一致|—|
+|`[安装]` (install)|Required by the script, missing on the machine|Installed by the updater (both automatic update and `/update-omp`). In general this is decided from `~/.omp/plugins/package.json`: GitHub compares the URL without `#ref`, npm compares the package name; Todo confirms readiness through the `omp-todo-more` identity and actual entry in the owner catalog, so a different installed ref/URL spelling does not trigger an upgrade|
+|`[卸载候选]` (uninstall candidate)|Removed from the script, still installed on the machine|Handled only by `/update-omp`: `omp plugin uninstall <name>` after asking; automatic update never uninstalls|
+|`[保留]` (keep)|Installed by the user, never declared in the script|Left alone|
+|`[已同步]` (in sync)|Script and machine agree|—|
 
-GitHub URL 的插件名按 URL 最后一段推断，仓库名和包名不同时分类可能有偏差，以 `omp plugin list` 的名称为准。
+A GitHub URL plugin's name is inferred from the URL's last segment; when the repository name and the package name differ the category may be off, and the name in `omp plugin list` is authoritative.
 
-### 思考翻译
+### Thinking translation
 
-`omp-thinking-translator` 从 `~/.omp/agent/thinking-translator.json` 读取翻译候选链，每次请求从第一项开始，失败才尝试下一项；配置在下一条消息开始时重读。仓库链先用 `futureppo-pool/grok-4.7`（`minimal`），再用 `futureppo-pool/deepseek-v4.1-flash`（`low`），其余模型保持配置顺序。可用模型的 `effort` 显式取模型目录支持的最低等级；当前目录缺失的 `ministral-14b-latest` 保留并设为 `off`，不据此断言它的能力。
+`omp-thinking-translator` reads its candidate chain from `~/.omp/agent/thinking-translator.json`; every request starts at the first entry and tries the next only on failure, and the config is re-read when the next message starts. The repository's chain uses `futureppo-pool/grok-4.7` (`minimal`) first, then `futureppo-pool/deepseek-v4.1-flash` (`low`), with the other models in configured order. Each available model's `effort` is set explicitly to the lowest level its catalog entry supports; `ministral-14b-latest`, missing from the current catalog, is kept with `off`, without claiming anything about its capability.
 
-写入 `effort` 不保证请求会携带推理参数。`futureppo-pool` 的自动发现兼容信息会省略 `reasoning_effort`，使用这两个模型时在本机 `models.yml` 的既有 provider 下加入逐模型覆盖，保留原有连接、凭据和 discovery：
+Writing `effort` does not guarantee that requests carry a reasoning parameter. The automatically discovered compatibility info of `futureppo-pool` omits `reasoning_effort`; when using these two models, add per-model overrides under the existing provider in the machine's `models.yml`, keeping the existing connection, credentials and discovery:
 
 ```yaml
 providers:
@@ -230,19 +231,19 @@ providers:
           supportsReasoningEffort: true
 ```
 
-`models.yml` 属于本机，不随配置仓库同步。修改 provider 兼容信息后启动新的 OMP 进程，运行 `/thinking-translator status` 核对候选顺序与强度，再触发实际思考翻译；真实请求应分别携带 `reasoning_effort: minimal` 和 `reasoning_effort: low`。只看到 status 中的强度不能证明上游收到了参数。
+`models.yml` belongs to the machine and is not synced with the config repository. After changing provider compatibility info, start a new OMP process, run `/thinking-translator status` to check the candidate order and efforts, then trigger an actual thinking translation; the real requests should carry `reasoning_effort: minimal` and `reasoning_effort: low` respectively. Seeing the effort in status alone does not prove the upstream received the parameter.
 
 ### todo-more
 
-[omp-todo-more](https://github.com/oh-my-omp/omp-todo-more) 是独立 OMP/Tern 插件，由安装列表声明并从普通 plugin discovery 加载，完整和轻量模式都使用它。原生 Todo 保持 `todo.enabled: false`；不能同时加载旧本地实现，也不靠同名工具最后加载覆盖。
+[omp-todo-more](https://github.com/oh-my-omp/omp-todo-more) is an independent OMP/Tern plugin, declared in the install list and loaded through ordinary plugin discovery; full and light mode both use it. Native Todo stays `todo.enabled: false`; the old local implementation must not be loaded alongside it, and nothing relies on a same-named tool loading last to win.
 
-- `todo` 保留 `init/start/done/rm/drop/block/unblock/append/view/explain`。goal 是 `{objective, measure, doneWhen}`，项是 `{title, explanation}`；任务按完整 title 寻址。工具说明、提醒、planning edit guard、normal/restricted `task:*` 行为由插件维护。
-- 在 OMP/Tern 输入 `/todo-more` 编辑 goal 或 explanation。Save 按当前分支只提交目标字段，保留最新 status/phase/blocker/order；删除标题不复活。Enter 换行、Tab/Shift+Tab 切换、Ctrl+Enter 保存，Escape/Cancel 丢弃；不替换宿主 `/todo`，不启动额外模型 turn。switch/branch/tree/shutdown 取消旧草稿。
-- 当前 session branch 的 `mouriya.omp.todo-more` snapshot 是状态记录，宿主 TodoTracker 和历史卡片只是投影/副本；reader 保持 native edits 标题联结和 empty barrier。同步提交确认 branch 接受，不等于磁盘 durable-write；正常保留以实际退出/resume 验证。
-- 配置侧 completion judge 只请求同步 `omp-todo-more:read` 投影，不导入插件内部模块；task log 只记录成功工具事件中的 goal-set，不是当前状态。
-- 插件 async factory 先等待 Tern owner 的正常复制安装和复查，再注册功能。matching ready/disabled 副本不重装；保留 disabled，linked 冲突不自动 unlink。无 Tern 时 ANSI 可用，不能据此声称 GUI 已启用。native UI、历史/提醒差异、read wire 和资产生命周期详见[插件 README](https://github.com/oh-my-omp/omp-todo-more#readme)。
+- `todo` keeps `init/start/done/rm/drop/block/unblock/append/view/explain`. The goal is `{objective, measure, doneWhen}`, an item is `{title, explanation}`; tasks are addressed by their complete title. The tool description, reminders, planning edit guard and normal/restricted `task:*` behavior are maintained by the plugin.
+- Type `/todo-more` in OMP/Tern to edit the goal or explanations. Save commits only the target field on the current branch and keeps the latest status/phase/blocker/order; a deleted title is not revived. Enter inserts a newline, Tab/Shift+Tab switches, Ctrl+Enter saves, Escape/Cancel discards; it does not replace the host's `/todo` and starts no extra model turn. Switch/branch/tree/shutdown cancel old drafts.
+- The `mouriya.omp.todo-more` snapshot on the current session branch is the state record; the host TodoTracker and historical cards are only projections/copies; the reader keeps the title join with native edits and the empty barrier. A synchronous commit confirms that the branch accepted it, not a durable disk write; normal persistence is verified by an actual exit/resume.
+- On the config side, the completion judge only requests the synchronous `omp-todo-more:read` projection and imports no plugin internals; the task log records only goal-sets from successful tool events and is not the current state.
+- The plugin's async factory first waits for the Tern owner's normal copy install and re-check, then registers its features. A matching ready/disabled copy is not reinstalled; disabled is kept, and a linked conflict is not unlinked automatically. Without Tern, ANSI works, which does not mean the GUI is enabled. Native UI, history/reminder differences, the read wire and the asset lifecycle are described in the [plugin README](https://github.com/oh-my-omp/omp-todo-more#readme).
 
-更新器在独立插件就绪后，手动和自动模式都退休以下八个路径：
+Once the independent plugin is ready, the updater retires these eight paths in both manual and automatic mode:
 
 ```text
 extensions/todo-more/index.ts
@@ -255,12 +256,11 @@ extensions/subagent-todo.ts
 extensions/subagent-todo/index.ts
 ```
 
-仅 unlink 已知文件或叶链接本身，保留目录、host-owned 邻居和 backing file。app-managed 叶、父目录链接或异常叶对象报错并阻止切换；就绪门禁不满足时同样保留消费者和旧模块。Reverse sync 明确排除这组路径，不把旧机器实现收回。切换无错误后重启 OMP 才加载新代码。
+Only the known file or the leaf link itself is unlinked; directories, host-owned neighbors and backing files are kept. An app-managed leaf, a parent-directory link or an unexpected leaf object is an error that blocks the switch; when the readiness gate is not met, the consumers and old modules are kept too. Reverse sync explicitly excludes these paths and never brings an old machine's implementation back. After an error-free switch, restart OMP to load the new code.
 
+### Manual migration
 
-### 手动迁移
-
-下面的整文件复制只用于尚无 OMP 配置和旧本地 Todo 的新机器。已有配置的机器必须执行 `/update-omp`：直接 `cp -a` 不会移除旧 Todo 模块，随后安装插件会留下两个实现，恢复本机字段也不能完成退休。不要复制整个 `agent/`，里面还可能有运行时状态、`models.yml` 和 `commandcode-models.json`。即使目标为空，这组复制仍会整体写入 `config.yml`、示例 `extensions/doc-polish/doc-polish.json` 和 repo-only `extensions-last/README.md`；需要保留本机内容或迁移平铺布局时同样使用更新器。先检查目标和差异，再复制：
+The whole-file copy below is only for a new machine with no OMP config and no old local Todo. A machine with existing config must use `/update-omp`: a plain `cp -a` does not remove the old Todo modules, installing plugins afterwards leaves two implementations, and restoring machine-local fields cannot complete the retirement. Do not copy the whole `agent/`; it may also hold runtime state, `models.yml` and `commandcode-models.json`. Even into an empty target, this copy set writes `config.yml`, the example `extensions/doc-polish/doc-polish.json` and the repo-only `extensions-last/README.md` whole; to keep machine content or migrate a flat layout, use the updater as well. Check the target and the differences before copying:
 
 ```bash
 mkdir -p "$HOME/.omp/agent"
@@ -273,11 +273,11 @@ cp pi/agent/pi-bansos-relay-state.json "$HOME/.pi/agent/"
 ./install-plugins.sh
 ```
 
-新机器完成复制和插件安装后可重启 OMP；已有旧实现的机器只能在 `/update-omp` 完整成功、退休完成后重启，errors 时先修复并重跑。只复制文件不会安装 PATH 上的 `omp-light`：在目标机执行 `/update-omp`，或打开 `/omp-config-autoupdate on` 后让首次自动更新安装入口与缺失插件。第一次自动 apply 尚无 `.omp-config-applied`，会完整应用默认分支；新扩展和插件仍需在无错误后再重启加载。
+A new machine can restart OMP after copying and installing plugins; a machine with an old implementation may restart only after `/update-omp` succeeds completely and the retirement is done, and on errors must fix and rerun first. Copying files alone does not install `omp-light` on PATH: run `/update-omp` on the target, or turn on `/omp-config-autoupdate on` and let the first automatic update install the entry and missing plugins. The first automatic apply has no `.omp-config-applied` yet and applies the default branch in full; new extensions and plugins still load only after a restart following an error-free run.
 
-`pi-bansos-relay-state.json` 放在 `~/.pi/agent/` 而不是 `~/.omp/agent/`，因为插件从那里读。它记录 relay 开关、当前 relay、已保存的 relay 列表和状态栏设置，由 `/bansos` 写入，不含凭据。状态栏默认显示 `relay: ON/OFF`；隐藏设置（`statusBar: "hidden"`）只存在这个文件里，缺了它，新机器会重新显示。
+`pi-bansos-relay-state.json` lives in `~/.pi/agent/` rather than `~/.omp/agent/` because the plugin reads it there. It records the relay switch, the current relay, the saved relay list and the status-bar setting; it is written by `/bansos` and holds no credentials. The status bar shows `relay: ON/OFF` by default; the hidden setting (`statusBar: "hidden"`) exists only in this file, so a new machine without it shows the entry again.
 
-### 迁移后检查
+### Post-migration checks
 
 ```bash
 omp config list --json
@@ -285,397 +285,398 @@ omp plugin list --json
 git status --short
 ```
 
-确认配置值、插件名称、版本、路径和 `enabled` 状态符合预期，第三方插件没有带进不需要的扩展，仓库里没有出现数据库、WAL、日志、会话、缓存或插件运行时文件。
+Confirm that config values, plugin names, versions, paths and `enabled` states are as expected, that third-party plugins brought in no unwanted extensions, and that no database, WAL, log, session, cache or plugin runtime file appeared in the repository.
 
-### 凭据迁移：`/migrate-omp-keys <target>`
+### Credential migration: `/migrate-omp-keys <target>`
 
-换机器后不用重新登录各个供应商：把本机 `~/.omp/agent/agent.db` 的 `auth_credentials` 表经 SSH 复制到远端同路径的 `agent.db`。这条路径与仓库快照无关，仓库仍然不收数据库。
+No need to log in to every provider again on a new machine: the `auth_credentials` table of the machine's `~/.omp/agent/agent.db` is copied over SSH into the `agent.db` at the same path on the remote host. This path has nothing to do with the repository snapshot, which still keeps no database.
 
-- `target` 是一个 SSH 地址（`user@host` 或 alias）。没给就先问，问不到就停止，不碰数据库。
-- 覆盖远端已有凭据：写之前说明并确认，用 SQLite `.backup` 给远端库做带时间戳的备份。
-- 远端 OMP 先关掉，迁完手动重启；命令本身不启停 OMP。
-- 只迁 `auth_credentials` 表，不迁会话、历史、缓存或模型。远端除了整表替换这张表，还会清空 `auth_credential_blocks` 和 `auth_credential_refresh_leases`。不轮换密钥，不打印凭据。
+- `target` is an SSH address (`user@host` or an alias). When it is missing it asks first, and stops without touching any database when there is no answer.
+- It overwrites existing remote credentials: it explains and confirms before writing, and backs up the remote database with SQLite `.backup` under a timestamp.
+- Shut down the remote OMP first and restart it by hand afterwards; the command itself neither stops nor starts OMP.
+- Only the `auth_credentials` table is migrated, not sessions, history, caches or models. Besides replacing that table wholesale, the remote side also clears `auth_credential_blocks` and `auth_credential_refresh_leases`. Keys are not rotated and credentials are never printed.
 
-## 轻量模式
+## Light mode
 
-`omp-light` 启动一个精简的 OMP 进程，适合简单小任务：
+`omp-light` starts a trimmed OMP process for small, simple tasks:
 
-- 用 `APPEND_SYSTEM_LIGHT.md` 代替完整的追加提示词。
-- 按 `config-light.yml` 禁用 13 个行为扩展：`ctx-tasklog`、`ctx-tool`、`doc-polish`、`fork-task`、`isolation-nudge`、`lang-nag`、`task-completion-judge`、`task-split-check`、`tool-policy-nag`、`turn-judge`、`user-prompt-inject`、`watchdog-agent`、`wt-tool`。
-- 未禁用的本地扩展照常加载：`append-system-model`、`bro`、`input-polish`、`repo-rules`、[omp-config-autoupdate](#omp-config-autoupdate)，以及兼容性修复 `commandcode-model-spec`。独立 [todo-more](#todo-more) 与其他插件从普通 discovery 加载，无须改 launcher 或额外 `-e`。`APPEND_SYSTEM_MODEL.md` 因此照样注入；自动更新开着时 `omp-light` 也会更新。原生 todo 同样关着。
-- `config-light.yml` 把 `extensions` 覆盖成空列表，去掉 `config.yml` 末项的 [system-prompt-replace](#system-prompt-replace)。`disabledExtensions` 按模块名过滤，但管不到在 `extensions` 或 `-e` 里直接写成文件路径的扩展（写成目录的，目录里发现的模块仍按名字过滤），所以只能这样排除。覆盖会连带去掉本机条目（如 `~/.claude`），所以 `omp-light` 读本机 `config.yml`，把 `extensions` 里路径不含 `/extensions-last/` 的条目逐个用 `-e` 传给 `omp`；`-e` 是另一条加载通道，不受这个覆盖影响。`extensions-last/` 下的扩展因此只属于完整模式（按路径字符串判断，相对路径或目录写法不会被认出来）。
-- 插件、rules、skills、上下文文件，以及 model、thinking、profile、auth、session 设置都不变。被禁用扩展注册的工具（`ctx`、`polish_doc`、`fork_task`、`wt`、`wt_remove`）在轻量模式下不存在。
-- `omp-light` 从 agent 目录读 `config-light.yml` 和 `APPEND_SYSTEM_LIGHT.md`：设置了 `PI_CODING_AGENT_DIR` 时用它，否则用 `~/.omp/agent`。缺任何一个就直接退出，不回退到别的目录。
-- `omp-light` 后面的参数原样传给 `omp`，可以覆盖入口预设的同名参数。
+- `APPEND_SYSTEM_LIGHT.md` replaces the full appended prompt.
+- `config-light.yml` disables 13 behavior extensions: `ctx-tasklog`, `ctx-tool`, `doc-polish`, `fork-task`, `isolation-nudge`, `lang-nag`, `task-completion-judge`, `task-split-check`, `tool-policy-nag`, `turn-judge`, `user-prompt-inject`, `watchdog-agent`, `wt-tool`.
+- Local extensions that are not disabled load as usual: `append-system-model`, `bro`, `input-polish`, `repo-rules`, [omp-config-autoupdate](#omp-config-autoupdate) and the compatibility fix `commandcode-model-spec`. The independent [todo-more](#todo-more) and other plugins load through ordinary discovery, with no launcher change or extra `-e`. `APPEND_SYSTEM_MODEL.md` is therefore still injected, and with automatic update on, `omp-light` updates too. Native todo is off here as well.
+- `config-light.yml` overrides `extensions` with an empty list, dropping [system-prompt-replace](#system-prompt-replace), the last entry of `config.yml`. `disabledExtensions` filters by module name but cannot reach an extension written as a file path in `extensions` or `-e` (for a directory entry, modules found inside are still filtered by name), so this is the only way to exclude it. The override also drops the machine's entries (such as `~/.claude`), so `omp-light` reads the machine's `config.yml` and passes every `extensions` entry whose path does not contain `/extensions-last/` to `omp` with `-e`; `-e` is a separate load lane that the override does not reach. Extensions under `extensions-last/` therefore belong to full mode only (decided by the path string, so a relative path or a directory form is not recognized).
+- Plugins, rules, skills, context files, and the model, thinking, profile, auth and session settings stay the same. Tools registered by disabled extensions (`ctx`, `polish_doc`, `fork_task`, `wt`, `wt_remove`) do not exist in light mode.
+- `omp-light` reads `config-light.yml` and `APPEND_SYSTEM_LIGHT.md` from the agent directory: `PI_CODING_AGENT_DIR` when set, otherwise `~/.omp/agent`. If either is missing it exits immediately instead of falling back to another directory.
+- Arguments after `omp-light` are passed to `omp` as they are and can override the same-named arguments the launcher presets.
 
-这些覆盖只对这一个进程有效，不改任何文件；托管文件仍由更新器写入（自动更新、`/update-omp`、`/omp-config-autoupdate run`），和完整模式相同。直接运行 `omp` 就是完整模式。
+These overrides apply only to that one process and change no file; managed files are still written by the updater (automatic update, `/update-omp`, `/omp-config-autoupdate run`), as in full mode. Running `omp` directly is full mode.
 
-**安装。** 自动更新和 `/update-omp` 都把 `agent/omp-light.ts` 安装到 PATH 上 `omp` 所在的目录，所以不用改 PATH，也不用建 symlink：
+**Installation.** Automatic update and `/update-omp` both install `agent/omp-light.ts` into the directory of `omp` on PATH, so neither PATH changes nor symlinks are needed:
 
-- POSIX（macOS、Linux）：可执行文件 `omp-light`，内容就是 `omp-light.ts`，靠 `#!/usr/bin/env bun` 运行，bash、zsh、fish、Unix `pwsh` 通用。
-- Windows：`omp-light.ts` 加一个生成的 `omp-light.cmd`，PowerShell 通过 `.cmd` 启动。
+- POSIX (macOS, Linux): an executable `omp-light` whose content is `omp-light.ts`, run through `#!/usr/bin/env bun`; it works from bash, zsh, fish and Unix `pwsh`.
+- Windows: `omp-light.ts` plus a generated `omp-light.cmd`; PowerShell starts it through the `.cmd`.
 
-安装出来的入口不属于仓库。POSIX 上内容与仓库一致、权限为 `0755` 时不重写；Windows 只比较内容。`/update-omp check` 列出需要重写的入口。写入后 PATH 上解析到的 `omp-light` 不是刚装的那个时（路径按不区分大小写比较），报告遮住它的旧副本，但不修复。
+The installed entry is not part of the repository. On POSIX it is not rewritten when its content matches the repository and its mode is `0755`; on Windows only the content is compared. `/update-omp check` lists entries that need rewriting. When the `omp-light` resolved on PATH after writing is not the one just installed (paths compared case-insensitively), the report names the older copy that shadows it, without fixing it.
 
-## Subagent 体系
 
-subagent 分三类：`task:*` 执行，`discuss:*` 只读讨论，`mentor:default` 只读指导。
+## Subagent system
 
-### 改哪里
+Subagents come in three kinds: `task:*` execute, `discuss:*` hold read-only discussions, and `mentor:default` gives read-only guidance.
 
-|要改的|位置|
+### Where to change things
+
+|What to change|Where|
 |---|---|
-|编排流程、各类 agent 如何配合、最终回复怎么写|`agent/APPEND_SYSTEM.md`|
-|某个 agent 的职责（`description`）和它自己的角色提示（正文）|`agent/agents/<name>.md`|
-|注入给某些 agent 的用户原话模板|`agent/extensions/user-prompt-inject/PROMPT-INJECT-*.md`，见 [user-prompt-inject](#user-prompt-inject)|
-|模型、推理强度、运行开关、禁用入口|`agent/config.yml`|
+|Orchestration flow, how the agent kinds work together, how the final reply is written|`agent/APPEND_SYSTEM.md`|
+|An agent's responsibilities (`description`) and its own role prompt (body)|`agent/agents/<name>.md`|
+|Templates of the user's own words injected into some agents|`agent/extensions/user-prompt-inject/PROMPT-INJECT-*.md`, see [user-prompt-inject](#user-prompt-inject)|
+|Models, reasoning effort, runtime switches, disabled entries|`agent/config.yml`|
 
-harness 会把 `APPEND_SYSTEM.md` 和每个 agent 的 `description` 都注入主 agent，所以两处不写重复内容。subagent 收不到 `APPEND_SYSTEM.md`，它需要的规则写在自己的定义里。
+The harness injects both `APPEND_SYSTEM.md` and every agent's `description` into the main agent, so the two never repeat each other. Subagents do not receive `APPEND_SYSTEM.md`; the rules they need are written into their own definitions.
 
-改 agent 定义前先读 `agent/agents/README.txt`，里面是实测过的陷阱：`spawns` 的默认值、`task.disabledAgents` 里的名字即使列进 allowlist 也派不出去、递归深度上限、只有 `yield` 的 agent 会丢答案、目录里的非 agent `.md` 会被当成定义解析等。改动在下次派发时生效，不用重启；已经在跑的 subagent 不受影响。
+Read `agent/agents/README.txt` before changing an agent definition; it lists pitfalls verified in practice: the default of `spawns`, names in `task.disabledAgents` cannot be spawned even when allowlisted, the recursion depth cap, a `yield`-only agent can lose its answer, a non-agent `.md` in the directory is parsed as a definition, and so on. Changes apply on the next dispatch without a restart; subagents already running are unaffected.
 
-### 分档
+### Tiers
 
-下表第二列是各 agent `description` 里的说法，也就是主 agent 看到的档次与成本；实际模型在 `config.yml` 的 `task.agentModelOverrides`。换模型不改变 agent 的职责，但要同步它 `description` 里和本表中的档次与成本。
+The second column below is what each agent's `description` says, i.e. the tier and cost the main agent sees; the actual models are in `task.agentModelOverrides` of `config.yml`. Changing a model does not change an agent's responsibilities, but the tier and cost in its `description` and in this table must be updated to match.
 
-|名称|`description` 里的档次与成本（每 1M token，综合）|可派发|用途|
+|Name|Tier and cost in `description` (per 1M tokens, blended)|Can spawn|Use|
 |---|---|---|---|
-|`task:high`|Claude Opus 5.5，约 0.45 USD|全部 `task:*`、两个 discussant、mentor|必须一次做对，或更便宜的档次裁决不了的工作；负责所派子批次的契约、验收与集成|
-|`task:mid`|Opus 级，约 0.3 USD|mentor|默认档次：委派的实现、调查、调试和验证；也裁决便宜档次之间的冲突|
-|`task:low`|Opus 级，约 0.01 USD|mentor|成本优先、结果可以直接交付的工作：批量机械改动、查询、例行检查；也负责验证 `task:free` 的结果|
-|`task:free`|Opus 级，零成本，并发几乎不限|mentor|结果不需要独立验证的工作：找候选代码或文档、列方案、探索性试验|
-|`discuss:divergent`|—|—|发散视角：找问题边界之外的替代方案及其代价|
-|`discuss:steady`|—|—|保守视角：查风险、隐藏假设、遗漏状态和更简单的方案|
-|`mentor:default`|—|—|无工具导师：调查前审计划，调查后核对证据和遗漏|
+|`task:high`|Claude Opus 5.5, about 0.45 USD|All `task:*`, both discussants, mentor|Work that must be right the first time, or that cheaper tiers cannot settle; owns the contracts, acceptance and integration of the batch it spawns|
+|`task:mid`|Opus class, about 0.3 USD|mentor|The default tier: delegated implementation, investigation, debugging and verification; also settles disagreements between cheaper tiers|
+|`task:low`|Opus class, about 0.01 USD|mentor|Cost-first work whose results can be delivered directly: bulk mechanical edits, lookups, routine checks; also validates `task:free` results|
+|`task:free`|Opus class, zero cost, almost unlimited concurrency|mentor|Work whose results need no independent validation: finding candidate code or documents, listing options, exploratory probes|
+|`discuss:divergent`|—|—|Divergent view: finds alternatives outside the problem's framing and their cost|
+|`discuss:steady`|—|—|Conservative view: looks for risks, hidden assumptions, missed states and simpler options|
+|`mentor:default`|—|—|Tool-less mentor: reviews the plan before an investigation, checks evidence and gaps after it|
 
-### 派发规则
+### Dispatch rules
 
-- **按成本和所需可信度选档次，不按难度选。** 默认派 `task:mid`；成本比多出的判断力更重要时（批量机械改动、查询、验证 `task:free`）降到 `task:low`。验证也算成本：需要验证才能采信的结果，用 `task:free` 加验证者比 `task:low` 做一次更贵。进仓库的改动、会被直接采信的结论和裁决都给 `task:low` 及以上。`task:free` 的结果不能互相验证。
-- **`task:free`、`task:low`、`task:mid` 不接设计和核心工作**：架构、领域类型与状态模型、接口与跨切片契约、改动的核心逻辑，以及文档、prompt、skill、agent 定义的设计。`task:high` 没有这条限制。
-- **核心代码、小改动和文档设计由当前负责人自己写**，不交给任何 `task:*`。小改动按整件工作判断：写派工单不比直接改省事，就自己改。
-- **其余工作切成最小、各有验收标准的单元，一次并行派出。** 单元能并行的条件：各有验收标准、启动不依赖其他单元的输出、文件和状态归属不重叠。只因接口或文件边界没定而不满足的，先定边界再并行。确实拆不开的，主 agent 交给一个 worker，worker 则自己做。
-- **只有 `task:high` 能派 worker**，因为切单元、定验收、划文件归属本身就是契约设计。递归最多两层：`task:high` 派出的孙代只能接可直接执行的叶子任务，也派不出 mentor。
-- **派发必须写明 `agent`。** 省略时会落到 allowlist 的第一项或被禁用的内置 agent 上。
-- **派发不覆盖 `effort`。** 选 tier 就是选它在 `config.yml` 里的模型绑定，不算改模型。原生 `task` 没有 `model` 参数；它的 `effort` 参数由 `task.enableEffort` 控制，本仓库关掉了，所以模型看不到它。`fork_task` 有 `effort`，除非用户明确要求不填。这条写在 `fork-task/index.ts` 的 `fork_task` 工具说明里，`task:high` 定义里也有同一条，用户的要求要经派工单转达给它。
-- **worker 自测不算验收。** 派发方要检查产物和执行证据，自己做跨切片的集成检查；复杂验收交给没写这部分代码的独立 agent。重要决定同时问两个 discussant。
+- **Pick a tier by cost and required trust, not by difficulty.** Dispatch `task:mid` by default; drop to `task:low` when cost matters more than the extra judgment (bulk mechanical edits, lookups, validating `task:free`). Validation is a cost too: a result that must be validated before it can be trusted costs more from `task:free` plus a validator than from `task:low` doing it once. Changes that land in the repository, conclusions acted on directly and verdicts go to `task:low` or above. `task:free` results never validate each other.
+- **`task:free`, `task:low` and `task:mid` take no design or core work**: architecture, domain types and state model, interfaces and cross-slice contracts, the core logic of the change, and the design of documents, prompts, skills and agent definitions. `task:high` has no such limit.
+- **Core code, small changes and document design are written by the current owner**, never by any `task:*`. A small change is judged on the whole piece of work: when writing the assignment is no easier than making the change, make it yourself.
+- **Cut the remaining work into the smallest units that each have acceptance criteria, and dispatch them in parallel in one go.** Units can run in parallel when each has its own acceptance criteria, none needs another unit's output to start, and their file and state ownership does not overlap. Units that fail this only because an interface or file boundary is unsettled get the boundary settled first and then run in parallel. Work that truly cannot be split goes to one worker from the main agent, while a worker does it itself.
+- **Only `task:high` can spawn workers**, because cutting units, defining acceptance and assigning file ownership is contract design. Recursion is at most two levels: the grandchildren that `task:high` spawns take only directly executable leaf tasks and cannot spawn a mentor.
+- **Every dispatch names `agent`.** When omitted, it falls to the first allowlist entry or to a disabled built-in agent.
+- **Dispatch does not override `effort`.** Choosing a tier means choosing its model binding in `config.yml`, which does not count as changing the model. The native `task` has no `model` parameter; its `effort` parameter is controlled by `task.enableEffort`, which this repository turns off, so the model does not see it. `fork_task` has `effort`, left unset unless the user explicitly asks. This rule is in the `fork_task` tool description in `fork-task/index.ts` and also in the `task:high` definition; the user's request has to reach it through the assignment.
+- **A worker's self-test is not acceptance.** The dispatcher inspects artifacts and execution evidence and runs the cross-slice integration check itself; complex acceptance goes to an independent agent that did not write that code. Consequential decisions go to both discussants.
 
-每个 `task:*` worker 的定义还要求：
+Every `task:*` worker definition also requires:
 
-- 动手前先读实际代码、写出计划，交给自己的 `mentor:default` 过一遍；处在递归上限、没有 `task` 工具时跳过这一步。
-- 每个切片都用 todo（工具由 [todo-more](#todo-more) 提供）：改动前用计划的全部步骤 `init`，每项写标题和解释，goal 照派工单写、不能比派工单窄；状态一变就更新；还有未完成项时不 `yield`；只有等待外部回复才算 block，不许用 `drop` / `rm` 缩小范围。
+- Before starting, read the actual code, write a plan and run it past its own `mentor:default`; skip this at the recursion cap, where there is no `task` tool.
+- Use todo for every slice (the tool comes from [todo-more](#todo-more)): `init` with every step of the plan before changing anything, each with a title and explanation, and a goal copied from the assignment, never narrower; update status the moment it changes; do not `yield` while open items remain; only waiting for an outside answer counts as blocked, and `drop` / `rm` must not shrink the scope.
 
-### 并行写入的隔离
+### Isolation for parallel writes
 
-隔离由派发方每次决定，不写在 agent 定义里：
+The dispatcher decides isolation for every spawn; it is not written into agent definitions:
 
-- 不带 `isolated: true` 的 `task:*` 在派发方的目录里运行。同一仓库同时有两个以上写入者（同一批，或前一个还在跑）时，每个写入者都要 `isolated: true`。只做调查的保持共享，结束后还能用 `write agent://<id>` 续聊。
-- `fork_task` 默认就是隔离的，只调查时显式写 `isolated: false`。父会话处于 plan mode 时一律共享目录，`isolated` 不起作用。
-- 给隔离 worker 的路径写成仓库相对路径。OMP 的隔离只靠提示约束，绝对路径会让 worker 的命令跑回派发方的目录。
-- 隔离 worker 完成不等于改动已落地：结果显示 `Applied patches: yes` 才算应用；失败或中止的隔离运行不保留改动。
-- 隔离不能代替划分文件归属，改动重叠只会变成应用失败的 patch。
-- 规则分布：派发方的规则写在 `APPEND_SYSTEM.md` 和 `task-high.md`；worker 在隔离工作树里的路径规则写在四个 `task-*.md` 里。模型忘了隔离时，[isolation-nudge](#isolation-nudge) 拦一次作提醒。
+- A `task:*` without `isolated: true` runs in the dispatcher's directory. When one repository has two or more writers at once (in one batch, or while an earlier one is still running), every writer needs `isolated: true`. Research-only spawns stay shared and can still be continued with `write agent://<id>` after they finish.
+- `fork_task` is isolated by default; write `isolated: false` explicitly for research only. While the parent session is in plan mode the directory is always shared and `isolated` has no effect.
+- Give isolated workers repository-relative paths. OMP's isolation is enforced only by prompting, and an absolute path sends the worker's commands back into the dispatcher's directory.
+- An isolated worker finishing does not mean its changes landed: they are applied only when the result shows `Applied patches: yes`; a failed or aborted isolated run keeps no changes.
+- Isolation does not replace file ownership; overlapping changes just become patches that fail to apply.
+- Where the rules live: the dispatcher's rules are in `APPEND_SYSTEM.md` and `task-high.md`; the path rules for workers in isolated worktrees are in the four `task-*.md` files. When the model forgets isolation, [isolation-nudge](#isolation-nudge) blocks once as a reminder.
 
-### 内置的 `task` 和 `sonic`
+### The built-in `task` and `sonic`
 
-`task` 和 `sonic` 是 OMP 内置 subagent，不在 `agent/agents/` 里，并且列在 `task.disabledAgents` 中。Vibe 模式的第一层派发固定用它们，所以 `config.yml` 只为这个场景保留它们的模型覆盖，常规任务不用。
+`task` and `sonic` are OMP's built-in subagents; they are not in `agent/agents/` and are listed in `task.disabledAgents`. Vibe mode's first-level dispatch always uses them, so `config.yml` keeps their model overrides for that case only; ordinary work does not use them.
 
-## 本地扩展
+## Local extensions
 
-`agent/extensions/` 和 `agent/extensions-last/` 里的扩展修补 OMP 和插件的缺陷，或补充行为约束、上下文恢复、派发检查、配置同步等能力。每个扩展一个目录，下文的 `<名字>/` 指 `agent/extensions/<名字>/`；扩展读写的配置、模板和状态文件都在它自己的目录里。“轻量”列表示[轻量模式](#轻量模式)下是否加载。
+The extensions in `agent/extensions/` and `agent/extensions-last/` patch defects in OMP and plugins, or add behavior constraints, context recovery, dispatch checks, config sync and similar features. Each extension is one directory; `<name>/` below means `agent/extensions/<name>/`; the config, templates and state files an extension reads and writes are all in its own directory. The "Light" column says whether it loads in [light mode](#light-mode).
 
-|扩展|作用|轻量|
+|Extension|What it does|Light|
 |---|---|---|
-|[tool-policy-nag](#tool-policy-nag)|发现用 shell/eval 代替内置工具时提醒；原生 JUDGE 可用时按意图提醒，否则计数后发通用提醒|否|
-|[watchdog-agent](#watchdog-agent)|按目标投放的第三方审查者|否|
-|[user-prompt-inject](#user-prompt-inject)|按模板把用户原话注入指定的 subagent|否|
-|[turn-judge](#turn-judge)|主会话每轮结束后用原生 JUDGE 判断这一轮，达到阈值就输入预设 prompt，否则显示判定|否|
-|[lang-nag](#lang-nag)|回复语言不对时，在下一条输入前加提醒|否|
-|[repo-rules](#repo-rules)|补读 `.claude/rules` 等 repo 级 rule 目录|是|
-|[append-system-model](#append-system-model)|按模型 / 提供商正则追加系统提示词|是|
-|[system-prompt-replace](#system-prompt-replace)|在按路径加载的扩展里最后执行，按 JSON 规则替换 system prompt 文字，用来改写内置工具说明|否|
-|[fork-task](#fork-task)|注册 `fork_task`：带着当前对话副本派 subagent|否|
-|[isolation-nudge](#isolation-nudge)|多个写入者共用目录时拦一次|否|
-|[task-split-check](#task-split-check)|拦下多主题派发和限制汇报长度的派发|否|
-|[task-completion-judge](#task-completion-judge)|worker 交付前审一次完成度|否|
-|[ctx-tool](#ctx-tool)|注册只读 `ctx` 工具，汇总上下文树并重放 todo 行事记录；compact 后强制注入 `ctx` 概览和当前任务记录|否|
-|[ctx-tasklog](#ctx-tasklog)|捕获成功的 todo / goal 修改，形成 `ctx` 的派生记录|否|
-|[doc-polish](#doc-polish)|`polish_doc` / `/polish-doc`：不改原意地润色文档|否|
-|[bro](#bro)|`/bro`：把回复、文档或网页改写成易懂的解释|是|
-|[input-polish](#input-polish)|`Ctrl+Enter` 润色输入框草稿，overlay 预览后回车发送、Esc 取消|是|
-|[wt-tool](#wt-tool)|注册 `wt` / `wt_remove`：主 agent 调用人用的 `/wt` 进入新 worktree，或检查、确认后删掉所在 worktree 回到主 checkout|否|
-|[commandcode-model-spec](#commandcode-model-spec)|修复 `--model` 指定 commandcode 模型时的认证失败|是|
-|[omp-config-autoupdate](#omp-config-autoupdate)|启动时从 GitHub 默认分支自动更新本机配置；默认关闭，`/omp-config-autoupdate on\|off` 开关，`run` 立即更新并显示详细报告|是|
+|[tool-policy-nag](#tool-policy-nag)|Reminds when shell/eval stands in for a built-in tool; by intent when native JUDGE is available, otherwise a generic reminder after counting|No|
+|[watchdog-agent](#watchdog-agent)|Third-party reviewer delivered to chosen targets|No|
+|[user-prompt-inject](#user-prompt-inject)|Injects the user's own words into chosen subagents through templates|No|
+|[turn-judge](#turn-judge)|Judges each main-session turn with native JUDGE; types a preset prompt past the threshold, otherwise shows the verdict|No|
+|[lang-nag](#lang-nag)|When the reply language is wrong, adds a reminder before the next input|No|
+|[repo-rules](#repo-rules)|Also reads repo-level rule directories such as `.claude/rules`|Yes|
+|[append-system-model](#append-system-model)|Appends system-prompt text by model / provider regex|Yes|
+|[system-prompt-replace](#system-prompt-replace)|Runs last among path-loaded extensions and replaces system-prompt text by JSON rules, used to rewrite built-in tool descriptions|No|
+|[fork-task](#fork-task)|Registers `fork_task`: spawns a subagent carrying a copy of the current conversation|No|
+|[isolation-nudge](#isolation-nudge)|Blocks once when several writers share a directory|No|
+|[task-split-check](#task-split-check)|Blocks multi-topic dispatches and dispatches that cap report length|No|
+|[task-completion-judge](#task-completion-judge)|Reviews completion once before a worker delivers|No|
+|[ctx-tool](#ctx-tool)|Registers the read-only `ctx` tool, summarizing the context tree and replaying the todo work record; after compaction it forces the `ctx` overview and current task record in|No|
+|[ctx-tasklog](#ctx-tasklog)|Captures successful todo / goal changes as the record `ctx` derives from|No|
+|[doc-polish](#doc-polish)|`polish_doc` / `/polish-doc`: polishes documents without changing their meaning|No|
+|[bro](#bro)|`/bro`: rewrites a reply, document or web page into an easy explanation|Yes|
+|[input-polish](#input-polish)|`Ctrl+Enter` polishes the input-box draft; Enter sends after the overlay preview, Esc cancels|Yes|
+|[wt-tool](#wt-tool)|Registers `wt` / `wt_remove`: the main agent invokes the human `/wt` to enter a new worktree, or after a check and confirmation removes the worktree it is in and returns to the main checkout|No|
+|[commandcode-model-spec](#commandcode-model-spec)|Fixes the auth failure when `--model` names a commandcode model|Yes|
+|[omp-config-autoupdate](#omp-config-autoupdate)|Updates the machine's config from the GitHub default branch at startup; off by default, `/omp-config-autoupdate on\|off` switches it, `run` updates now and shows the detailed report|Yes|
 
-### 目录结构与开发规范
+### Layout and development conventions
 
-omp 从 `~/.omp/agent/extensions/` 往下只找一层：直接放的 `*.ts`、`<目录>/index.ts`，或 `<目录>/package.json` 里声明的入口。本仓库统一用 `<目录>/index.ts`，目录名就是扩展 id（`config-light.yml` 里的 `extension-module:<名字>`）；同目录的其他 `.ts` 不会被当成扩展加载。
+omp looks only one level down from `~/.omp/agent/extensions/`: a `*.ts` placed directly, `<dir>/index.ts`, or the entry declared in `<dir>/package.json`. This repository always uses `<dir>/index.ts`, and the directory name is the extension id (`extension-module:<name>` in `config-light.yml`); other `.ts` files in the directory are not loaded as extensions.
 
-|位置|放什么|
+|Location|What goes there|
 |---|---|
-|`agent/extensions/<名字>/index.ts`|扩展入口，默认导出注册函数，函数名取目录名的 camelCase（如 `toolPolicyNag`）|
-|`agent/extensions/<名字>/*.ts`|这个扩展自己的模块，只有一层|
-|`agent/extensions/<名字>/` 里的其他文件|这个扩展读写的配置、模板和状态，用 `import.meta.dir` 定位；哪些归仓库、哪些归本机见[两个方向共同的规则](#两个方向共同的规则)|
-|`agent/extensions/_shared/*.ts`|两个以上扩展共用的代码；没有 `index.ts`，omp 不会把它当扩展加载|
-|`agent/extensions/omp-config-autoupdate/omp-config-update.ts`|唯一的例外：仓库 → 本机的更新器，是独立脚本，不是扩展模块。它的导出（`applySnapshot`、`LOCAL_CONFIG_FIELDS` 等）是给旧更新器和同步命令用的接口|
-|`agent/extensions-last/<名字>/`|同样的结构，由 `config.yml` 的 `extensions` 按路径加载|
+|`agent/extensions/<name>/index.ts`|The extension entry; default-exports the registering function, named after the directory in camelCase (such as `toolPolicyNag`)|
+|`agent/extensions/<name>/*.ts`|The extension's own modules, one level only|
+|Other files in `agent/extensions/<name>/`|Config, templates and state the extension reads and writes, located with `import.meta.dir`; which belong to the repository and which to the machine is in [Rules shared by both directions](#rules-shared-by-both-directions)|
+|`agent/extensions/_shared/*.ts`|Code shared by two or more extensions; it has no `index.ts`, so omp never loads it as an extension|
+|`agent/extensions/omp-config-autoupdate/omp-config-update.ts`|The one exception: the repo → machine updater, a standalone script rather than an extension module. Its exports (`applySnapshot`, `LOCAL_CONFIG_FIELDS` and so on) are the interface used by older updaters and the sync command|
+|`agent/extensions-last/<name>/`|The same structure, loaded by path through `config.yml`'s `extensions`|
 
-`extensions/` 和 `extensions-last/` 下不直接放 `.ts`。扩展之间不互相 import，共用的代码放进 `_shared/`，用带 `.ts` 后缀的相对路径导入：
+No `.ts` sits directly under `extensions/` or `extensions-last/`. Extensions do not import each other; shared code goes into `_shared/` and is imported by relative path with the `.ts` suffix:
 
-|模块|提供|
+|Module|Provides|
 |---|---|
-|`errors.ts`|`errorText`：异常转成文字|
-|`messages.ts`|`textOf`、`lastAssistantText`：取消息里的文字块|
-|`config.ts`|`loadJsonConfig(文件名, schema, [ctx.cwd, import.meta.dir])`：cwd 下的副本优先，无效的副本跳过并记进 `skipped`|
-|`models.ts`|`resolveModelChain`、`findModel`、`splitLevel`：解析 `provider/id[:level]` 和逗号分隔的候选链，只查模型列表，不发请求|
-|`helper-session.ts`|`runHelperPrompt`：在内存辅助会话里做一次模型调用，不抛异常，固定传 `taskDepth: 1`|
-|`judge.ts`|`openNativeJudge`：使用当前会话的配置和 OMP 角色解析器选择 JUDGE 的具体模型，仅原生 judgment API 可用，凭据与请求头由宿主提供|
-|`spec-files.ts`|`discoverSpecFiles`、`parseFrontmatter`、`unquote`：查找和解析 `*-<标签>.md`（扩展目录，再从 cwd 往上到 git root 及各层 `.omp/`）|
-|`task-log.ts`|task log 的路径、格式与独立 `TaskLogGoal` 模型/解析/三行 formatter，`ctx-tool` 与 `ctx-tasklog` 共用；不依赖插件领域 reader|
+|`errors.ts`|`errorText`: turns an exception into text|
+|`messages.ts`|`textOf`, `lastAssistantText`: take the text blocks of a message|
+|`config.ts`|`loadJsonConfig(file name, schema, [ctx.cwd, import.meta.dir])`: a copy under cwd wins, invalid copies are skipped and listed in `skipped`|
+|`models.ts`|`resolveModelChain`, `findModel`, `splitLevel`: parse `provider/id[:level]` and comma-separated candidate chains; they only look up the model list and send no request|
+|`helper-session.ts`|`runHelperPrompt`: one model call in an in-memory helper session; never throws, always passes `taskDepth: 1`|
+|`judge.ts`|`openNativeJudge`: chooses the concrete JUDGE model with the current session's config and OMP's role resolver; only the native judgment API is usable, and credentials and headers come from the host|
+|`spec-files.ts`|`discoverSpecFiles`, `parseFrontmatter`, `unquote`: find and parse `*-<label>.md` (the extension directory, then from cwd up to the git root and each level's `.omp/`)|
+|`task-log.ts`|The task log's path and format, plus the independent `TaskLogGoal` model, parser and three-line formatter, shared by `ctx-tool` and `ctx-tasklog`; it does not depend on the plugin's domain reader|
 
-`_shared` 只提供机制。重试、超时、节流、用户看到的措辞、失败时返回什么，都留在调用方。
+`_shared` provides mechanism only. Retries, timeouts, throttling, user-visible wording and what to return on failure stay in the caller.
 
-代码规范，由 `bun run check`（Biome 和 `tsc --noEmit`）强制，CI 的 `code` job 也跑：
+Code conventions, enforced by `bun run check` (Biome and `tsc --noEmit`) and run by CI's `code` job:
 
-- **格式**：只用 Biome（tab、双引号、分号、尾逗号、行宽 140），用 `bun run format` 整理，不手调格式。
-- **类型**：`tsc` strict 加 `noUncheckedIndexedAccess`，不用 `any`。`as` 只用在运行时没法检查的宿主类型上，并写一行原因；外部输入一律不用。
-- **外部输入**：JSON 文件、工具参数、会话条目、`unknown` 的事件数据、子进程输出，在边界用 `@oh-my-pi/pi-coding-agent` 导出的 `z` 或类型守卫解析一次，之后只传有类型的值。
-- **状态**：有多种情形时用以 `kind` 区分的联合类型，`switch` 写全并带 `never` 分支。互相独立的事实保持独立字段；不用几个布尔值组合表示互斥的状态。
-- **错误**：预期内的失败用结果联合类型返回，异常只表示程序错误。hook 和工具不把异常抛给 omp：在入口捕获，用 `pi.logger.warn(…, { error: errorText(error) })` 记下。空的 `catch {}` 要写注释说明预期的是哪种失败。
-- **主会话还是 subagent**：用 `ctx.agent.kind` 判断，不看会话文件名。
-- **文件位置**：扩展自己的文件用 `import.meta.dir` 读，不用 `getAgentDir()`。只有路径由别人定死的文件留在原处：`thinking-translator.json`（插件定）、`commandcode-models.json`（插件生成）、omp 自己的文件。
-- **注入消息**：扩展替自己发的用户消息写 `attribution: "agent"`，见 [user-prompt-inject](#user-prompt-inject)。
-- **结构**：`index.ts` 开头写注释，说明扩展做什么、注册了哪些事件 / 工具 / 命令、读写哪些文件、作用于主会话还是 subagent、失败时怎么办。只有默认导出，除非同一扩展的其他文件要用；不留测试接口。超过约 150 行的函数拆成模块级的具名函数。
-- **import**：只用 omp 宿主包的根路径（`pi-agent-core`、`pi-ai`、`pi-catalog`、`pi-coding-agent`、`pi-natives`、`pi-tui`、`pi-utils`）、node 内置模块和相对路径。宿主包的子路径不一定能在 omp 里加载（`@oh-my-pi/pi-tui/thinking` 就加载不到），只用已经在真实 omp 会话里加载过的。
+- **Format**: Biome only (tabs, double quotes, semicolons, trailing commas, width 140); tidy with `bun run format`, never by hand.
+- **Types**: `tsc` strict plus `noUncheckedIndexedAccess`, no `any`. `as` is used only on host types that cannot be checked at runtime, with a one-line reason, and never on external input.
+- **External input**: JSON files, tool parameters, session entries, `unknown` event data and child-process output are parsed once at the boundary with the `z` exported by `@oh-my-pi/pi-coding-agent` or a type guard; only typed values travel after that.
+- **State**: multiple cases use a union discriminated by `kind`, with an exhaustive `switch` and a `never` arm. Independent facts stay independent fields; no combination of booleans encodes mutually exclusive states.
+- **Errors**: expected failures return result unions; exceptions mean programmer errors. Hooks and tools never throw into omp: catch at the entry and record with `pi.logger.warn(…, { error: errorText(error) })`. An empty `catch {}` carries a comment naming the expected failure.
+- **Main session or subagent**: decide with `ctx.agent.kind`, never the session file name.
+- **File locations**: an extension reads its own files with `import.meta.dir`, not `getAgentDir()`. Only files whose path someone else fixes stay where they are: `thinking-translator.json` (fixed by its plugin), `commandcode-models.json` (generated by its plugin), omp's own files.
+- **Injected messages**: user messages an extension sends on its own behalf set `attribution: "agent"`, see [user-prompt-inject](#user-prompt-inject).
+- **Structure**: `index.ts` starts with a comment stating what the extension does, which events / tools / commands it registers, which files it reads and writes, whether it acts on the main session or subagents, and what happens on failure. Only the default export, unless another file of the same extension needs a name; no test seams. A function over about 150 lines is split into named module-level functions.
+- **Imports**: only omp host package roots (`pi-agent-core`, `pi-ai`, `pi-catalog`, `pi-coding-agent`, `pi-natives`, `pi-tui`, `pi-utils`), node built-ins and relative paths. A host-package subpath may not load inside omp (`@oh-my-pi/pi-tui/thinking` does not), so use only subpaths already loaded in a real omp session.
 
-`bun run check` 用 `node_modules` 里的宿主包做类型检查，证明不了扩展在 omp 里能加载。改了扩展还要在没有 `node_modules` 的目录里真实加载一次，并在真实会话里触发改动的工具、命令或钩子，见[维护须知](#维护须知)。
+`bun run check` type-checks against the host packages in `node_modules`, which cannot prove an extension loads inside omp. After changing an extension, also load it for real from a directory without `node_modules` and trigger the changed tool, command or hook in a real session, see [Maintenance notes](#maintenance-notes).
 
-### 行为约束
+### Behavior constraints
 
-`turn-judge`、`tool-policy-nag` 的 intent 通道、`watchdog-agent` 的选项判定后端共用 OMP 的 **JUDGE 模型角色**，不各自设置 Jev 的 provider/model。只需在 OMP 的模型选择器中配置 JUDGE；这些已启用功能会在该角色首选可用候选是原生 judgment API 模型时自动参与。角色解析沿用 OMP 的候选顺序与默认值，凭据也从 OMP 取得，不另建模型配置。
+`turn-judge`, the intent lane of `tool-policy-nag` and the option backend of `watchdog-agent` share OMP's **JUDGE model role** instead of each setting a Jev provider/model. Configure JUDGE once in OMP's model selector; these enabled features join automatically when the role's first available candidate is a native judgment API model. Role resolution follows OMP's candidate order and defaults, and credentials come from OMP; there is no separate model config.
 
-JUDGE 也能指向普通聊天或本地模型，但这里的选项概率需要原生判定：角色解析出的模型不是原生后端时，相关判定静默不运行；原生请求失败也不回退到聊天模型。每次触发重新取当前会话的角色配置，不缓存独立开关；OMP 实时重载角色配置后，下一次触发生效。同一次触发沿用解析出的具体模型，不因请求期间改角色而换后端。`enabled: false`、`intent: null` 和轻量模式的禁用设置仍优先，不因配置 JUDGE 而重新打开。
-
+JUDGE can also point at an ordinary chat or local model, but the option probabilities here need native judgment: when the role resolves to a model without the native backend, the related judgments silently do not run; a failed native request does not fall back to the chat model either. Every trigger re-reads the current session's role config, with no cached separate switch; after OMP hot-reloads the role config, the next trigger uses it. One trigger keeps the concrete model it resolved and does not switch backends if the role changes mid-request. `enabled: false`, `intent: null` and light mode's disable settings still take precedence and are not turned back on by configuring JUDGE.
 
 #### tool-policy-nag
 
-`tool-policy-nag/` 只作用于主会话。它在 `tool_call` 阶段检查被监视的调用，只提醒，不拦截命令。三条通道各管一件**不同**的事，由同目录的 `tool-policy-nag.json` 分别开关，可以同时开着：
+`tool-policy-nag/` acts on the main session only. At the `tool_call` stage it checks watched calls; it only reminds and never blocks a command. Three lanes each handle a **different** concern, switched separately by `tool-policy-nag.json` in the same directory, and they can all be on at once:
 
-- `form` — 字符串检测：命令解析器机械地数这次调用里有几个操作本该用内置工具。
-- `intent` — 意图检测：把这次调用整体交给原生 JUDGE，问它这次调用想干什么、这件事该用哪个内置工具。回答的是**工具路由**问题。
-- `risk` — 风险检测：不经模型、确定性地判断这次调用**能不能从这一行看出它会做什么**。这是和工具检测无关的另一件事：一条命令又长、牵涉的外部程序又多、还有会写入的步骤时，结果没法只从命令本身推出来。工具违规、风险、两者都有、两者都无，四种情况都能出现。
+- `form` — string detection: a command parser mechanically counts how many operations in this call should have used a built-in tool.
+- `intent` — intent detection: hands the whole call to the native JUDGE and asks what the call is trying to do and which built-in tool should do it. It answers a **tool-routing** question.
+- `risk` — risk detection: decides deterministically, without a model, whether **what the call does can be read off this one line**. This is a separate concern from tool detection: when a command is long, involves many external programs and has a writing step, its outcome cannot be inferred from the command alone. A tool violation, a risk, both or neither can all occur.
 
-- **检查的调用**（三条通道相同）：`bash` / `bash_bg` 的命令；`exec_command` 的命令；经 `write` 写到 `xd://bash`、`xd://bash_bg`、`xd://exec_command` 的命令；`eval` 的 Python / JS 代码（风险通道只看 shell 命令）。工具名按底层工具算（`exec_command`），不是设备路径（`xd://exec_command`），所以同一条命令经设备写和直接调用得到同一条描述。
-- **配置** `tool-policy-nag.json`：
-  - `form`：`{"detector": "heuristic"}` 打开字符串通道，`null` 关掉。
-  - `intent`：`{"threshold": 0.5}` 声明意图通道，仓库里的值；模型跟随 OMP 的 JUDGE 角色，原生后端可用后自动运行；`threshold` 取 (0, 1]；`null` 关掉，省略时也不开启。
-  - `risk`：`{"minCommands": 4, "minChars": 600, "minPrograms": 3}` 打开风险通道，仓库里的值；`null` 关掉。三个阈值都是正整数：段数下限、字符数下限（满足其一即可）、以及不同外部程序数的下限。
-  - 没有通道块时读单检测器形状：`{"detector": "heuristic"}` 等于只开 form，`{"detector": "jev", "threshold": …}` 等于只声明 intent；没有 `risk` 块时不启用风险通道。
-  - 依次尝试 cwd 下和扩展目录下的文件，第一个存在且有效的生效；缺失或无效时试下一个，两个都不行就只开 form。无效的文件每个进程警告一次。每次检查调用时重读，改文件从下一次 shell / eval 调用生效，不用重启。
-- **两条工具通道一次调用只发一条提醒。** `intent` 已声明、题目有效且启用、原生 JUDGE 可用时，提醒由 `intent` 负责，`form` 照常计数、记日志、维护自己的状态但不发消息；不满足这些条件时，由 `form` 发通用提醒。准备阶段异常会警告，不妨碍 form；原生判定请求失败不会再补发 form 提醒。风险通道在题目和 JUDGE 解析前运行，不受这条约束。
+- **Watched calls** (the same for all three lanes): `bash` / `bash_bg` commands; `exec_command` commands; commands written through `write` to `xd://bash`, `xd://bash_bg` or `xd://exec_command`; `eval` Python / JS code (the risk lane looks only at shell commands). The tool name is the underlying tool (`exec_command`), not the device path (`xd://exec_command`), so the same command written through the device and called directly gets the same description.
+- **Config** `tool-policy-nag.json`:
+  - `form`: `{"detector": "heuristic"}` turns the string lane on, `null` turns it off.
+  - `intent`: `{"threshold": 0.5}` declares the intent lane, the repository's value; the model follows OMP's JUDGE role and the lane runs automatically once the native backend is available; `threshold` is in (0, 1]; `null` turns it off, and omitting it does not turn it on either.
+  - `risk`: `{"minCommands": 4, "minChars": 600, "minPrograms": 3}` turns the risk lane on, the repository's values; `null` turns it off. All three thresholds are positive integers: the minimum number of segments, the minimum number of characters (either suffices), and the minimum number of distinct external programs.
+  - Without lane blocks, the single-detector shape is read: `{"detector": "heuristic"}` equals form only, `{"detector": "jev", "threshold": …}` equals declaring intent only; without a `risk` block the risk lane is off.
+  - The file under cwd and then the one in the extension directory are tried, and the first that exists and is valid applies; a missing or invalid one moves on to the next, and when neither works only form is on. Each invalid file warns once per process. It is re-read on every watched call, so edits apply from the next shell / eval call without a restart.
+- **The two tool lanes send at most one reminder per call.** When `intent` is declared, its spec is valid and enabled, and native JUDGE is available, `intent` owns the reminder, while `form` still counts, logs and maintains its own state but sends no message; otherwise `form` sends the generic reminder. A preparation error warns without hindering form; a failed native judgment request does not trigger a form reminder after the fact. The risk lane runs before the spec and JUDGE are resolved and is not bound by this rule.
 
-**form 通道（字符串检测）：**
+**The form lane (string detection):**
 
-- **shell 违规分六类**：
-  - 列目录：`ls`、带路径的 `find`。
-  - 读文件：`cat`、`bat`、`nl`、`head`、`tail`、`less`、`more` 读文件或 `< file`，以及 `sed -n`。
-  - 搜索：`grep` / `egrep` / `fgrep` / `rg` / `ag` / `ack` 搜文件，`awk` 读文件。
-  - 编辑：`sed -i`、`perl -i`、`mv`。
-  - 写文件：`echo` / `printf` / `cat` 重定向到文件。
-  - 内联脚本：`node`、`bun`、`deno`、`python`、`ruby` 带 `-e` / `-c` / `--eval` / `-p` 的内联代码、`deno eval`，以及以 `-` 作为脚本参数从 stdin 读的脚本。不带 `-` 的 heredoc 或 `< script` 重定向不算。
-- **eval 违规**：Python 的 `Path.read_text`、`open` 读取、`glob` / `os.listdir` 等列目录，JS 的 `readFileSync`、`Bun.file`、`readdir`、`Bun.Glob` 等。按正则匹配，是启发式判断。
-- **按命令结构解析**：识别管道、分号、引号、heredoc、命令替换和重定向；跳过 `sudo`、`doas`、`su`、`ssh`；`/dev/*` 目标只对读、搜索、编辑、写文件豁免，列目录照样计数。管道的有效终点是 `wc` 时（`wc` 之后还可以接不读文件的 `tr`、`sort`、`uniq`、`head`、`tail`、`grep` 等），前面的列目录、读、搜索不算违规。
-- **节奏**：前 3 次违规只记录。之后每次有违规的调用发一条 steer 消息“你为什么不遵守system prompt。”并弹出 UI 警告，每个 context 最多 3 条。发满后停止检测，直到下一次 compaction（手动，或成功的自动 compaction）。intent 已声明、题目有效且启用、原生 JUDGE 可用时照常计数和记日志，只是不发这句。
-- **状态**：存在 session custom entry `mouriya.omp.tool-policy-nag.state`。恢复会话、切换分支或跳转会话树时，从当前分支重建：分支上的 `compaction`、`reset_boundary`（`/clear`）、`branch_summary` 边界会清零，之后的状态照常恢复，所以切到一个已经发满的分支仍保持停止检测。
+- **Shell violations fall into six kinds**:
+  - Listing directories: `ls`, `find` with a path.
+  - Reading files: `cat`, `bat`, `nl`, `head`, `tail`, `less`, `more` reading a file or `< file`, and `sed -n`.
+  - Searching: `grep` / `egrep` / `fgrep` / `rg` / `ag` / `ack` searching files, `awk` reading a file.
+  - Editing: `sed -i`, `perl -i`, `mv`.
+  - Writing files: `echo` / `printf` / `cat` redirected to a file.
+  - Inline scripts: inline code for `node`, `bun`, `deno`, `python`, `ruby` with `-e` / `-c` / `--eval` / `-p`, `deno eval`, and scripts read from stdin with `-` as the script argument. A heredoc without `-` or a `< script` redirect does not count.
+- **eval violations**: Python's `Path.read_text`, reading with `open`, directory listing with `glob` / `os.listdir` and similar, JS's `readFileSync`, `Bun.file`, `readdir`, `Bun.Glob` and similar. Matched by regex, so it is heuristic.
+- **Parsed by command structure**: pipes, semicolons, quotes, heredocs, command substitution and redirection are recognized; `sudo`, `doas`, `su` and `ssh` are skipped; `/dev/*` targets are exempt for reading, searching, editing and writing, but listing still counts. When a pipeline effectively ends in `wc` (`wc` may still be followed by non-file-reading `tr`, `sort`, `uniq`, `head`, `tail`, `grep` and so on), the listing, reading and searching before it are not violations.
+- **Cadence**: the first 3 violations are only recorded. After that every call with a violation sends a steer message "你为什么不遵守system prompt。" ("why don't you follow the system prompt") and shows a UI warning, at most 3 per context. Once the cap is reached detection stops until the next compaction (manual, or a successful automatic one). When intent is declared, its spec valid and enabled and native JUDGE available, it still counts and logs, just without sending this sentence.
+- **State**: stored in the session custom entry `mouriya.omp.tool-policy-nag.state`. On session resume, branch switch or session-tree navigation it is rebuilt from the current branch: `compaction`, `reset_boundary` (`/clear`) and `branch_summary` boundaries on the branch reset it, and later state is restored as usual, so switching to a branch that already hit the cap keeps detection stopped.
 
-**intent 通道（意图检测）：**
+**The intent lane (intent detection):**
 
-- **判定**：每个被检查的调用发一次 judge 请求，里面只有一个 `choice` 问题（不是每类一个是非题）：这次调用想让哪个内置工具做这件事。选项就是那件事该用的工具——`list`（列目录 / 找文件 → `read <dir>` / `glob`）、`read`（读文件内容）、`search`（搜文件文本 → `grep`）、`edit`、`write`、`move`、`eval`、`ast`、`pty`、`shell`（该走 `exec_command`）、`mixed`（一次调用重拼了多个内置工具的操作，没有单个工具能一次做完）、`none`（真程序 / 外部 CLI / 构建 / 测试 / git，shell 本来就是对的）。是否违规按调用类型定：shell 调用只要不是 `none` 就是违规；eval 调用里 `eval` 和 `none` 都不算违规（eval 内核本来就是它的工具）。这里只回答**工具路由**：调用有多长、串了多少东西、有没有风险，都不影响这个判断（那是风险通道的事）。
-- **题目与案例**：问题正文和 12 个选项的判据在同目录的 `INTENT-policy.md` 里（frontmatter 是 `options.<选项>.{title,tool,rubric}`，正文是给 JUDGE 的说明）。每个 `rubric` 给出这一类的正面例子和反例，反例取自审出来的实际误报类（`km ls actions` 不是 `read` / `list`、`ssh host 'cat x'` 不是 `read`、`npm test > log` 不是 `write`、`curl -I` 不是 `read`、管道过滤器不算读、`ls | head` 是 `list` 等）。`title` 和 `tool` 是提醒里显示的中文意图名和该用的工具。每次调用都重读该文件，改它从下一次调用生效；文件缺失或解析不了时这条通道不提醒（每个进程警告一次）。
-- **提醒**：选中选项的概率达到 `threshold` 才提醒，一次调用最多一条：提醒里写「你这次 `exec_command` 调用属于『列目录 / 找文件』，应该用 `read <dir>` / `glob`，而不是这样绕出去。」再加这次调用的原文。不计数、不封顶。
-- **时机**：判定与工具调用并行，不阻塞命令，结果通常在调用结束后才到，所以消息以 `aside` 插到下一个 step 边界；会话已经空闲时开启新一轮。判定返回前会话切换、分支切换或树跳转时不发消息，只弹 info。
-- **可用性与失败**：没有原生 JUDGE 时不发判定请求，由已启用的 form 通道照常提醒。原生后端可用后，凭据、请求或响应出错，以及 90 秒超时都不提醒，也不补发字符串提醒；同一原因每个进程警告一次，headless 只写日志。
-- **用量**：每个被检查的调用一次 judge 请求，消耗 JUDGE 后端额度，不计入会话用量。每次判定写一条 `Tool-policy intent verdict` info 日志，含选中的选项、概率、confidence 和是否触发。
+- **Judgment**: every watched call sends one judge request with a single `choice` question (not one yes/no question per kind): which built-in tool should this call have asked to do the work. The options are the tool that work should use — `list` (list a directory / find files → `read <dir>` / `glob`), `read` (read file contents), `search` (search file text → `grep`), `edit`, `write`, `move`, `eval`, `ast`, `pty`, `shell` (should go through `exec_command`), `mixed` (one call reassembles several built-in tools' operations and no single tool does it in one go), `none` (a real program / external CLI / build / test / git, where the shell is right). Whether it is a violation depends on the call type: for a shell call anything but `none` is a violation; for an eval call neither `eval` nor `none` is a violation (the eval kernel is already its tool). It answers only **tool routing**: how long the call is, how much it chains and whether it is risky do not affect this judgment (that is the risk lane's job).
+- **Question and cases**: the question body and the criteria of the 12 options are in `INTENT-policy.md` in the same directory (the frontmatter is `options.<option>.{title,tool,rubric}`, the body is the instructions for JUDGE). Each `rubric` gives positive examples and counterexamples for its kind, the counterexamples drawn from real false-positive classes found in audits (`km ls actions` is not `read` / `list`, `ssh host 'cat x'` is not `read`, `npm test > log` is not `write`, `curl -I` is not `read`, a pipeline filter is not a read, `ls | head` is `list`, and so on). `title` and `tool` are the Chinese intent name and the tool to use shown in the reminder. The file is re-read on every call, so edits apply from the next call; when it is missing or cannot be parsed the lane sends no reminders (one warning per process).
+- **Reminder**: it reminds only when the chosen option's probability reaches `threshold`, at most one per call: the reminder says "你这次 `exec_command` 调用属于『列目录 / 找文件』，应该用 `read <dir>` / `glob`，而不是这样绕出去。" ("this `exec_command` call is 'list a directory / find files'; it should use `read <dir>` / `glob` instead of going around them"), followed by the call's original text. No counting, no cap.
+- **Timing**: the judgment runs in parallel with the tool call and does not block the command; the result usually arrives after the call finishes, so the message is inserted as `aside` at the next step boundary; when the session is already idle it starts a new turn. When the session switches, the branch switches or the tree is navigated before the judgment returns, no message is sent and only an info notification shows.
+- **Availability and failure**: without native JUDGE no judgment request is sent and an enabled form lane reminds as usual. Once the native backend is available, credential, request or response errors and the 90-second timeout produce no reminder and no string reminder after the fact; each cause warns once per process, and headless mode only logs.
+- **Usage**: one judge request per watched call, spending the JUDGE backend's quota and not counted in session usage. Every judgment writes a `Tool-policy intent verdict` info log with the chosen option, probability, confidence and whether it triggered.
 
-**risk 通道（风险检测，不经模型）：**
+**The risk lane (risk detection, no model):**
 
-- **判据**（三条都满足才算）：① 规模——简单命令段数 ≥ `minCommands`，或整条命令字符数 ≥ `minChars`；② 牵涉面——去掉 shell 自己的管道件（`cd`、`echo`、`printf`、`export`、`source`、`test`、`mkdir` 等）后，不同的程序数 ≥ `minPrograms`，也就是这条命令大部分在跟别的软件打交道；③ 有写入——重定向 / `tee` / 就地编辑，或一个按本职会写的程序（`rm`、`cp`、`mv`、`chmod`、`dd`、`tar -c/-x`、`rsync`、`scp`、`make`、`install`、`patch`…），或一个只在特定子命令 / 参数下写的程序（`git add|commit|push|reset…`、`gh … create|delete|download|upload…`、`docker run|build|push|rm|exec…`、`kubectl apply|delete|exec…`、`orb push|create|delete…`、`npm|pnpm|yarn|bun install|add|…`、`tofu|terraform apply|destroy|state|init`、`curl -o|-O|-T|-d|-X POST`、`wget -O`）。子命令只取参数里前两个非 `-` 开头的词，所以引号里的 `fork=`、issue 标题里的词不会误判。
-- **只读不算风险**：一条只会读的命令是 intent 通道的事；只写自己产物的构建 / 设置命令也不触发（要求同时有读和写的日子已经过去——现在要求的是"长 + 程序多 + 有写入"）。
-- **提醒**：命中就发一条，内容是「你这次 `exec_command` 调用有 N 段命令、M 字符，牵涉 K 个外部程序（…），其中 … 会写入。它太长、牵涉太多别的软件，执行结果没法只从这一行看出来：拆成几条分开跑，或先确认它到底会改动什么。」加这次调用的原文；同时弹 UI 警告、记一条 `Tool-policy risk` warn 日志。不计数、不封顶。
-- **与其他通道的关系**：完全独立——同一次调用可能既拿到意图提醒又拿到风险提醒（它们说的是两件事），也可能只有其中一条或都没有。判定在 `tool_call` 里同步完成，不存在"判定还没回来"的时延。
+- **Criteria** (all three must hold): ① size — at least `minCommands` simple command segments, or at least `minChars` characters in the whole command; ② reach — after dropping the shell's own plumbing (`cd`, `echo`, `printf`, `export`, `source`, `test`, `mkdir` and so on), at least `minPrograms` distinct programs, meaning most of the command deals with other software; ③ a write — a redirect / `tee` / in-place edit, a program whose job is writing (`rm`, `cp`, `mv`, `chmod`, `dd`, `tar -c/-x`, `rsync`, `scp`, `make`, `install`, `patch`…), or a program that writes only under certain subcommands / flags (`git add|commit|push|reset…`, `gh … create|delete|download|upload…`, `docker run|build|push|rm|exec…`, `kubectl apply|delete|exec…`, `orb push|create|delete…`, `npm|pnpm|yarn|bun install|add|…`, `tofu|terraform apply|destroy|state|init`, `curl -o|-O|-T|-d|-X POST`, `wget -O`). Subcommands are taken only from the first two arguments not starting with `-`, so a `fork=` inside quotes or words in an issue title are not misread.
+- **Read-only is not a risk**: a command that only reads is the intent lane's business; build / setup commands that only write their own artifacts do not trigger either (it no longer requires both reads and writes — it now requires "long + many programs + a write").
+- **Reminder**: a hit sends one message: "你这次 `exec_command` 调用有 N 段命令、M 字符，牵涉 K 个外部程序（…），其中 … 会写入。它太长、牵涉太多别的软件，执行结果没法只从这一行看出来：拆成几条分开跑，或先确认它到底会改动什么。" ("this `exec_command` call has N command segments and M characters and involves K external programs (…), of which … write. It is too long and involves too much other software for its outcome to be read off this one line: split it into separate runs, or first confirm what exactly it will change."), followed by the call's original text; it also shows a UI warning and writes a `Tool-policy risk` warn log. No counting, no cap.
+- **Relation to the other lanes**: fully independent — one call may get both an intent reminder and a risk reminder (they say two different things), only one of them, or neither. The decision completes synchronously inside `tool_call`, so there is no "judgment not back yet" delay.
 
 #### watchdog-agent
 
-`watchdog-agent/` 是按目标投放的 watchdog，由 `WATCHDOG-<标签>.md` 文件驱动。原生 advisor 发现的 `WATCHDOG.md` / `WATCHDOG.yml` 会推给所有被顾问的会话，没法只投给某个目标，ExtensionAPI 也没有能介入的钩子，所以本扩展自带运行路径，不接管原生 `WATCHDOG.md`。
+`watchdog-agent/` is a watchdog delivered to chosen targets, driven by `WATCHDOG-<label>.md` files. The `WATCHDOG.md` / `WATCHDOG.yml` found by the native advisor is pushed to every advised session and cannot be aimed at one target, and the ExtensionAPI has no hook to step in, so this extension runs its own path and does not take over the native `WATCHDOG.md`.
 
-**文件位置。** 放在扩展目录（默认 `~/.omp/agent/extensions/watchdog-agent/`，随 profile 变化）下的 `WATCHDOG-*.md`，或从 cwd 往上每一层的 `<dir>/WATCHDOG-*.md`、`<dir>/.omp/WATCHDOG-*.md`；往上走到 git root 为止，没有 git root 时走到 home 或文件系统根。文件名不区分大小写，同一目录里按文件名排序。每个文件是一个独立的 watchdog，可以同时有多个，各自计数、各自运行、各自封顶。扩展目录里的这些文件属于本机，更新器和 `/sync-omp-config` 都不碰。
+**File locations.** `WATCHDOG-*.md` in the extension directory (default `~/.omp/agent/extensions/watchdog-agent/`, varying with the profile), or `<dir>/WATCHDOG-*.md` and `<dir>/.omp/WATCHDOG-*.md` at every level from cwd upward; the walk stops at the git root, or at home or the file-system root when there is no git root. File names are case-insensitive and sorted by name within a directory. Each file is an independent watchdog; several can coexist, each counting, running and capping on its own. These files in the extension directory belong to the machine; neither the updater nor `/sync-omp-config` touches them.
 
-**frontmatter 字段：**
+**Frontmatter fields:**
 
-|字段|说明|
+|Field|Meaning|
 |---|---|
-|`target`（必填）|`main`、agent 名（如 `task:low`）、`*`、`subagents`，或逗号分隔的列表|
-|`name`、`enabled`|`name` 缺省取文件名里的标签，`/watchdog` 按它找 watchdog；`enabled` 默认 `true`，是全局开关|
-|`delivery`|`aside`（默认）、`steer`、`nextTurn`、`followUp`；无法识别的值按 `aside` 处理|
-|`maxPerContext`|本 watchdog 在两次压缩之间最多提醒几次，默认不限；每次压缩后清零|
-|`every`|被观察的 agent 累计多少条操作后运行一次，默认 30。每个工具调用算 1 条，每条非空文字回复算 1 条|
-|`scope`|`full`（默认，看整条分支）或 `window`（只看本 watchdog 上次运行之后的新消息）|
-|`model`、`tools`|聊天 reviewer 后端用，见下|
-|`instructions`、`option.*`|原生 JUDGE 后端用，声明 `option.*` 即选择该后端，见下|
+|`target` (required)|`main`, an agent name (such as `task:low`), `*`, `subagents`, or a comma-separated list|
+|`name`, `enabled`|`name` defaults to the label in the file name and is what `/watchdog` looks it up by; `enabled` defaults to `true` and is the global switch|
+|`delivery`|`aside` (default), `steer`, `nextTurn`, `followUp`; an unrecognized value is treated as `aside`|
+|`maxPerContext`|How many reminders this watchdog may send between two compactions, unlimited by default; reset after every compaction|
+|`every`|Run once after the observed agent has accumulated this many operations, default 30. Each tool call counts as 1, and each non-empty text reply counts as 1|
+|`scope`|`full` (default, the whole branch) or `window` (only messages new since this watchdog's last run)|
+|`model`, `tools`|For the chat reviewer backend, see below|
+|`instructions`, `option.*`|For the native JUDGE backend; declaring `option.*` selects that backend, see below|
 
-**两种后端，二选一：**
+**Two backends, one or the other:**
 
-- **聊天 reviewer**（默认）：用一个禁止加载扩展的内存会话审阅。
-  - `model` 可带 `:effort`；缺省依次尝试 `@advisor`、`advisor`、`@slow` 角色，最后用会话模型。显式写了 `model` 但解析不到时跳过这次审阅，不回退。
-  - `tools` 默认 `read` / `grep` / `glob`，只接受 read、grep、glob、ast_grep、web_search、edit、write、bash、eval。edit、write、bash、eval 会给 reviewer 真实的修改能力，按需授予。
-  - 正文是审阅重点。reviewer 被要求回答 `PASS`，或带严重度的问题说明。回答首行以 `PASS`、`OK`、`LGTM`、`NONE` 开头算通过；其他非空回答都当作问题说明注入，没写严重度时按 `concern` 处理。
-- **原生 JUDGE 判定**：声明 `option.*`，模型跟随 OMP 的 JUDGE 角色，不再写 `judge: provider/model`。
-  - 必须同时写正文；不能与 `model`、`tools` 或 `note` 同用，否则跳过该文件并记 warning。
-  - 只看按 `scope` 选出的 transcript 和正文准则，从作者声明的选项里选一个，不调工具、不写解释；注入的文字是该选项预先写好的 prompt。
-  - 具体模型由 OMP 的角色解析器选择，按 judgment API 识别原生后端，不按 provider 名字或 catalog kind 猜测；不额外实现重试候选链。
-  - 没有原生 JUDGE 时静默跳过，配置好后下一次审阅自动可用。鉴权失败、响应无效、选了未声明的选项或 90 秒超时，都不提醒，不当作通过，也不退回聊天 reviewer。
+- **Chat reviewer** (default): reviews in an in-memory session that may not load extensions.
+  - `model` may carry `:effort`; by default the `@advisor`, `advisor` and `@slow` roles are tried in turn, and finally the session model. An explicit `model` that cannot be resolved skips the review instead of falling back.
+  - `tools` defaults to `read` / `grep` / `glob` and accepts only read, grep, glob, ast_grep, web_search, edit, write, bash and eval. edit, write, bash and eval give the reviewer real power to change things; grant them as needed.
+  - The body is the review focus. The reviewer is asked to answer `PASS` or describe problems with a severity. An answer whose first line starts with `PASS`, `OK`, `LGTM` or `NONE` passes; any other non-empty answer is injected as a problem description, treated as `concern` when no severity is given.
+- **Native JUDGE judgment**: declare `option.*`; the model follows OMP's JUDGE role, and `judge: provider/model` is no longer written.
+  - A body is required as well; it cannot be combined with `model`, `tools` or `note`, otherwise the file is skipped with a warning.
+  - It looks only at the transcript selected by `scope` and the body's criteria, picks one of the author's declared options, calls no tools and writes no explanation; the injected text is that option's prewritten prompt.
+  - The concrete model is chosen by OMP's role resolver, identifying the native backend by the judgment API rather than guessing from the provider name or catalog kind; no extra retry candidate chain is implemented.
+  - Without native JUDGE it is skipped silently, and becomes available at the next review once configured. Auth failures, invalid responses, an undeclared option chosen, or the 90-second timeout produce no reminder, do not count as a pass, and do not fall back to the chat reviewer.
 
-**判定选项。** 用扁平键声明。frontmatter 解析器会把键转成小写，所以标签只能是小写字母、数字、`_`、`-`；每个值占一行。
+**Judgment options.** Declared with flat keys. The frontmatter parser lowercases keys, so labels may contain only lowercase letters, digits, `_` and `-`; each value takes one line.
 
-|键|说明|
+|Key|Meaning|
 |---|---|
-|`instructions`|可选，交给 JUDGE 的判定说明；缺省为“只按正文准则判断 transcript 里最近的工作，不推断 transcript 以外的事实”|
-|`option.<标签>`|声明一个选项，值是交给 JUDGE 的判定标准；留空表示标签本身已足够说明。至少两个|
-|`option.<标签>.prompt`|JUDGE 选中该选项时注入的文字；不写就是静默选项（相当于通过）。至少一个选项要有|
-|`option.<标签>.delivery`|可选，覆盖该选项的投放方式，取值同 `delivery`；只能用于有 prompt 的选项|
+|`instructions`|Optional judgment instructions for JUDGE; by default "judge only the latest work in the transcript against the body's criteria, and infer no facts outside the transcript"|
+|`option.<label>`|Declares an option; the value is the criterion handed to JUDGE, or empty when the label says enough. At least two|
+|`option.<label>.prompt`|Text injected when JUDGE picks the option; without it the option is silent (equivalent to passing). At least one option must have one|
+|`option.<label>.delivery`|Optional, overrides the delivery for that option with the same values as `delivery`; only for options with a prompt|
 
-注入的标签是 `<watchdog name=… severity=<选中的标签>>`。未知的 `option.*` 键、只写了 prompt / delivery 却没声明的选项、空 prompt，都会让整个文件被跳过并记 warning。
+The injected tag is `<watchdog name=… severity=<chosen label>>`. An unknown `option.*` key, a prompt / delivery for an undeclared option, or an empty prompt skips the whole file with a warning.
 
-示例 `~/.omp/agent/extensions/watchdog-agent/WATCHDOG-Evidence.md`：
+Example `~/.omp/agent/extensions/watchdog-agent/WATCHDOG-Evidence.md`:
 
 ```md
 ---
 target: main
 delivery: aside
-option.pass: 最近的工作没有宣称已验证，或宣称时附了实际运行输出；证据不足时也选这个。
-option.concern: 最近的工作宣称已验证，但没有给出实际运行时证据。
-option.concern.prompt: 你最近宣称已验证，但 transcript 里没有运行时证据。补跑真实入口并贴出命令和输出；做不到就明确写“已改，未完成 runtime 验证”。
-option.blocker: 最近的工作在没有任何运行的情况下宣布任务完成并交付。
-option.blocker.prompt: 停止交付。你在没有运行验证的情况下宣布完成，这不算完成。先跑真实路径并给出证据，再重新报告。
+option.pass: The latest work claims no verification, or attaches actual run output when it does; also choose this when evidence is insufficient.
+option.concern: The latest work claims verification but gives no actual runtime evidence.
+option.concern.prompt: You recently claimed verification, but the transcript has no runtime evidence. Run the real entry point and paste the command and output; if you cannot, say plainly "changed, runtime verification not done".
+option.blocker: The latest work declares the task complete and delivers it without any run at all.
+option.blocker.prompt: Stop delivering. Declaring completion without a verification run does not count as complete. Run the real path and give evidence first, then report again.
 option.blocker.delivery: steer
 ---
-仅当最近的工作宣称代码已验证、却没有给出实际运行时证据时标记违例。
+Flag a violation only when the latest work claims the code is verified without giving actual runtime evidence.
 ```
 
-**运行方式：**
+**How it runs:**
 
-- **计数**：每条 assistant 消息结束时累加该 watchdog 的计数。达到 `every` 就立即运行，不等本轮结束；运行期间 agent 照常工作。
-- **补跑**：本轮结束（`agent_end` 且不是 `willContinue`）时计数没到 `every` 但大于 0，就补跑一次；该 watchdog 正在运行时，等它跑完再补跑。
-- **transcript**：按 `scope` 取，`full` 为整条分支，`window` 为游标之后的消息。游标只在审查得出结论（通过或有问题）后推进，审查失败或超时时不动，下次运行会把这段重新审一遍。包含用户、assistant、工具调用与结果的文字，不截断，不含自己注入的 `<watchdog>` 消息。
-- **注入**：聊天 reviewer 不通过，或原生 JUDGE 选中带 prompt 的选项时，运行一结束就以 `<watchdog name=… severity=…>` 注入匹配的会话，时机按 `delivery`：`aside` 在运行中插到下一个 step 边界、空闲时开启新一轮；`steer` 打断当前运行；`followUp` 排到当前运行之后；`nextTurn` 先排队，等用户下一次真正输入（不是斜杠命令，也不是扩展发的消息）开始的那一轮，作为一条 custom 消息注入。subagent 没有用户输入，`nextTurn` 在它下一次触发 `before_agent_start` 的一轮注入；被 `write agent://<id>` 唤醒的续聊不触发它，提醒继续留在队列里。排队中的提醒只在内存里，会话重启或切换就丢失。
-- **识别会话**：取宿主的 `ctx.agent`：`kind` 为 `main` 的是主会话；subagent 的名字取 `ctx.agent.name`（agent 定义名，如 `task:low`），id 取 `ctx.agent.id`（子会话文件名去掉 `.jsonl`）。没有会话文件（如 `omp -p --no-session`）的主会话同样识别为 `main`。
-- **封顶**：设置了 `maxPerContext` 时，每个 watchdog 在一个 context 里最多注入这么多条（`nextTurn` 排队时就计入），封顶后到下次压缩前不再运行审阅；不设就不限。提醒不做去重，审出来就发。每次压缩（手动或自动）后封顶计数清零；压缩不影响累计的操作条数、`window` 游标和正在进行的判定。
-- **状态恢复**：游标在每次审查得出结论后写进会话（custom entry `mouriya.omp.watchdog-agent.cursor`），跟随分支。会话启动或恢复、`session_switch`、分支切换和树跳转时从当前分支恢复：游标取该 watchdog 文件最后一条记录；封顶计数取上次压缩之后分支上已注入的该 watchdog 提醒条数；累计操作数取游标之后的操作数。还没返回的判定丢弃。
-- **失败**：模型不可用、审查报错或超时（两种后端均为 90 秒）都不提醒，也不推进游标，不阻塞主轮次。超时前已经流出的半截文字不算结论。subagent 上的注入是尽力而为，只有执行器收走结果前会话被重新打开才生效。
-- **用量**：聊天 reviewer 用禁止加载扩展的内存会话，不会递归。原生 JUDGE 的用量和估算费用只写扩展 info 日志，不计入会话用量。两种后端各自消耗额度。
+- **Counting**: every finished assistant message adds to the watchdog's count. When it reaches `every` the watchdog runs immediately, without waiting for the turn to end; the agent keeps working meanwhile.
+- **Catch-up**: when the turn ends (`agent_end` that is not `willContinue`) with a count below `every` but above 0, it runs once more; if that watchdog is already running, the catch-up waits for it to finish.
+- **Transcript**: taken by `scope`: `full` is the whole branch, `window` the messages after the cursor. The cursor advances only after a review reaches a conclusion (pass or problem); a failed or timed-out review leaves it in place, so the next run reviews that stretch again. It includes the text of user, assistant, tool calls and results, untruncated, excluding the watchdog's own injected `<watchdog>` messages.
+- **Injection**: when the chat reviewer does not pass, or native JUDGE picks an option with a prompt, the result is injected into the matching sessions as soon as the run ends, as `<watchdog name=… severity=…>`, timed by `delivery`: `aside` inserts at the next step boundary while running and starts a new turn when idle; `steer` interrupts the current run; `followUp` queues after the current run; `nextTurn` queues first and is injected as a custom message in the turn started by the user's next real input (not a slash command, nor a message sent by an extension). A subagent has no user input, so `nextTurn` injects in its next turn that fires `before_agent_start`; a continuation woken by `write agent://<id>` does not fire it, and the reminder stays queued. Queued reminders live only in memory and are lost on session restart or switch.
+- **Identifying sessions**: from the host's `ctx.agent`: `kind` `main` is the main session; a subagent's name is `ctx.agent.name` (the agent definition name, such as `task:low`), and its id is `ctx.agent.id` (the child session file name without `.jsonl`). A main session without a session file (such as `omp -p --no-session`) is still identified as `main`.
+- **Cap**: with `maxPerContext` set, each watchdog injects at most that many reminders per context (`nextTurn` counts when queued), and after the cap it runs no reviews until the next compaction; without it there is no limit. Reminders are not deduplicated; whatever is found is sent. Every compaction (manual or automatic) resets the cap count; compaction does not affect the accumulated operation count, the `window` cursor or a judgment in progress.
+- **State recovery**: after every review that reaches a conclusion, the cursor is written into the session (custom entry `mouriya.omp.watchdog-agent.cursor`) and follows the branch. On session start or resume, `session_switch`, branch switch and tree navigation it is restored from the current branch: the cursor from that watchdog file's last record; the cap count from the reminders of that watchdog injected on the branch since the last compaction; the accumulated operation count from operations after the cursor. Judgments not yet returned are dropped.
+- **Failure**: an unavailable model, a review error or a timeout (90 seconds for both backends) produces no reminder, does not advance the cursor and does not block the main turn. Partial text streamed before a timeout is not a conclusion. Injection into a subagent is best effort and only takes effect if the session is reopened before the executor collects the result.
+- **Usage**: the chat reviewer uses an in-memory session that may not load extensions, so it cannot recurse. Native JUDGE usage and estimated cost go only to the extension's info log and are not counted in session usage. Each backend spends its own quota.
 
-**斜杠命令**（子命令、watchdog 名和范围都有补全）：
+**Slash commands** (subcommands, watchdog names and scopes all complete):
 
-|命令|作用|
+|Command|What it does|
 |---|---|
-|`/watchdog` 或 `/watchdog list`|列出成功解析的 watchdog 文件：全局开关、本会话覆盖、目标、`every`、`scope`、后端和路径。`ON` 表示开关开启；`native @judge` 是否执行还取决于当前原生 JUDGE 可用性。读不了、没有 `target` 或选项声明有误的文件不在列表里，会话加载时各记一条 warning|
-|`/watchdog on\|off <name>` 或 `… <name> session`|只在本会话开启或关闭，不改文件。记录为会话自定义条目，恢复会话后仍然有效，并跟随会话分支；只能用于目标包含本会话的 watchdog|
-|`/watchdog on\|off <name> global`|改写该文件 frontmatter 里的 `enabled` 行（没有就加一行），对之后所有会话生效，并清除本会话对它的覆盖|
-|`/watchdog add <需求>`|让模型按需求起草一个新 watchdog，在对话里和用户对齐后写入项目或全局目录，见下|
-|`/watchdog edit <name> [改动]`|让模型按改动修改已有的 watchdog，和 `add` 一样先对齐再写入，见下；不写改动时，模型先列出当前行为和设置|
-|`/watchdog rm <name>`|弹窗确认后删除该文件，并清除本会话对它的覆盖；取消则保留|
+|`/watchdog` or `/watchdog list`|Lists successfully parsed watchdog files: global switch, this session's override, target, `every`, `scope`, backend and path. `ON` means the switch is on; whether `native @judge` actually runs also depends on current native JUDGE availability. Files that cannot be read, lack `target` or declare options wrongly are not listed; each logs one warning when the session loads|
+|`/watchdog on\|off <name>` or `… <name> session`|Turns it on or off for this session only, without changing the file. Recorded as a session custom entry, it survives resume and follows the session branch; only for watchdogs whose target includes this session|
+|`/watchdog on\|off <name> global`|Rewrites the `enabled` line in the file's frontmatter (adding one if absent), applying to all later sessions, and clears this session's override for it|
+|`/watchdog add <request>`|Asks the model to draft a new watchdog from the request, align it with the user in the conversation and write it to the project or global directory, see below|
+|`/watchdog edit <name> [change]`|Asks the model to change an existing watchdog as requested, aligning before writing like `add`, see below; without a change, the model first lists the current behavior and settings|
+|`/watchdog rm <name>`|Deletes the file after a confirmation dialog and clears this session's override for it; cancelling keeps it|
 
-本会话覆盖优先于文件里的 `enabled`。关闭时正在进行的判定结果会被丢弃；重新开启时游标、封顶计数和累计操作数按上面的规则从分支恢复。多个文件同名时命令报错并列出路径，需要给它们设不同的 `name`。`edit` 后面跟着的名字可以含空格，按最长匹配的已有名字切开，剩下的是改动。
+This session's override takes precedence over the file's `enabled`. Turning it off drops judgments in progress; turning it back on restores the cursor, cap count and accumulated operation count from the branch by the rules above. When several files share a name the command errors and lists the paths; give them different `name`s. The name after `edit` may contain spaces; it is split at the longest matching existing name, and the rest is the change.
 
-**`/watchdog add` 和 `/watchdog edit`。** 两个命令本身都不写文件，而是给当前会话的模型发一条消息（`attribution: "agent"`；模型正在运行时排到本轮之后）。消息里有：
+**`/watchdog add` and `/watchdog edit`.** Neither command writes a file itself; each sends a message to the current session's model (`attribution: "agent"`; while the model is running it queues after the current turn). The message contains:
 
-- 用户的需求或改动原文；`edit` 还附上该文件的当前全文和路径；
-- 每个设置的默认值和含义；
-- 项目位置（git root 下的 `.omp/`，没有 git root 时为 cwd 下的 `.omp/`）和全局位置（扩展目录 `extensions/watchdog-agent/`）；
-- 默认 reviewer 此刻解析到的模型；
-- 其他 watchdog 的名字，避免重名。
+- the user's request or change verbatim; `edit` also attaches the file's current full text and path;
+- every setting's default and meaning;
+- the project location (`.omp/` under the git root, or `.omp/` under cwd when there is no git root) and the global location (the extension directory `extensions/watchdog-agent/`);
+- the model the default reviewer resolves to right now;
+- the names of the other watchdogs, to avoid duplicates.
 
-模型不用 `ask`，按以下几轮推进：
+The model does not use `ask` and proceeds in rounds:
 
-1. **起草。** 回复依次给出预期行为、设置表、完整文件内容和绝对路径。这一轮不写盘。
-   - **`add`：** 需求写明或明显暗示的设置照需求填，其余取默认值。设置表的来源分为需求或默认。
-   - **`edit`：** 从当前文件出发，只改改动涉及的设置，其余保持现值，文件里省略的行仍取默认值。预期行为先说和现在相比哪里变了。设置表列出现值、新值，来源分为现值、改动或默认。
-   - **预期行为**包括：盯谁、多久审一次、读哪段 transcript、标记什么放过什么、一两条示例提醒、提醒怎么送达、每个 context 几条、用哪个模型、每次审阅都要花一次模型调用、看不到或做不了什么。
-2. **修改。** 用户点名要改哪些设置，模型改完后按同样格式再给一遍，并标出改动。只改设置的回复不算确认。
-3. **写入。** 用户明确确认后才写盘，最后说明从现在起会发生什么。
-   - **`add`：** 用 `write` 新建文件，不覆盖已有文件；还要说明怎么关掉它。
-   - **`edit`：** 在原路径改写。改位置或标签时，先写新文件再删旧文件，新路径不能已存在。
+1. **Draft.** The reply gives, in order, the expected behavior, a settings table, the full file content and the absolute path. Nothing is written to disk in this round.
+   - **`add`:** settings the request states or clearly implies are filled from the request, the rest take defaults. The settings table marks each source as request or default.
+   - **`edit`:** starting from the current file, only the settings the change touches change, the rest keep their current values, and lines omitted in the file still take defaults. The expected behavior first says what changes compared with now. The settings table lists current and new values, with the source marked as current, change or default.
+   - **Expected behavior** covers: whom it watches, how often it reviews, which part of the transcript it reads, what it flags and what it lets pass, one or two sample reminders, how reminders are delivered, how many per context, which model it uses, that every review costs a model call, and what it cannot see or do.
+2. **Revise.** The user names the settings to change; the model changes them and gives the same format again, marking the changes. A reply that only changes settings is not a confirmation.
+3. **Write.** Only after the user explicitly confirms is it written to disk, finally explaining what will happen from now on.
+   - **`add`:** creates the file with `write`, never overwriting an existing file; it also explains how to turn it off.
+   - **`edit`:** rewrites it at the original path. When changing the location or label, it writes the new file first and then deletes the old one, and the new path must not already exist.
 
-**写入后的检查。** 任何成功的 `write` / `edit` 只要碰到 `WATCHDOG-*.md`（`edit` 按 `[路径#TAG]` 头、`MV` 目标或 `path` 参数识别），扩展都会立即重读 watchdog 列表，新文件在本会话里马上生效，并在该工具结果末尾附一行状态。状态有四种：
+**Check after writing.** Whenever a successful `write` / `edit` touches a `WATCHDOG-*.md` (`edit` is recognized by its `[path#TAG]` header, the `MV` target or the `path` argument), the extension re-reads the watchdog list at once, so a new file takes effect in this session immediately, and appends one status line to that tool result. The status is one of four:
 
-- 已识别：附是否在本会话生效，以及 `/watchdog list` 格式的那一行；
-- 未识别：附原因，文件被忽略；
-- 合法但当前目录不会搜索到；
-- 已删除。
+- recognized: with whether it is active in this session, and its line in `/watchdog list` format;
+- not recognized: with the reason; the file is ignored;
+- valid but not in a directory that is searched from here;
+- deleted.
 
-模型据此发现问题、修正，再重新写入。
+The model uses this to find problems, fix them and write again.
+
 
 #### user-prompt-inject
 
-`user-prompt-inject/` 把根会话里用户自己写的 prompt 填进 `PROMPT-INJECT-<标签>.md` 模板，注入指定 subagent 的每一次模型调用。用途是让 mentor 和 discussant 拿用户原话核对派它的 agent，而不是只听对方转述。OMP 没有现成办法：`before_subagent_spawn` 只能换模型或拦截；`before_agent_start` 在 idle 或 parked 的 subagent 被 `write agent://<id>` 唤醒时不触发，续聊收不到新的用户输入。
+`user-prompt-inject/` fills the prompts the user wrote in the root session into `PROMPT-INJECT-<label>.md` templates and injects them into every model call of the chosen subagents. The purpose is to let the mentor and discussants check the agent that spawned them against the user's own words instead of only its retelling. OMP has nothing ready-made: `before_subagent_spawn` can only swap the model or block; `before_agent_start` does not fire when an idle or parked subagent is woken by `write agent://<id>`, so a continuation never receives new user input.
 
-**文件位置**与 [watchdog-agent](#watchdog-agent) 相同：扩展目录（`~/.omp/agent/extensions/user-prompt-inject/`）下的 `PROMPT-INJECT-*.md`，或从 cwd 往上到 git root 每一层的 `<dir>/PROMPT-INJECT-*.md`、`<dir>/.omp/PROMPT-INJECT-*.md`，文件名不区分大小写。每个文件独立生效，同一个 subagent 可以匹配多个。仓库带的模板随更新器同步；本机在扩展目录里自己加的模板属于本机。
+**File locations** match [watchdog-agent](#watchdog-agent): `PROMPT-INJECT-*.md` in the extension directory (`~/.omp/agent/extensions/user-prompt-inject/`), or `<dir>/PROMPT-INJECT-*.md` and `<dir>/.omp/PROMPT-INJECT-*.md` at every level from cwd up to the git root, with case-insensitive file names. Each file applies on its own, and one subagent can match several. Templates the repository ships are synced by the updater; templates the machine adds in the extension directory belong to the machine.
 
-**frontmatter 字段：**
+**Frontmatter fields:**
 
-|字段|说明|
+|Field|Meaning|
 |---|---|
-|`target`（必填）|agent 名（如 `mentor:default`），逗号分隔可写多个；`*` 表示所有 subagent。主会话不注入|
-|`name`|注入块的名字，缺省取文件名里的标签|
-|`enabled`|默认 `true`；写了的话，只有 `true`、`yes`、`on`、`1`（不区分大小写，可带引号）算开启，其他值不加载|
+|`target` (required)|Agent name (such as `mentor:default`), several separated by commas; `*` means every subagent. The main session never gets injections|
+|`name`|Name of the injected block, defaulting to the label in the file name|
+|`enabled`|Default `true`; when written, only `true`, `yes`, `on`, `1` (case-insensitive, quotes allowed) mean on, and any other value does not load|
 
-**占位符。** 正文是模板。`user_prompt` 是用户 prompt 的数组，按时间顺序，0 是第一条：
+**Placeholders.** The body is a template. `user_prompt` is the array of user prompts in time order, 0 being the first:
 
-|写法|结果|
+|Form|Result|
 |---|---|
-|`{{user_prompt[0]}}`|第一条|
-|`{{user_prompt[-1]}}`|最新一条；`-3` 是从最新往前数第三条|
-|`{{user_prompt[3:e]}}`|切片，`e` 表示结尾；不含右端点，与数组切片相同，两端都可以写负数|
+|`{{user_prompt[0]}}`|The first one|
+|`{{user_prompt[-1]}}`|The latest one; `-3` is the third counting back from the latest|
+|`{{user_prompt[3:e]}}`|A slice, `e` meaning the end; the right end is excluded as in array slicing, and both ends may be negative|
 
-- 单条越界时为空；切片两端夹到 `[0, 长度]`，起点不小于终点时为空。
-- 单条插入取出的文字；切片的每一项写成 `<user_prompt index="N">…</user_prompt>`，`N` 是从 0 开始的位置。
-- 其他 `{{user_prompt…}}` 写法（如 `{{user_prompt}}`、`{{user_prompt[:3]}}`）让整个文件跳过并记 warning。用户 prompt 里出现的占位符原样保留，不再展开。
+- A single index out of range is empty; slice ends are clamped to `[0, length]`, and a start not below the end is empty.
+- A single index inserts the text it takes; each item of a slice is written as `<user_prompt index="N">…</user_prompt>`, `N` being its 0-based position.
+- Any other `{{user_prompt…}}` form (such as `{{user_prompt}}` or `{{user_prompt[:3]}}`) skips the whole file with a warning. Placeholders that appear inside user prompts stay as they are and are not expanded.
 
-仓库的 `agent/extensions/user-prompt-inject/PROMPT-INJECT-user-goal.md` 投给 `mentor:default`、`discuss:steady`、`discuss:divergent`，用 `{{user_prompt[0:e]}}` 注入全部用户 prompt，并要求它们以用户原话为准，指出对方计划偏离的地方。
+The repository's `agent/extensions/user-prompt-inject/PROMPT-INJECT-user-goal.md` targets `mentor:default`, `discuss:steady` and `discuss:divergent`, injects every user prompt with `{{user_prompt[0:e]}}`, and tells them to treat the user's own words as authoritative and point out where the other agent's plan deviates.
 
-**用户 prompt 的来源。** 从本 subagent 沿 `ctx.agent.parentId` 在进程的 agent registry 里往上找到主会话（`task:high` 派出的孙代也一样），读它当前分支（`getBranch()`，compact 之前的消息也在）上 `role: "user"`、`attribution: "user"`、非 `synthetic` 的消息，按顺序排列。每条只取文本块（多个文本块用换行拼接），去掉首尾空白；取完是空的消息（比如只有图片）不占位置，所以下标只数有文字的 prompt。
+**Where the user prompts come from.** From this subagent it follows `ctx.agent.parentId` up the process's agent registry to the main session (grandchildren spawned by `task:high` too), and reads the messages on its current branch (`getBranch()`, including messages before a compact) that are `role: "user"`, `attribution: "user"` and not `synthetic`, in order. Each contributes only its text blocks (several joined with newlines), trimmed; a message that ends up empty (only an image, for example) takes no position, so indices count only prompts with text.
 
-- 输入经过 `input` 钩子和命令展开后才存进会话，所以取到的是提交给模型的文字；例如 [lang-nag](#lang-nag) 加在前面的 `instruction` 也在里面。
-- `attribution` 由发送方决定，扩展用 `sendUserMessage` 不写它时默认是 `user`。本仓库扩展注入的消息因此都标为 `agent`：`watchdog-agent`、`turn-judge`、`tool-policy-nag`、`ctx-tool` 的 compact 后注入、`doc-polish` 的结果回传。新增会注入用户消息的扩展时也要这样写，否则它的消息会被当成用户原话。插件注入的消息不受本仓库控制。
-- 技能调用（`/skill:…`）存成 custom 消息，不算进 `user_prompt`。
+- Input is stored in the session after the `input` hook and command expansion, so what is read is the text submitted to the model; the `instruction` [lang-nag](#lang-nag) prepends, for example, is included.
+- `attribution` is set by the sender, and an extension's `sendUserMessage` defaults to `user` when it does not set it. Messages this repository's extensions inject are therefore all marked `agent`: `watchdog-agent`, `turn-judge`, `tool-policy-nag`, `ctx-tool`'s post-compact injection and `doc-polish`'s result hand-back. A new extension that injects user messages must do the same, or its messages are taken as the user's own words. Messages plugins inject are outside this repository's control.
+- Skill invocations (`/skill:…`) are stored as custom messages and do not count toward `user_prompt`.
 
-**运行方式：**
+**How it runs:**
 
-- 模板在会话开始时读取，改动从下一个派出的 subagent 开始生效。
-- 每次 `context` 事件（每次模型调用，包括 IRC 唤醒、parked 后的恢复）重新读根会话，在消息最前面加一条只用于本次请求的 developer 消息，里面是所有匹配模板渲染出的 `<user-prompt-inject name=…>…</user-prompt-inject>`。这条消息不写进会话，也就不会在后续调用里重复。
-- 用户 prompt 变了，这条消息就变，subagent 对话的 prompt cache 从这条消息起失效。
-- **失败**：文件格式错误时跳过并记 warning；找不到主会话或主会话已释放时不注入，同一原因只记一次 warning。都不阻塞模型调用。
-- 依赖 OMP 内部实现（`AgentRegistry`、`ctx.agent`、`context` 事件的调用时机），升级 OMP 后要在真实 TUI 里重新验证首次派发和续聊。
+- Templates are read when the session starts, so changes apply from the next subagent spawned.
+- On every `context` event (every model call, including IRC wakes and resuming after being parked) it re-reads the root session and puts one request-only developer message at the very front, containing the rendered `<user-prompt-inject name=…>…</user-prompt-inject>` of every matching template. The message is not written into the session, so it never repeats in later calls.
+- When the user prompts change, the message changes, and the subagent conversation's prompt cache is invalidated from this message on.
+- **Failure**: a malformed file is skipped with a warning; when the main session cannot be found or has been released, nothing is injected and each cause warns once. Neither blocks the model call.
+- It depends on OMP internals (`AgentRegistry`, `ctx.agent`, when the `context` event fires); after an OMP upgrade, re-verify the first spawn and continuations in a real TUI.
 
 #### turn-judge
 
-`turn-judge/` 在主会话每一轮结束后，按 `TURN-JUDGE-<标签>.md` 通过 OMP 的原生 JUDGE 判断这一轮，每个文件问一个问题。带 prompt 的选项置信度达到阈值时，把这段 prompt 直接作为一条用户消息输入；否则弹 info 显示判定结果。和 [watchdog-agent](#watchdog-agent) 的选项后端相比：它每轮判一次，不按操作数；发给 JUDGE 的只有用户输入和模型说的话；按选项的置信度阈值触发，不按选中了哪个选项；没触发时也显示判定结果。
+After every main-session turn, `turn-judge/` judges that turn through OMP's native JUDGE according to `TURN-JUDGE-<label>.md`, one question per file. When an option with a prompt reaches its confidence threshold, that prompt is typed as a user message; otherwise an info notification shows the verdict. Compared with the option backend of [watchdog-agent](#watchdog-agent): it judges once per turn rather than by operation count; JUDGE receives only the user's input and what the model said; it triggers on an option's confidence threshold rather than on which option was picked; and it shows the verdict even when nothing triggers.
 
-**文件位置**与 [watchdog-agent](#watchdog-agent) 相同：扩展目录（`~/.omp/agent/extensions/turn-judge/`）下的 `TURN-JUDGE-*.md`，或从 cwd 往上到 git root 每一层的 `<dir>/TURN-JUDGE-*.md`、`<dir>/.omp/TURN-JUDGE-*.md`，文件名不区分大小写。每个文件独立判定，各自一次请求。仓库带的配置随更新器同步；本机自己加的属于本机。
+**File locations** match [watchdog-agent](#watchdog-agent): `TURN-JUDGE-*.md` in the extension directory (`~/.omp/agent/extensions/turn-judge/`), or `<dir>/TURN-JUDGE-*.md` and `<dir>/.omp/TURN-JUDGE-*.md` at every level from cwd up to the git root, with case-insensitive file names. Each file judges on its own with its own request. Configs the repository ships are synced by the updater; the machine's own belong to the machine.
 
-**frontmatter 字段**（键不区分大小写，每个值占一行）：
+**Frontmatter fields** (keys are case-insensitive, each value on one line):
 
-|字段|说明|
+|Field|Meaning|
 |---|---|
-|`name`|显示名，缺省取文件名里的标签|
-|`enabled`|默认 `true`；写了的话，只有 `true`、`yes`、`on`、`1`（不区分大小写，可带引号）算开启|
-|`maxChars`|过去的记录的字数上限，正整数，默认 30000|
-|`option.<标签>`|声明一个选项，值是交给 JUDGE 的判定标准，留空表示标签本身已足够说明。至少两个。标签可以用中文，不能含 `.` 或空白|
-|`option.<标签>.prompt`|该选项触发时输入的 prompt；不写就只显示判定|
-|`option.<标签>.threshold`|写了 prompt 就必填，取 (0, 1]；该选项的概率达到或超过它才输入 prompt|
+|`name`|Display name, defaulting to the label in the file name|
+|`enabled`|Default `true`; when written, only `true`, `yes`, `on`, `1` (case-insensitive, quotes allowed) mean on|
+|`maxChars`|Character cap for the past record, a positive integer, default 30000|
+|`option.<label>`|Declares an option; the value is the criterion handed to JUDGE, empty when the label says enough. At least two. Labels may be Chinese but may not contain `.` or whitespace|
+|`option.<label>.prompt`|The prompt typed when the option triggers; without it only the verdict is shown|
+|`option.<label>.threshold`|Required when a prompt is written, in (0, 1]; the prompt is typed only when the option's probability reaches or exceeds it|
 
-正文是问题，原样交给 JUDGE。少于两个选项、只写了 prompt / threshold 却没声明选项、threshold 缺失或越界、正文为空，都会让整个文件被跳过。
+The body is the question, handed to JUDGE as is. Fewer than two options, a prompt / threshold for an undeclared option, a missing or out-of-range threshold, or an empty body skips the whole file.
 
-仓库的 `agent/extensions/turn-judge/TURN-JUDGE-甩锅.md` 问“模型是不是在甩锅？”，选项 `是` / `否`；`是` 的概率达到 0.5 时输入“你这一轮在甩锅：把本该你自己负责、自己做的事推给了用户。不要等我，接着把它做完。”：
+The repository's `agent/extensions/turn-judge/TURN-JUDGE-甩锅.md` asks "模型是不是在甩锅？" (is the model passing the buck?), with options `是` (yes) / `否` (no); when `是` reaches probability 0.5 it types "你这一轮在甩锅：把本该你自己负责、自己做的事推给了用户。不要等我，接着把它做完。" (this turn you passed the buck: you pushed onto the user what you should own and do yourself. Do not wait for me; go on and finish it.):
 
 ```md
 ---
@@ -687,353 +688,353 @@ option.是.threshold: 0.5
 模型是不是在甩锅？
 ```
 
-**一轮**：主会话里模型自己结束（`stopReason: "stop"`）、有文字的 assistant 消息。被中断、出错、以工具调用结束的消息都不算；subagent 不判。
+**A turn**: an assistant message with text that the model ended itself (`stopReason: "stop"`) in the main session. Interrupted messages, errors and messages ending in a tool call do not count; subagents are not judged.
 
-**发给 JUDGE 的内容**：`{ 过去的记录: [{ 角色: "用户" | "模型", 内容 }], 本轮回复 }`。
+**What JUDGE receives**: `{ 过去的记录: [{ 角色: "用户" | "模型", 内容 }], 本轮回复 }` (past record: [{ role: "user" | "model", content }], this turn's reply).
 
-- `过去的记录` 是当前分支上本轮之前的内容，按时间顺序：用户自己的输入（`attribution: "user"`、非 `synthetic`，所以扩展注入的消息不算）和每条 assistant 消息的文字。工具调用、工具结果、thinking 都不放。
-- 超过 `maxChars` 时从最早的一条起整条丢掉，不向判定模型添加省略说明。默认 30000 保留了既有 Jev 后端的请求预算。
-- `本轮回复` 是这一轮最后那条消息的文字，不截断。
+- `过去的记录` (past record) is the content before this turn on the current branch, in time order: the user's own input (`attribution: "user"`, not `synthetic`, so messages extensions inject do not count) and the text of every assistant message. Tool calls, tool results and thinking are left out.
+- Beyond `maxChars`, whole entries are dropped from the oldest, with no omission note added for the judging model. The default 30000 keeps the request budget of the earlier Jev backend.
+- `本轮回复` (this turn's reply) is the text of the turn's last message, untruncated.
 
-**结果：**
+**Result:**
 
-- 带 prompt 的选项里，概率达到自己阈值的，取概率最高的一个，把它的 prompt 以 `attribution: "agent"` 发出：会话空闲时开启新一轮，还在运行时排到本轮之后（follow-up）。
-- 其余文件弹 info：`turn-judge <name>：<JUDGE 选中的标签>（<每个选项的概率>）`。同一轮所有文件的 info 等这一轮的判定全部返回后合并成一条弹出，因为连续的 UI 通知会互相覆盖。
-- prompt 引起的那一轮照样会判，没有上限：判定一直达到阈值，就一直输入。
-- 判定返回前用户发了新输入，或会话切换、分支切换、树跳转时，本该输入的 prompt 不再输入，只在 info 里显示判定并注明未发送。
-- 文件每轮结束时重读，改文件从下一轮生效，不用重启。
+- Among options with a prompt, of those whose probability reaches their own threshold, the most probable one is taken and its prompt is sent with `attribution: "agent"`: it starts a new turn when the session is idle and queues after the current turn (follow-up) while it is running.
+- Every other file shows info: `turn-judge <name>：<label JUDGE picked>（<probability of each option>）`. The info of all files for one turn is merged into one notification after all of that turn's judgments return, because consecutive UI notifications overwrite each other.
+- A turn caused by a prompt is judged too, with no limit: as long as the judgment keeps reaching the threshold, prompts keep being typed.
+- When the user sends new input before the judgment returns, or the session switches, the branch switches or the tree is navigated, the prompt is no longer typed; the info shows the verdict and notes that it was not sent.
+- Files are re-read at the end of every turn, so changes apply from the next turn without a restart.
 
-**可用性与失败**：没有原生 JUDGE 时静默不运行，不报缺少模型；配置好后下一轮自动判定。原生后端已可用，但凭据、请求或响应出错，或 90 秒超时，这一轮弹 warning，写明是哪个文件、什么原因。文件格式错误时跳过，同一文件同一原因每个进程只警告一次。headless 只写日志。都不阻塞也不改动这一轮。
+**Availability and failure**: without native JUDGE it silently does not run and does not complain about a missing model; once configured, the next turn is judged automatically. With the native backend available, a credential, request or response error or the 90-second timeout shows a warning for that turn naming the file and the cause. A malformed file is skipped, warning once per process per file and cause. Headless mode only logs. None of this blocks or changes the turn.
 
-**用量**：每轮每个文件一次 judge 请求，各自消耗 JUDGE 后端额度，不计入会话用量。
+**Usage**: one judge request per file per turn, each spending the JUDGE backend's quota and not counted in session usage.
 
 #### lang-nag
 
-`lang-nag/` 只作用于主会话。主 agent 一轮结束后，取最后一条有正文的回复的最后一段（前 200 个字符），用辅助会话问模型这段是不是目标语言；判定为否，就在用户下一条输入前面加上 `instruction`。它不改已经发出的回复。
+`lang-nag/` acts on the main session only. After a main-agent turn, it takes the last paragraph (the first 200 characters) of the last reply with body text and asks a model in a helper session whether it is in the target language; if not, it prepends `instruction` to the user's next input. It never changes a reply already sent.
 
-- **配置** `lang-nag.json`：`model`、`language`、`instruction` 三项必填。依次尝试 cwd 下和扩展目录下的文件，第一个能读、能解析、字段齐全的生效；cwd 下的文件坏了会回退到扩展目录下的。只在会话开始或切换时读取。仓库里的值是 `openai-codex/gpt-6-luna`、`中文`、`说中文`。
-- **不提醒的情况**：自动续写的轮次、判定还没完成、判定失败或答案无法识别、模型不可用（记 warning）。斜杠命令会清掉待用的判定；分支切换、树跳转和 compact 会取消进行中的判定。
-- **辅助会话**：无工具、内存会话、不加载扩展，只在需要判定时创建。
+- **Config** `lang-nag.json`: `model`, `language` and `instruction` are required. The file under cwd and then the one in the extension directory are tried, and the first that can be read, parsed and has all fields applies; a broken file under cwd falls back to the extension directory's. It is read only at session start or switch. The repository's values are `openai-codex/gpt-6-luna`, `中文` (Chinese) and `说中文` (speak Chinese).
+- **No reminder when**: the turn is an automatic continuation, the judgment has not finished, the judgment failed or its answer cannot be recognized, or the model is unavailable (logs a warning). A slash command clears a pending judgment; branch switches, tree navigation and compaction cancel a judgment in progress.
+- **Helper session**: no tools, in memory, loads no extensions, created only when a judgment is needed.
 
 #### repo-rules
 
-`repo-rules/` 补读 OMP 默认不扫描的 repo 级 rule。OMP 默认读 `.omp/rules`、`.agent(s)/rules`、`.cursor/rules`、`.windsurf/rules`、`.clinerules`、`.github/instructions`；`.claude/rules` 和 `.pi/rules` 不在默认扫描范围内（只有把 `.claude`、`.pi` 显式写成扩展包根目录时才会读到其中的 `rules/`），仓库给 Claude Code 或旧版 pi 写的规则因此被忽略。
+`repo-rules/` also reads repo-level rules OMP does not scan by default. OMP reads `.omp/rules`, `.agent(s)/rules`, `.cursor/rules`, `.windsurf/rules`, `.clinerules` and `.github/instructions` by default; `.claude/rules` and `.pi/rules` are outside the default scan (their `rules/` are read only when `.claude` or `.pi` is explicitly written as an extension package root), so rules a repository wrote for Claude Code or older pi are ignored.
 
-- **扫描**：会话开始时，从 cwd 往上到仓库根（第一个含 `.git` 的目录；没有就只扫 cwd），每层递归扫描 `.claude/rules`、`.agents/rules`、`.pi/rules` 下的 `.md` / `.mdc`，跳过隐藏文件。
-- **注入还是列目录**：没有 frontmatter，或 `alwaysApply: true` 的，注入正文；其余有 frontmatter 的，只列出名字、`description` 和路径，供需要时 `read`。
-- **同名**：按去掉扩展名的文件名判断，离 cwd 近的优先；同一层按 `.claude`、`.agents`、`.pi` 的顺序。
-- **注入位置**：每次 `before_agent_start` 追加一个 `<repo-level-rules>` 块。要注入正文的规则，正文按空白归一后已经整段出现在本次收到的 system prompt 里就跳过，所以原生已加载的规则、用户级规则的同一份拷贝不会重复注入；但扫描到的两个不同文件名、正文相同的规则会各注入一次。只列目录的规则，system prompt 里已经出现 `rule://<文件名>` 这段文字时不列；这是子串匹配，`rule://foo-bar` 也会让 `foo` 不列。用户级 rule 交给宿主处理。
+- **Scan**: at session start, from cwd up to the repository root (the first directory containing `.git`; only cwd when there is none), each level recursively scans `.md` / `.mdc` under `.claude/rules`, `.agents/rules` and `.pi/rules`, skipping hidden files.
+- **Inject or list**: rules without frontmatter, or with `alwaysApply: true`, have their body injected; other rules with frontmatter are only listed by name, `description` and path, to `read` when needed.
+- **Same names**: judged by file name without extension; the one nearer cwd wins, and within one level the order is `.claude`, `.agents`, `.pi`.
+- **Where it injects**: every `before_agent_start` appends a `<repo-level-rules>` block. A rule whose body would be injected is skipped when that body, whitespace-normalized, already appears in full in the system prompt received this time, so rules already loaded natively and the same copy of a user-level rule are not injected twice; but two scanned files with different names and identical bodies are each injected once. A listed rule is not listed when the text `rule://<file name>` already appears in the system prompt; this is a substring match, so `rule://foo-bar` also suppresses `foo`. User-level rules are left to the host.
 
 #### append-system-model
 
-`append-system-model/` 让追加提示词能按模型区分，而不用改写整个系统提示词。OMP 的 `APPEND_SYSTEM.md`、`SYSTEM.md` 和 rulebook 都不分模型；`SYSTEM_TEMPLATE.md` 能拿到当前模型的 `provider/id` 字符串、用 `when` 做相等判断，但那要替换整个模板。这个扩展用一个单独的文件追加，每块按 model / provider 的正则匹配，多块按文件顺序拼接。
+`append-system-model/` lets appended prompts differ by model without rewriting the whole system prompt. OMP's `APPEND_SYSTEM.md`, `SYSTEM.md` and rulebook do not distinguish models; `SYSTEM_TEMPLATE.md` can read the current model's `provider/id` string and test equality with `when`, but that replaces the whole template. This extension appends from a separate file, each block matched by model / provider regex, with several blocks joined in file order.
 
-**文件**：扩展目录（`~/.omp/agent/extensions/append-system-model/`，随 profile 变化）下的 `APPEND_SYSTEM_MODEL.md`，一个文件写多块。这个文件属于本机，仓库不带。每块先是 `---` 包起来的 YAML 头，后面是正文，正文到下一个 `---` 行为止：
+**File**: `APPEND_SYSTEM_MODEL.md` in the extension directory (`~/.omp/agent/extensions/append-system-model/`, varying with the profile), with several blocks in one file. The file belongs to the machine; the repository ships none. Each block starts with a YAML header wrapped in `---`, followed by the body, which runs to the next `---` line:
 
 ```md
 ---
 model: opus
 provider: ^anthropic$
 ---
-只追加给 Anthropic 提供的 Opus。
+Appended only for Opus served by Anthropic.
 ---
 model: "(gpt-5|o3)"
 ---
-追加给任何提供商的 GPT-5 和 o3。
+Appended for GPT-5 and o3 from any provider.
 ```
 
-|字段|说明|
+|Field|Meaning|
 |---|---|
-|`model`|JavaScript 正则，匹配模型 id（如 `claude-opus-5-5`）|
-|`provider`|JavaScript 正则，匹配提供商 id（如 `anthropic`）|
+|`model`|JavaScript regex matched against the model id (such as `claude-opus-5-5`)|
+|`provider`|JavaScript regex matched against the provider id (such as `anthropic`)|
 
-- **匹配**：每块至少写一个字段；写了的字段都匹配才生效。正则不自动锚定，需要时自己写 `^` / `$`；YAML 会误读的写法（以 `(`、`*`、`[` 等开头）加引号。
-- **注入**：所有生效的块按文件顺序拼成一个额外的 system prompt 块，加在末尾。正文里不能有单独一行 `---`，它总会开启新的头；分隔线用 `***`。
-- **时机**：每次 `before_agent_start`，主会话和每个 subagent 都按各自的模型匹配。每条 prompt 重新读文件，所以改文件、`/model` 切换都从下一条 prompt 生效，不用重启。一轮内 auto-retry 换了模型时，沿用这一轮开始时选中的块。
-- **失败**：文件不存在时静默不注入；读不了文件时每次都记 warning（不带行号）；格式错误（未知字段、正则无效、正文为空、`---` 没闭合等）时不注入，按行号记 warning，同一错误连续出现只记一次，错误变了或中间读成功过就再记。都不阻塞 prompt。
+- **Matching**: every block needs at least one field, and every field written must match. Regexes are not anchored automatically; write `^` / `$` yourself when needed, and quote forms YAML would misread (starting with `(`, `*`, `[` and so on).
+- **Injection**: all matching blocks are joined in file order into one extra system-prompt block, appended at the end. The body cannot contain a line that is just `---`, which always opens a new header; use `***` for a divider.
+- **Timing**: on every `before_agent_start`, the main session and every subagent match against their own model. The file is re-read for every prompt, so file edits and `/model` switches apply from the next prompt without a restart. When auto-retry switches models within a turn, the blocks chosen at the start of the turn are kept.
+- **Failure**: a missing file silently injects nothing; an unreadable file logs a warning every time (without a line number); a format error (unknown field, invalid regex, empty body, unclosed `---` and so on) injects nothing and logs a warning with the line number, the same error repeated in a row logging once and logging again when the error changes or a read succeeded in between. None of this blocks the prompt.
 
 #### system-prompt-replace
 
-`extensions-last/system-prompt-replace/` 对 system prompt 做文字替换。OMP 内置的提示词模板（包括工具说明）打包在程序里，没有覆盖目录；本仓库打开了 `inlineToolDescriptors`，内置工具的说明拼在 system prompt 里。和 `APPEND_SYSTEM.md` 冲突的句子，例如 `task` 工具的 “Omit \`agent\` only for default (\`task\`); NEVER specify it.”，只能靠改写 system prompt 文字修正。
+`extensions-last/system-prompt-replace/` replaces text in the system prompt. OMP's built-in prompt templates (tool descriptions included) are bundled into the program with no override directory; this repository turns on `inlineToolDescriptors`, so built-in tool descriptions are part of the system prompt. Sentences that conflict with `APPEND_SYSTEM.md`, such as the `task` tool's "Omit \`agent\` only for default (\`task\`); NEVER specify it.", can only be fixed by rewriting system-prompt text.
 
-**规则文件**：同目录的 `system-prompt-replace.json`：
+**Rules file**: `system-prompt-replace.json` in the same directory:
 
 ```json
 {
   "replacements": [
-    { "literal": "原文", "replace": "替换文字" },
-    { "regex": "JavaScript 正则源码", "replace": "替换文字，可用 $1" }
+    { "literal": "original text", "replace": "replacement" },
+    { "regex": "JavaScript regex source", "replace": "replacement, may use $1" }
   ]
 }
 ```
 
-- 每条规则 `literal`、`regex` 二选一，再加 `replace`；其他键、空匹配串、无效正则都让整个文件不生效。
-- `literal` 替换所有出现处，`replace` 里的 `$` 没有特殊含义。`regex` 自动加 `g`，`replace` 按 `String.prototype.replace` 解释 `$1`、`$&`。
-- 规则按文件顺序依次作用于每个 system prompt 块，后一条看到的是前一条替换后的结果。
-- 仓库里的规则（改的都是 OMP 内置 prompt 或插件工具说明里的句子）：
-  - `task` 工具那句换成 “Always set \`agent\` explicitly; never rely on the default.”，和 `APPEND_SYSTEM.md` 要求写明 agent 一致。默认 agent 名用正则匹配，所以 `spawns` 不同、默认 agent 不同的 subagent 也能命中。
-  - Engineering 的 “NEVER rerun checks to confirm them.” 换成 “NEVER rerun checks to doubt them. Reproducing to locate the cause and confirming the fix still apply.”：用户报的问题不用复跑去怀疑，但为定位原因复现、修完确认仍要做，和 Workflow 的 “reproduce before; confirm after” 不再冲突。
-  - “Compiled code: NEVER avoidable allocation, …” 补上谓语 `add`。
-  - `eval` 工具说明末尾 “On error, retry only the failed step; …” 之后追加一段：拒绝用 `eval` 调查文件。读内容（`open`、`Path.read_text`、`Bun.file`、`readFileSync`、prelude 的 `read()`）、列目录或找文件（`os.listdir`、`os.walk`、`glob.glob`、`readdirSync`）、搜文本（对文件内容跑正则、`subprocess` 调 `cat`/`ls`/`find`/`grep`/`rg`）都归 `read`、`glob`、`grep`；随手看一眼、批量处理多个文件、少调几次工具都不算例外。`eval` 只用于对已拿到的数据做计算、转换、结构化解析和库调用。`APPEND_SYSTEM.md` 的 Tool Call 一节有同类规则，但 subagent 收不到附录，工具说明里这段对所有带 `eval` 的会话生效。
-  - `exec_command`（`omp-unified-exec` 插件，挂在 `xd://` 下，system prompt 里只有截断的摘要）的开头句 “Run a command in a persistent session.” 之后插入两段。插在开头句后面而不是摘要末尾，是因为摘要按长度截断，末尾的文字进不了 system prompt。
-    - 拒绝用它调查文件：读内容（`cat`、`head`、`tail`、`sed -n`、`less`）、列目录或找文件（`ls`、`find`、`fd`、`tree`）、搜文本（`grep`、`rg`、`ag`、`awk`），不管单独跑、放进管道还是包在 `python -c` / `node -e` / `bun -e` 里，都归 `read`、`glob`、`grep`；随手看一眼、批量处理、少调几次工具都不算例外。它只留给真正的二进制程序和简短的事实型管道：构建、测试、git、外部 CLI、计数、校验和。
-    - 交互式操作用 `tty: true` 启动、用 `write_stdin` 驱动：`ssh` 会话，密码、口令和 host-key 提示，REPL 和数据库 shell，TUI，以及通过真实 TUI 测试 harness 或 CLI；管道、heredoc、`yes |` 都不能代替终端。不要过早轮询 TTY：启动程序或发送输入后，把 `yield_time_ms` 设到能覆盖预期响应的长度（shell 提示符或 `ssh` 登录几秒，harness 里一轮模型回复 20–30 秒），等这个窗口过了还没出现预期的提示或输出，才发空轮询；程序还在干活时连着轮询，只会拿到画了一半的屏幕，白白浪费轮次。
-  - `xd://` 设备的调用说明 “Write JSON args as `content` to `xd://<tool>` via `<写工具>`.” 之后追加：设备不是函数，不存在 `xd__<tool>`、`xd_<tool>` 或裸 `<tool>` 函数，不要调用；唯一的调用方式是用这个写工具、`path` 设为 `xd://<tool>`。
-- 关于某个工具怎么用的规则，优先改写该工具的说明，而不是写进 `APPEND_SYSTEM.md`：subagent 收不到附录，但能看到工具说明，规则只写一处就覆盖所有会话。附录只保留编排逻辑和最终回复的写法，并要求遵守 `todo` 工具的规则。
-- 改写工具说明依赖 `config.yml` 的 `inlineToolDescriptors: "on"`：打开时完整工具说明都写进 system prompt。默认的 `auto` 只对 Gemini 这样做，`off` 一律不做；不写进 system prompt、又走原生 tool calling 时，system prompt 只列工具名，说明随 `tools[]` 发送，这类规则就失效了。
-- 内置 prompt 的规则句常省略主语，以覆盖所有场景；改写时保持这种写法，只补意思，不加明确主语。
+- Each rule has exactly one of `literal` or `regex`, plus `replace`; any other key, an empty match string or an invalid regex disables the whole file.
+- `literal` replaces every occurrence, and `$` in `replace` has no special meaning. `regex` gets `g` automatically, and `replace` interprets `$1` and `$&` as `String.prototype.replace` does.
+- Rules apply in file order to every system-prompt block; each rule sees the result of the previous one.
+- The repository's rules (all changing sentences in OMP's built-in prompts or plugin tool descriptions):
+  - The `task` tool's sentence becomes "Always set \`agent\` explicitly; never rely on the default.", matching `APPEND_SYSTEM.md`'s requirement to name the agent. The default agent name is matched by regex, so subagents with different `spawns` and different default agents are hit too.
+  - Engineering's "NEVER rerun checks to confirm them." becomes "NEVER rerun checks to doubt them. Reproducing to locate the cause and confirming the fix still apply.": a problem the user reports needs no rerun to doubt it, but reproducing to locate the cause and confirming after the fix still happen, so it no longer conflicts with Workflow's "reproduce before; confirm after".
+  - "Compiled code: NEVER avoidable allocation, …" gets its missing verb `add`.
+  - After "On error, retry only the failed step; …" at the end of the `eval` tool description, a paragraph is appended: refuse to investigate files through `eval`. Reading content (`open`, `Path.read_text`, `Bun.file`, `readFileSync`, the prelude's `read()`), listing or finding files (`os.listdir`, `os.walk`, `glob.glob`, `readdirSync`) and searching text (regex over file content, `subprocess` running `cat`/`ls`/`find`/`grep`/`rg`) belong to `read`, `glob` and `grep`; a quick look, batch processing of many files or fewer tool calls are not exceptions. `eval` is only for computation, transformation, structured parsing and library calls on data already in hand. `APPEND_SYSTEM.md`'s Tool Call section has a similar rule, but subagents do not receive the appendix, whereas this paragraph in the tool description applies to every session with `eval`.
+  - Two paragraphs are inserted after the opening sentence "Run a command in a persistent session." of `exec_command` (from the `omp-unified-exec` plugin, mounted under `xd://`, so the system prompt has only a truncated summary). They go after the opening sentence rather than at the end of the summary because the summary is truncated by length, and text at its end never reaches the system prompt.
+    - Refuse to investigate files with it: reading content (`cat`, `head`, `tail`, `sed -n`, `less`), listing or finding files (`ls`, `find`, `fd`, `tree`) and searching text (`grep`, `rg`, `ag`, `awk`), whether run alone, in a pipeline or wrapped in `python -c` / `node -e` / `bun -e`, belong to `read`, `glob` and `grep`; a quick look, batch processing or fewer tool calls are not exceptions. It is reserved for real binaries and short factual pipelines: builds, tests, git, external CLIs, counts and checksums.
+    - Interactive work starts with `tty: true` and is driven with `write_stdin`: `ssh` sessions, password, passphrase and host-key prompts, REPLs and database shells, TUIs, and testing a harness or CLI through its real TUI; pipes, heredocs and `yes |` cannot stand in for a terminal. Do not poll a TTY early: after starting the program or sending input, set `yield_time_ms` long enough to cover the expected response (a few seconds for a shell prompt or `ssh` login, 20–30 seconds for a model turn in a harness), and send an empty poll only when that window has passed without the expected prompt or output; back-to-back polls while the program is still working only return half-drawn screens and waste turns.
+  - After the `xd://` device call instruction "Write JSON args as `content` to `xd://<tool>` via `<write tool>`.", it appends: devices are not functions; no `xd__<tool>`, `xd_<tool>` or bare `<tool>` function exists, so never call one; the only call is that write tool with `path` set to `xd://<tool>`.
+- Rules about how to use a tool go preferably into that tool's description rather than `APPEND_SYSTEM.md`: subagents do not receive the appendix but do see tool descriptions, so a rule written once covers every session. The appendix keeps only orchestration logic and how to write the final reply, and requires following the `todo` tool's rules.
+- Rewriting tool descriptions relies on `config.yml`'s `inlineToolDescriptors: "on"`: when on, full tool descriptions are written into the system prompt. The default `auto` does this only for Gemini, and `off` never does; when descriptions are not in the system prompt and native tool calling is used, the system prompt lists only tool names and the descriptions travel with `tools[]`, so such rules stop working.
+- Rule sentences in built-in prompts often omit the subject to cover every situation; rewrites keep that style, adding meaning without adding an explicit subject.
 
-**最后执行**：`before_agent_start` 按扩展的加载顺序串行执行，每个 handler 拿到的是前一个返回的 system prompt。加载顺序是：native 发现（`~/.omp/agent/extensions/`，以及 `settings.json` 的 `extensions` 列出的模块，不管有没有 `config.yml`）→ hooks → 插件扩展 → `-e` 参数 → `config.yml` 的 `extensions`（按列表顺序）→ OMP 内置的 inline 扩展（SDK 传入的扩展、autoresearch、`.omp/tools/` 等自定义工具的包装）；同一路径只加载第一次出现的那个。因此本扩展放在 `extensions/` 之外的 `extensions-last/`，并写成 `config.yml` 中 `extensions` 的最后一项，在所有按路径加载的扩展之后执行。放进 `extensions/` 会随 native 批次提前加载，`config.yml` 里的条目也会被当成重复路径丢掉。以后往 `config.yml` 的 `extensions` 加条目，要写在它前面；本机条目由更新器自动放在仓库条目前面。inline 扩展仍在它之后：其中 autoresearch 在 `/autoresearch` 模式下会改写 system prompt，那时它加的文字不经过这里的替换。
+**Running last**: `before_agent_start` runs serially in extension load order, each handler receiving the system prompt the previous one returned. The load order is: native discovery (`~/.omp/agent/extensions/`, plus the modules listed in `settings.json`'s `extensions`, whether or not `config.yml` exists) → hooks → plugin extensions → `-e` arguments → `config.yml`'s `extensions` (in list order) → OMP's built-in inline extensions (SDK-supplied extensions, autoresearch, the wrapper for custom tools such as `.omp/tools/`); a path loads only at its first occurrence. This extension therefore sits in `extensions-last/` outside `extensions/` and is written as the last entry of `config.yml`'s `extensions`, so it runs after every path-loaded extension. Placed in `extensions/`, it would load early with the native batch, and its `config.yml` entry would be dropped as a duplicate path. Future entries added to `config.yml`'s `extensions` must go before it; the updater puts machine entries ahead of the repository's automatically. Inline extensions still come after it: autoresearch rewrites the system prompt in `/autoresearch` mode, and the text it adds then does not pass through these replacements.
 
-`extensions/` 目录内部没有排序：顺序取决于 native `glob` 遍历返回的顺序，不是目录名顺序，所以不能用目录名前缀控制先后。需要确定顺序的，只能靠 `config.yml` 的 `extensions` 列表。
+There is no ordering inside `extensions/`: the order is whatever the native `glob` walk returns, not directory-name order, so directory-name prefixes cannot control precedence. A definite order is only available through `config.yml`'s `extensions` list.
 
-- **时机**：每次 `before_agent_start`，主会话和每个 subagent 都执行，轻量模式除外（见[轻量模式](#轻量模式)）。每条 prompt 重新读规则文件，改规则不用重启；改扩展本身要重启。
-- **失败**：规则文件不存在时不替换。JSON 或规则格式错误时不替换，记 warning，同一错误连续出现只记一次。某条规则的目标在主会话的 system prompt 里一处都找不到时（升级 OMP 后模板文字变了，或规则写错），每条规则每个进程警告一次：交互模式弹 UI 警告，headless 写 stderr，同时记日志。subagent 不做这项检查，它们的 prompt 本来就可能没有目标文字（比如不能派发的 worker 没有 `task` 工具说明）。都不阻塞 prompt。
-- **范围**：只改 system prompt，不改随请求单独发送的工具 schema。`config.yml` 里的路径写死 `~/.omp/agent`，用 `PI_CODING_AGENT_DIR` 换 agent 目录时要同步改这一项。
+- **Timing**: on every `before_agent_start`, for the main session and every subagent, except in light mode (see [Light mode](#light-mode)). The rules file is re-read for every prompt, so rule changes need no restart; changes to the extension itself do.
+- **Failure**: a missing rules file replaces nothing. A JSON or rule format error replaces nothing and logs a warning, the same error repeated in a row logging once. When a rule's target appears nowhere in the main session's system prompt (OMP's template text changed after an upgrade, or the rule is wrong), each rule warns once per process: a UI warning in interactive mode, stderr in headless mode, and a log entry in both. Subagents are not checked, since their prompts may legitimately lack the target text (a worker that cannot dispatch has no `task` tool description, for example). None of this blocks the prompt.
+- **Scope**: it changes only the system prompt, not the tool schemas sent separately with the request. The path in `config.yml` hard-codes `~/.omp/agent`; when `PI_CODING_AGENT_DIR` changes the agent directory, update that entry too.
 
-### 派发与交付
+### Dispatch and delivery
 
 #### fork-task
 
-`fork-task/` 注册 `fork_task` 工具。参数沿用 `task` 的批量形式（顶层 `context` 加 `tasks[]`），但每项没有 `solutionSpace`；派出的也是原生 `task` 子代理：用自己的 agent 定义、模型和工具，Hub、`agent://`、`history://`、隔离与 patch 合并都走原生路径。区别在于子代理的初始 transcript 是调用方当前对话的副本，之后才是派工单。
+`fork-task/` registers the `fork_task` tool. Its parameters follow `task`'s batch form (a top-level `context` plus `tasks[]`), but items have no `solutionSpace`; what it spawns is also a native `task` subagent with its own agent definition, model and tools, and Hub, `agent://`, `history://`, isolation and patch merging all follow the native path. The difference is that the subagent's initial transcript is a copy of the caller's current conversation, followed by the assignment.
 
-适合派工单依赖本对话已有的需求、决定和已读内容的多步实现、调试或设计落地；需要独立视角，或背景很短时用 `task`。
+It suits multi-step implementation, debugging or design follow-through whose assignment depends on requirements, decisions and material already read in this conversation; use `task` when an independent view is needed or the background is short.
 
-和 `task` 的差别：
+Differences from `task`:
 
-- `isolated` 默认 `true`，写 `isolated: false` 才共享目录。父会话处于 plan mode 时一律共享。隔离的子代理结束后不能续聊。
-- 每项可选 `shake: true`，对副本执行和手动 `/shake` 相同的 `session.shake("elide")`。
-- `name` 会加 `_xxxx` 后缀，子代理 id 以结果为准。
-- 需要 `async.enabled: true`，否则报错。
+- `isolated` defaults to `true`; only `isolated: false` shares the directory. While the parent session is in plan mode the directory is always shared. An isolated subagent cannot be continued after it finishes.
+- Each item may set `shake: true`, which runs `session.shake("elide")` on the copy, the same as a manual `/shake`.
+- `name` gets a `_xxxx` suffix; the subagent id in the result is authoritative.
+- It needs `async.enabled: true`, otherwise it errors.
 
-**shake 的效果**：最近约 4,000 token 受保护，但其中被标记为 useless 的非错误工具结果照样会被省略。更早的部分里，所有文本工具结果、消息中不少于 400 token 的围栏代码块和顶层小写 XML 元素，被替换成 `[shaken ~N tokens — recover: artifact://<id> (region K)]`，子代理可以 `read` 取回原文；原文存进 artifact 失败时只剩 `[shaken ~N tokens]`，取不回来。`skill` 结果、`skill://` 读取、`local://PLAN.md` 的读取、块外正文、thinking 和工具调用参数不动，已被 compaction 概括的历史不处理；父会话用的是别的 plan 文件路径时，那份 plan 的读取不受保护。
+**What shake does**: the most recent ~4,000 tokens are protected, though non-error tool results marked useless inside them are still elided. In the earlier part, every text tool result, every fenced code block and top-level lowercase XML element of at least 400 tokens in messages is replaced with `[shaken ~N tokens — recover: artifact://<id> (region K)]`, and the subagent can `read` the original back; when saving the original to an artifact fails, only `[shaken ~N tokens]` remains and it cannot be recovered. `skill` results, `skill://` reads, reads of `local://PLAN.md`, prose outside blocks, thinking and tool-call arguments are untouched, and history already summarized by compaction is not processed; when the parent session uses another plan file path, reads of that plan are not protected.
 
-**实现**：
+**Implementation**:
 
-1. 把调用方会话 fork 到 `$TMPDIR/omp-fork-task/<uuid>/`：清零继承的费用，给未返回的工具调用补上中止结果，清空 todo（[todo-more](#todo-more) 的 goal 随之清空），追加一条 `<system-notice cause="fork_task">`，说明这段对话只是背景。
-2. 删掉父会话的运行时条目（`session_init`、`model_change`、`thinking_level_change`、`service_tier_change`、shake 辅助会话的 `session_exit`），其子条目挂到上一级。
-3. 共享子代理保留父会话的 cwd；隔离子代理的 cwd 置空，由执行器绑定到 worktree。shake 的 artifact 写进父会话的 artifact 目录，子代理共用。
-4. `task` 异步派发时先分配 id，再触发 `before_subagent_spawn`；扩展在这里把副本移到 `<父会话文件去掉 .jsonl>/<子代理 id>.jsonl`，执行器打开的就是它。没派出去的副本在出错或会话结束时清理。
+1. Fork the caller's session into `$TMPDIR/omp-fork-task/<uuid>/`: zero the inherited cost, add aborted results for tool calls that never returned, clear the todo (the goal of [todo-more](#todo-more) goes with it), and append a `<system-notice cause="fork_task">` saying this conversation is only background.
+2. Delete the parent session's runtime entries (`session_init`, `model_change`, `thinking_level_change`, `service_tier_change`, and the `session_exit` of shake's helper session), reattaching their children to the level above.
+3. A shared subagent keeps the parent session's cwd; an isolated subagent's cwd is cleared and bound to the worktree by the executor. Shake's artifacts are written into the parent session's artifact directory and shared by the subagents.
+4. When `task` dispatches asynchronously it assigns the id first and then fires `before_subagent_spawn`; here the extension moves the copy to `<parent session file without .jsonl>/<subagent id>.jsonl`, which is exactly what the executor opens. Copies that were never dispatched are cleaned up on error or at session end.
 
-这依赖 OMP 的内部实现（`AgentRegistry`、子会话文件路径、钩子顺序、会话条目类型）。每次升级 OMP 后，都要在真实 TUI 里重新验证继承、隔离、shake 和续聊。
+This depends on OMP internals (`AgentRegistry`, child session file paths, hook order, session entry types). After every OMP upgrade, re-verify inheritance, isolation, shake and continuation in a real TUI.
 
 #### isolation-nudge
 
-`isolation-nudge/` 在 `tool_call` 阶段检查 `task` 调用（不查 `fork_task`）：会有两个以上可写 agent 不带隔离、共用当前目录时拦下，提示写入者加 `isolated: true`、只调查的项写明 `isolated: false`。它不会替模型设置 `isolated`。
+`isolation-nudge/` checks `task` calls at the `tool_call` stage (not `fork_task`): when two or more writing agents would share the current directory without isolation, it blocks the call and asks for `isolated: true` on writers and an explicit `isolated: false` on research-only items. It never sets `isolated` for the model.
 
-- **可写 agent**：`task:*`、内置 `task`、省略 `agent` 的项、`m1` 这类标记模型的 agent。
-- **“两个以上”**：包括同一批里的多个，以及本会话之前派出、仍在运行的共享写入者（取本会话的 async job；eval 的 `agent()` / `workpool()` 不算）。显式写了 `isolated: false` 的项自己不会触发提醒，但仍计入写入者总数。
-- **只提醒一次**：按每项 `task` 文本的 sha256 记录，原样重派放行，换了新 prompt 会再拦一次。记录只在内存里，每个会话（含 subagent 会话）各自一份。
-- **不拦的情况**：`task` 工具的说明里没有 `isolated`（隔离没启用，或处于 plan mode）；扩展自己出错（只记 warning）。
+- **Writing agents**: `task:*`, the built-in `task`, items that omit `agent`, and agents marking a model such as `m1`.
+- **"Two or more"**: includes several in one batch, plus shared writers this session dispatched earlier that are still running (taken from this session's async jobs; eval's `agent()` / `workpool()` do not count). An item with an explicit `isolated: false` never triggers the reminder itself but still counts toward the writer total.
+- **Reminds once**: recorded by the sha256 of each item's `task` text, so an unchanged redispatch passes and a new prompt is blocked again. The record lives only in memory, one per session (subagent sessions included).
+- **Not blocked when**: the `task` tool's description has no `isolated` (isolation is not enabled, or plan mode is on); the extension itself errors (only a warning is logged).
 
 #### task-split-check
 
-`task-split-check/` 在 `tool_call` 阶段用模型检查 `task` / `fork_task` 的每个派发项（共享 `context` 加该项的 `task`），有一项不合格就拦下整次调用。`split` 只按该项的 `task` 判断，共享 `context` 只作背景；`report-limit` 两者都看。
+`task-split-check/` uses a model at the `tool_call` stage to check each dispatch item of `task` / `fork_task` (the shared `context` plus that item's `task`), and blocks the whole call when any item fails. `split` judges by the item's `task` alone, with the shared `context` as background only; `report-limit` looks at both.
 
-|检查|范围|问的问题|原样重派|
+|Check|Scope|Question|Unchanged redispatch|
 |---|---|---|---|
-|`split`|主会话的 `task` 调用中，派给 `task:low` / `task:free` / `task:mid` 的项|这一项是否把多个主题塞给了一个 agent|放行（记为 `repeat`）|
-|`report-limit`|任何会话的 `task` 和 `fork_task` 中，`agent` 为 `task:*` 或省略的项|是否限制了 worker 汇报的长度|不放行，必须删掉限制|
+|`split`|Items for `task:low` / `task:free` / `task:mid` in the main session's `task` calls|Does this item stuff several topics into one agent|Passes (recorded as `repeat`)|
+|`report-limit`|Items whose `agent` is `task:*` or omitted, in `task` and `fork_task` of any session|Does it cap the length of the worker's report|Does not pass; the limit must be removed|
 
-- `split` 看主题，不看文件数：同一个修改落到很多文件、同一主题写几份文档都算一个主题；几块互不依赖的调查、不相干的功能或 bug 放进同一项才算多个。拦截时要求按主题拆开，确认是单一主题的可以原样重派。
-- `report-limit` 指字数、字符、句、段、行、token、条目上限或“简短汇报”；给要写进仓库或文件的交付物定长度不算。拦截时要求删掉限制，长报告让 worker 写到文件（如 `local://<name>.md`）并回报路径。
-- **请求**：同一项需要判断的检查合并成一次 `openai-codex/gpt-6-sol`（推理强度 medium）请求，模型只看 prompt，逐行回答 `<检查名>: true|false`。所有项并发，共用一个 25 秒的中止信号（低于宿主 30 秒的 `tool_call` 超时）。
-- **缓存**：按“检查 + prompt 的 sha256”记在进程内存里。`split` 记所有有结论的；`report-limit` 只记判为无限制的。判断失败不记。
-- **失败处理**：模型不可用、请求失败或超时，这次请求里的检查都放行；某个回答解析不了，只放行那一项检查。
-- 做了判定的调用写一条 `task-split-check verdicts` info 日志。
+- `split` looks at topics, not file counts: one change landing in many files, or several documents on one topic, is one topic; several independent investigations, unrelated features or bugs in one item are several. When blocked, it asks to split by topic; an item confirmed to be a single topic can be redispatched unchanged.
+- `report-limit` means caps in words, characters, sentences, paragraphs, lines, tokens or items, or a "brief report"; setting the length of a deliverable to be written into the repository or a file does not count. When blocked, it asks to remove the limit and have the worker write long reports to a file (such as `local://<name>.md`) and report the path.
+- **Request**: the checks one item needs are merged into a single `openai-codex/gpt-6-sol` request (reasoning effort medium); the model sees only the prompt and answers line by line with `<check name>: true|false`. All items run concurrently and share one 25-second abort signal (below the host's 30-second `tool_call` timeout).
+- **Cache**: kept in process memory keyed by "check + sha256 of the prompt". `split` caches every conclusive verdict; `report-limit` caches only "no limit" verdicts. Failed judgments are not cached.
+- **Failure handling**: an unavailable model, a failed request or a timeout passes every check in that request; an answer that cannot be parsed passes only that check.
+- A call that was judged writes one `task-split-check verdicts` info log.
 
 #### task-completion-judge
 
-`task-completion-judge/` 在 `task:low`、`task:mid`、`task:free` 的会话里拦截交付用的 `yield`，先让模型判断切片是否真的做完。只在该运行确实有 structured yield 工具时生效；无 yield 的 unstructured task 没有这项拦截。`task:high` 和主 agent 不受影响；本次迁移不更改 task structured 设置。
+`task-completion-judge/` intercepts the delivering `yield` in `task:low`, `task:mid` and `task:free` sessions and first has a model judge whether the slice is really done. It applies only when the run actually has a structured yield tool; an unstructured task without yield has no such interception. `task:high` and the main agent are unaffected; this migration does not change the task structured setting.
 
-- **依据**：派工单，即当前分支最后一条 `session_init` 里的 `task` prompt（`task` 和 `fork_task` 都一样）；system prompt 里的共享背景；worker 自己 todo 的 goal（见 [todo-more](#todo-more)，没有时注明为空）；最后一条 `session_init` 之后该 worker 自己最近 50 次工具调用及结果；这次提交的内容（`yield` 的 `data`；没有 `data` 时取同一条 assistant 消息里的文字）。OMP 在运行中 system prompt 变化时会追加新的 `session_init`，所以看到的工具调用可能只是这次运行的后一段。`fork_task` 子代理开头继承的父对话只是背景，其中的用户消息和工具调用都不算。每次调用的参数和结果各保留原文最多 800 个字符，提交内容最多 6000 个字符，超长时按六成头、四成尾保留，中间另插一行省略标记。
-- **goal 的用法**：派工单仍是标准，goal 只是 worker 自己的复述，用来多做几项检查：goal 缩小了派工单的范围、goal 写的衡量方法在工具调用里没做过、没达到 goal 写的完成程度，都判 `NOT_DONE`。
-- **判定**：`openai-codex/gpt-6-sol`（推理强度 low），25 秒超时，回答 `DONE` 或 `NOT_DONE`。如实报告了 blocker 也算 `NOT_DONE`。
-- **退回**：判为 `NOT_DONE` 时拦下这次 `yield`，要求继续做完并验证；判为 `DONE` 后重新向插件请求当前 worker 的只读投影，仍有 pending / in_progress 项时也拦下，逐项列出解释，要求先把 todo 更新到真实进度（blocked 项不触发）。构造模型 prompt 前也请求一次，但模型前的副本不用于模型后的维护判断。两种退回各最多一次；一旦放行，同一会话不再判定。
-- **结果附注**：`yield` 的数据结构是开放对象（没有自定义 `outputSchema`）时，放行的交付里附上 `completion_judge`（判定、理由、`bounced`），派发方能看到。`bounced` 只表示是否因 `NOT_DONE` 退回过，todo 退回不计入。
-- **不判定的情况**：带错误的 `yield`、增量提交；会话分支上没有 `session_init`；模型不可用、请求失败、超时或回答无法识别时直接放行，不附注。插件未加载、未回复或 wire 解析失败时记录 `task-completion-judge skipped a yield` warning 并 fail-open；不可用不是空 Todo。
-- 状态只在内存里，会话结束时清除；每次判定写一条 info 日志。
+- **Evidence**: the assignment, i.e. the `task` prompt in the last `session_init` on the current branch (the same for `task` and `fork_task`); the shared background in the system prompt; the goal of the worker's own todo (see [todo-more](#todo-more); noted as empty when there is none); the worker's own last 50 tool calls and results after the last `session_init`; and what it is submitting now (`yield`'s `data`, or the text in the same assistant message when there is no `data`). OMP appends a new `session_init` when the system prompt changes mid-run, so the tool calls seen may be only the latter part of the run. The parent conversation a `fork_task` subagent inherits at the start is only background; its user messages and tool calls do not count. Each call's arguments and result keep at most 800 characters of original text, and the submission at most 6000; overlong text keeps the first 60% and the last 40% with an omission marker line in between.
+- **How the goal is used**: the assignment remains the standard; the goal is only the worker's own restatement, used for a few more checks: a goal that narrows the assignment's scope, a measure in the goal that never shows up in the tool calls, or falling short of the goal's done-when all judge `NOT_DONE`.
+- **Judgment**: `openai-codex/gpt-6-sol` (reasoning effort low), a 25-second timeout, answering `DONE` or `NOT_DONE`. Honestly reporting a blocker still counts as `NOT_DONE`.
+- **Bounce**: on `NOT_DONE` it blocks this `yield` and asks the worker to finish and verify; after `DONE` it requests the current worker's read-only projection from the plugin again and also blocks while pending / in_progress items remain, listing each with its explanation and asking for the todo to be updated to the real progress first (blocked items do not trigger this). It also requests once before building the model prompt, but that pre-model copy is not used for the post-model maintenance decision. Each kind of bounce happens at most once; once it lets a yield through, the same session is not judged again.
+- **Result annotation**: when `yield`'s data is an open object (no custom `outputSchema`), a delivery that passes gets `completion_judge` attached (verdict, reason, `bounced`), visible to the dispatcher. `bounced` only says whether it was bounced for `NOT_DONE`; todo bounces do not count.
+- **Not judged**: a `yield` carrying an error, an incremental submission; a session branch without `session_init`; an unavailable model, a failed request, a timeout or an unrecognizable answer lets it through directly without annotation. When the plugin is not loaded, does not reply or its wire response fails to parse, it logs a `task-completion-judge skipped a yield` warning and fails open; unavailable is not an empty Todo.
+- State lives only in memory and is cleared at session end; every judgment writes an info log.
 
-### Context 恢复
+### Context recovery
 
-完整模式下，`todo-more`、`ctx-tasklog` 和 `ctx-tool` 组成一条联合链路，不是互不相关的功能：todo 维护权威任务状态，task log 记录成功的修改调用，`ctx` 将记录重放成简短时间线，compact 后再把主会话的 `ctx list` 和 `ctx show` 结果注入。task log 的路径和格式由两边共用的 `_shared/task-log.ts` 定义。task log 是从 todo 派生的行事记录，不取代会话分支上的 todo 记录，重放结果是近似值，见 [ctx-tool](#ctx-tool) 的限制。
+In full mode, `todo-more`, `ctx-tasklog` and `ctx-tool` form one combined chain rather than unrelated features: todo maintains the authoritative task state, the task log records successful change calls, `ctx` replays the record into a short timeline, and after a compact the main session's `ctx list` and `ctx show` results are injected. The task log's path and format are defined by `_shared/task-log.ts`, shared by both sides. The task log is a work record derived from todo; it does not replace the todo records on the session branch, and its replay is approximate, see the limits of [ctx-tool](#ctx-tool).
 
 #### ctx-tool
 
-`ctx-tool/` 注册只读的 `ctx` 工具，把当前会话、subagent registry、transcript、compaction 摘要、sidecar summary 和 task log 拼成一棵上下文树。不修改会话或文件。它还负责主会话 compact 后的注入，见下面的“compact 后注入”。
+`ctx-tool/` registers the read-only `ctx` tool, which assembles the current session, the subagent registry, transcripts, compaction summaries, sidecar summaries and the task log into one context tree. It modifies no session or file. It is also responsible for the main session's post-compact injection, see "After-compact injection" below.
 
-- **`ctx list [<id>] [all=true]`**：深度优先，每行一个 context，含状态、摘要和任务计数（`done/total`，有带原因的 block 时附 blocked）。同级按创建时间排序；默认视图里从隐藏节点提升上来的后代留在原位，不重新排序。
-  - 默认只显示主会话和 `task` / `task:*` 子代理，mentor、discuss、trace 等其他 context 隐藏，其可见后代提升到上一级，并给出隐藏数量；`all=true` 全部列出（advisor 除外）。作为根节点的 context（当前会话或 `<id>` 指定的）总会显示。
-  - 非根节点的后代超过 8 个时折叠成一行，用 `ctx list <id>` 展开。
-- **`ctx show <id>`**：handoff、`## Goal` 加 `## Tasks` 时间线。
-  - `## Goal` 是 task log 里最后一条有效的 goal-set 记录，由日志自己的模型解析，按 Objective/Measure/Done when 三行显示；没有记录时不显示。它是历史事件，不反推当前 Todo，也不记录每次当前状态读取。
-  - 查询当前会话时，handoff 取当前分支最新的 compaction 摘要（没有就显示 `(none)`）；查询其他 context 时优先取相邻的 `.md` sidecar 全文，没有时从 `.json` sidecar 取一行不超过 120 字符的摘要。
-  - 时间线由 task log 里的 todo 操作重放而来，分 `Completed` 和 `Open` 两段，按最后一次被采纳的操作的本地时间排序，每个任务名保留一个状态：`start` / `block` / `unblock` 算 open，`done` 算 completed，`drop` / `rm` 移除，`init` 清空重来；`block` 的原因附在 open 项后面。`init` / `append` 只记数量、不记任务名，所以只建过、还没被单独操作的任务计入 `ctx list` 的总数，但不出现在时间线里。
-  - id 先精确匹配，再忽略大小写匹配；找不到时报错并列出已知 id。
-- **限制**：计数和时间线是从操作日志重建的近似值，不一定等于 `TodoTracker` 的当前状态。按 phase 或不指名的批量操作只记一个目标（phase 名，或第一个完成的任务）；删掉从没被单独操作过的任务、删掉 phase、`drop` 已完成的任务都不会正确改动计数；已 completed 或已移除的任务名，之后的 `start` / `block` / `unblock` 不再生效；没写原因或原因里带 `)` 的 block 不显示为 blocked；任务名按空白归一后比较，名为 `all tasks` 的任务会被当成“全部任务”。
-- **性能**：transcript 的修改时间和大小没变时，复用缓存的会话头；新增或变化的 transcript 读到会话头和 `session_init` 就停，缺其中一条时读到文件末尾。
+- **`ctx list [<id>] [all=true]`**: depth-first, one context per line, with status, summary and task counts (`done/total`, plus blocked when there are blocks with a reason). Siblings are ordered by creation time; in the default view, descendants promoted from hidden nodes stay where they are and are not reordered.
+  - By default only the main session and `task` / `task:*` subagents are shown; other contexts such as mentor, discuss and trace are hidden, their visible descendants promoted one level up with the hidden count given; `all=true` lists everything (except the advisor). A context that is the root (the current session or the one named by `<id>`) is always shown.
+  - When a non-root node has more than 8 descendants, they fold into one line; expand with `ctx list <id>`.
+- **`ctx show <id>`**: the handoff, `## Goal` and a `## Tasks` timeline.
+  - `## Goal` is the last valid goal-set record in the task log, parsed by the log's own model and shown as three lines Objective/Measure/Done when; nothing is shown without a record. It is a historical event; it does not reconstruct the current Todo and does not record every read of the current state.
+  - For the current session, the handoff is the current branch's latest compaction summary (`(none)` when there is none); for other contexts, the full adjacent `.md` sidecar is preferred, falling back to a one-line summary of at most 120 characters from the `.json` sidecar.
+  - The timeline is replayed from the todo operations in the task log, in two sections `Completed` and `Open`, ordered by the local time of the last accepted operation, with one state per task name: `start` / `block` / `unblock` count as open, `done` as completed, `drop` / `rm` remove, `init` clears and starts over; a `block` reason is attached to the open item. `init` / `append` record only counts, not task names, so tasks that were created but never operated on individually count toward `ctx list`'s total but do not appear in the timeline.
+  - An id is matched exactly first, then case-insensitively; when nothing matches it errors and lists the known ids.
+- **Limits**: counts and timeline are approximations rebuilt from the operation log and may differ from `TodoTracker`'s current state. A phase-wide or unnamed batch operation records a single target (the phase name, or the first completed task); deleting tasks never operated on individually, deleting a phase, or `drop` on completed tasks does not adjust the counts correctly; for a task name already completed or removed, a later `start` / `block` / `unblock` no longer takes effect; a block without a reason or with `)` in its reason is not shown as blocked; task names are compared after whitespace normalization, and a task named `all tasks` is taken as "all tasks".
+- **Performance**: when a transcript's mtime and size are unchanged, the cached session header is reused; a new or changed transcript is read only up to the session header and `session_init`, or to the end of the file when either is missing.
 
 #### ctx-tasklog
 
-`ctx-tasklog/` 在每次成功的 `todo` / `goal` 修改操作后，把本地时间、工具名、操作和详情追加到 local root 下的 `task-log/<agent-id>.md`。这里的 `goal` 是 OMP 原生的 goal 模式工具，和 todo 的 goal 无关。`ctx` 只重放其中的 `todo` 事件和 todo goal 行，`goal` 事件记下来但不进计数和时间线。`todo view` 和 `goal get` 不改变状态，因此不记；失败的工具调用也不记，成功但没改变状态的调用（如重复 `done`）照样记。详情随操作而定：`init` 记阶段和任务数，`append` 记阶段和新增项数，`start` / `done` / `block` / `explain` 等记一个目标（指名的任务或 phase；不指名时记第一个完成的任务或 `all tasks`，`block` 附原因），`goal` 记目标。带 goal 的成功 `todo` 调用紧跟着再记一行 `todo-more set: <goal 的 JSON>`，时间相同。这使行事记录绑定到实际成功的工具调用，而不是模型声称做过什么。写失败只记 warning。
+After every successful `todo` / `goal` change, `ctx-tasklog/` appends the local time, tool name, operation and details to `task-log/<agent-id>.md` under the local root. `goal` here is OMP's native goal-mode tool, unrelated to todo's goal. `ctx` replays only the `todo` events and todo goal lines; `goal` events are recorded but do not enter counts or the timeline. `todo view` and `goal get` change no state and are not recorded; failed tool calls are not recorded either, while successful calls that changed nothing (such as a repeated `done`) still are. Details depend on the operation: `init` records phases and task counts, `append` the phase and number of new items, `start` / `done` / `block` / `explain` and the like one target (the named task or phase; without a name, the first completed task or `all tasks`, with the reason for `block`), and `goal` the objective. A successful `todo` call carrying a goal is followed by one more line, `todo-more set: <goal JSON>`, with the same time. This binds the work record to tool calls that actually succeeded rather than to what the model claims it did. A write failure only logs a warning.
 
-#### compact 后注入
+#### After-compact injection
 
-由 `ctx-tool/` 负责（原来的 `ctx-post-compact-hint` 扩展已并入）。主会话 compact 后，以 steer 消息注入一个 `<post-compact-ctx>` 块：`## List` 等同 `ctx list`，`## Current session` 等同对主会话的 `ctx show`，两者基于同一份会话清单；后者包含由 todo task log 重放的简短任务时间线。subagent 的详情仍需自己 `ctx show <id>`。
+Handled by `ctx-tool/` (the former `ctx-post-compact-hint` extension was merged into it). After the main session compacts, it injects a `<post-compact-ctx>` block as a steer message: `## List` equals `ctx list`, `## Current session` equals `ctx show` on the main session, both built from the same session inventory; the latter includes the short task timeline replayed from the todo task log. Subagent details still need their own `ctx show <id>`.
 
-- 监听 `session_compact`，以及没有中止、没有跳过、有结果的 `auto_compaction_end`。
-- 5 秒内只尝试注入一次，按尝试时间算，所以 5 秒内连续两次 compact 只注入一次，失败的尝试也占用这个窗口。
-- subagent 会话不注入；出错只记 warning，这次 compact 就没有注入。
+- It listens to `session_compact`, and to `auto_compaction_end` that was not aborted, not skipped and has a result.
+- It tries to inject at most once in 5 seconds, counted from the attempt, so two compacts within 5 seconds inject once, and a failed attempt also occupies the window.
+- Subagent sessions get no injection; an error only logs a warning, and that compact goes without injection.
 
-### 用户工具
+### User tools
 
 #### doc-polish
 
-`doc-polish/` 注册 `polish_doc` 工具和 `/polish-doc <path…>` 命令，在不改原意的前提下重排、润色 `.md` / `.txt`。它不改源文件，而是把评审写到 `/tmp/doc-polish/<时间戳>-<文件名>/`：`review.md`（逐组“改之前 / 改之后 / 点评”）、原文副本和切分索引 `split.json`。多个文件依次处理。
+`doc-polish/` registers the `polish_doc` tool and the `/polish-doc <path…>` command, which restructure and polish `.md` / `.txt` without changing their meaning. It does not modify the source file; it writes the review to `/tmp/doc-polish/<timestamp>-<file name>/`: `review.md` (groups of "before / after / comment"), a copy of the original and the split index `split.json`. Several files are processed one after another.
 
-**三个子代理**，模型用 `provider/model:effort` 全名，可以给逗号分隔的候选链，用第一个能解析的：
+**Three subagents**, with models given as full `provider/model:effort` names, optionally a comma-separated candidate chain from which the first resolvable one is used:
 
-- 拆分：只有 `read` 和 `write`，自己读原文，写出带起止行号的切分索引和关键词表。
-- 润色：无工具，按正文不超过 5000 码点分批（不截断，超长段单独一批），只带相关的词表，返回润色文本和词表变更。
-- 校验：无工具，逐组判断语义是否保持；没指定模型时用拆分模型。
+- Split: only `read` and `write`; it reads the original itself and writes a split index with start/end line numbers and a glossary.
+- Polish: no tools; batched by body text of at most 5000 code points (no truncation, an overlong paragraph forms its own batch), carrying only the relevant glossary entries; returns the polished text and glossary changes.
+- Check: no tools; judges group by group whether the meaning is preserved; uses the split model when none is given.
 
-**配置**：
+**Config**:
 
-- 优先级：工具参数 > `doc-polish.json` > 当前会话模型（没有当前会话模型时取可用模型列表里的第一个）；`checkModel` 都没给时跟 `splitModel` 用同一个。`doc-polish.json` 整份生效：cwd 下的能解析就用它，否则用扩展目录下的。键为 `splitModel`、`polishModel`、`checkModel`、`concurrency`。
-- 仓库里的 `doc-polish.json` 设了拆分、润色模型和并发 8；没配置时并发默认 6。
-- `/polish-doc` 只接受路径，不能覆盖模型和并发。
+- Precedence: tool parameters > `doc-polish.json` > the current session model (the first model in the available list when there is no current session model); when `checkModel` is not given anywhere it uses the same model as `splitModel`. `doc-polish.json` applies as a whole: the one under cwd when it parses, otherwise the one in the extension directory. Keys are `splitModel`, `polishModel`, `checkModel` and `concurrency`.
+- The repository's `doc-polish.json` sets the split and polish models and concurrency 8; without config, concurrency defaults to 6.
+- `/polish-doc` accepts only paths and cannot override models or concurrency.
 
-**失败处理**：
+**Failure handling**:
 
-- 按上面的优先级选出的三个模型，只要有一个不在可用模型列表里（只查列表，不发请求），调用就直接报错，不做任何处理：不拆分、不派子代理、不写 `/tmp/doc-polish/`。被工具参数覆盖掉的配置项不检查。报错内容列出缺的是哪个角色、哪个模型、来自参数、配置还是当前会话，以及三个模型各管什么。模型调用 `polish_doc` 时是一个错误的工具结果（`isError`）；人用 `/polish-doc` 时弹错误通知。
-- 模型存在但请求失败（不在套餐内、限流、网络错误）时，该子代理最多尝试 3 次，仍失败就报错，内容包含角色、模型全名、失败次数和 provider 原始报错。
-- 润色输出解析不了时不重试：该批保留原文，并在评审里标出。
+- When any of the three models chosen by the precedence above is missing from the available model list (only the list is checked, no request is sent), the call errors immediately and does nothing: no split, no subagents, nothing written to `/tmp/doc-polish/`. Config items overridden by tool parameters are not checked. The error lists which role and which model is missing, whether it came from a parameter, the config or the current session, and what each of the three models does. When the model calls `polish_doc`, it is an error tool result (`isError`); when a person uses `/polish-doc`, it shows an error notification.
+- When a model exists but the request fails (outside the plan, rate-limited, network error), that subagent tries at most 3 times and then errors with the role, the full model name, the number of failures and the provider's original error.
+- Polish output that cannot be parsed is not retried: that batch keeps the original and is flagged in the review.
 
-**流程**：拆分之后都是程序逻辑。润色批次按并发上限（仓库配置 8，默认 6）并行，汇齐后按 `sourceIndices` 用并查集识别段落合并、重新编组，再按同一并发上限校验，最后按原顺序写出评审。子代理禁止加载扩展，不会递归。
+**Flow**: after the split everything is program logic. Polish batches run in parallel up to the concurrency limit (8 in the repository's config, 6 by default); once all are back, paragraph merges are identified through `sourceIndices` with union-find and regrouped, then checked with the same concurrency limit, and the review is written in original order. Subagents may not load extensions, so there is no recursion.
 
-**结果**：模型调用时，评审路径和“仅供参考”的说明作为工具结果返回；人调用 `/polish-doc` 时，同样的内容作为新输入交给主 agent。结果里还附带对接收方的硬性要求：必须亲自处理、不得转交子代理，并且要把每份评审完整读完，不许分页、截断或只看摘要。副作用是写 `/tmp/doc-polish/`，按批消耗所选模型的额度。
+**Result**: when the model calls it, the review path and a "for reference only" note come back as the tool result; when a person runs `/polish-doc`, the same content is handed to the main agent as new input. The result also carries hard requirements for the receiver: handle it personally, never hand it to a subagent, and read every review in full, with no paging, truncation or summary-only reading. Side effects are writes under `/tmp/doc-polish/` and spending the chosen models' quota per batch.
 
 #### bro
 
-`bro/` 是原 `pi-bro` 插件的内置重写。它注册 `/bro` 命令，把一段内容改写成易懂的解释，在 TUI overlay 里流式显示；解释不写进主会话。
+`bro/` is a built-in rewrite of the former `pi-bro` plugin. It registers the `/bro` command, which rewrites content into an easy explanation streamed into a TUI overlay; the explanation is not written into the main session.
 
-|子命令|作用|
+|Subcommand|What it does|
 |---|---|
-|`/bro` 或 `/bro simplify`|等当前会话空闲后，解释最近一条正常结束的 assistant 回复|
-|`/bro simplify <text>`|解释给定的文字|
-|`/bro file <path>`|解释 cwd 内的文件：`.md` / `.markdown` / `.txt` 直接读，`.pdf` / `.docx` / `.pptx` / `.xlsx` / `.epub` 先转成 Markdown。文件上限 10 MiB，取出的文字上限 100,000 字符，扫描版 PDF 不做 OCR|
-|`/bro url <url>`|抓取公网 HTML 页面后解释：只接受 HTTP(S)，拒绝私有地址，最多 5 次重定向，HTTP 抓取 25 秒超时，5 MiB 上限，开标签超过 100,000 个或转成的文字超过 100,000 字符时拒绝，不运行页面 JS|
-|`/bro open`|重新打开上一次的解释|
-|`/bro model` / `effort` / `mode`|设置模型、推理强度、模式（`brief`、`balanced`、`faithful`）；不带参数时在 TUI 里选|
-|`/bro doctor`|检查设置、自定义 prompt、模型可用性和推理强度|
-|`/bro help`|显示说明|
+|`/bro` or `/bro simplify`|Once the current session is idle, explains the latest assistant reply that ended normally|
+|`/bro simplify <text>`|Explains the given text|
+|`/bro file <path>`|Explains a file inside cwd: `.md` / `.markdown` / `.txt` are read directly, `.pdf` / `.docx` / `.pptx` / `.xlsx` / `.epub` are converted to Markdown first. Files up to 10 MiB, extracted text up to 100,000 characters, no OCR for scanned PDFs|
+|`/bro url <url>`|Fetches a public HTML page and explains it: HTTP(S) only, private addresses rejected, at most 5 redirects, a 25-second HTTP fetch timeout and a 5 MiB cap; rejected when there are more than 100,000 opening tags or more than 100,000 characters of converted text; page JS is not run|
+|`/bro open`|Reopens the last explanation|
+|`/bro model` / `effort` / `mode`|Sets the model, reasoning effort and mode (`brief`, `balanced`, `faithful`); without an argument, pick in the TUI|
+|`/bro doctor`|Checks settings, the custom prompt, model availability and reasoning effort|
+|`/bro help`|Shows help|
 
-overlay 里上下键或滚轮滚动，解释完整生成后 `C` 复制到系统剪贴板、`R` 重新生成，`Esc` 关闭并取消进行中的请求。
+In the overlay, up/down keys or the scroll wheel scroll; once the explanation is complete, `C` copies it to the system clipboard and `R` regenerates it; `Esc` closes and cancels a request in progress.
 
-- **设置**：扩展目录（`~/.omp/agent/extensions/bro/`）下的 `bro-settings.json`（`model`、`effort`、`mode`），扩展加载时不存在就创建。默认模型链 `commandcode/deepseek/deepseek-v4.1-flash,google-antigravity/gemini-2.5-flash-lite,commandcode/google/gemini-3.5-flash-lite`，推理强度 `minimal`，模式 `balanced`。环境变量 `PI_BRO_MODEL` 覆盖文件里的模型。这两个文件属于本机，不进仓库。
-- **自定义 prompt**：同目录的 `bro-prompt.md`，必须恰好包含一次 `{{response}}`。存在且有效时完全替代内置模式的 prompt；无效时阻止解释，用 `/bro doctor` 查原因。
-- **辅助会话**：无工具、内存会话、不加载扩展。
+- **Settings**: `bro-settings.json` in the extension directory (`~/.omp/agent/extensions/bro/`) (`model`, `effort`, `mode`), created when the extension loads if missing. The default model chain is `commandcode/deepseek/deepseek-v4.1-flash,google-antigravity/gemini-2.5-flash-lite,commandcode/google/gemini-3.5-flash-lite`, effort `minimal`, mode `balanced`. The environment variable `PI_BRO_MODEL` overrides the model in the file. These two files belong to the machine and do not enter the repository.
+- **Custom prompt**: `bro-prompt.md` in the same directory, which must contain `{{response}}` exactly once. When present and valid it fully replaces the built-in mode prompts; when invalid it blocks explanations, and `/bro doctor` shows why.
+- **Helper session**: no tools, in memory, loads no extensions.
 
 #### input-polish
 
-`input-polish/` 只作用于主会话的交互式 TUI。在输入框按配置的组合键（默认 `Ctrl+Enter`）代替回车，就用模型润色草稿。润色结果不写进输入框，而是在输入框位置的 overlay 里流式显示，输入框始终保留原文。
+`input-polish/` acts only on the main session's interactive TUI. Pressing the configured chord (default `Ctrl+Enter`) in the input box instead of Enter polishes the draft with a model. The polished text is not written into the input box; it streams into an overlay at the input box's position, and the input box always keeps the original.
 
-|按键|效果|
+|Key|Effect|
 |---|---|
-|组合键|开始润色，overlay 里流式显示改写|
-|`Enter`|输入框换成润色稿，同一次回车交给输入框提交，走原有提交路径（历史、图片、流式中的 steer、`input` 钩子）|
-|`Esc` / `Ctrl+C`|中止润色，关闭 overlay，输入框保持原文|
+|The chord|Starts polishing; the rewrite streams into the overlay|
+|`Enter`|Replaces the input box with the polished draft, and the same Enter is handed to the input box to submit through the usual submit path (history, images, steer while streaming, the `input` hook)|
+|`Esc` / `Ctrl+C`|Aborts polishing and closes the overlay; the input box keeps the original|
 
-润色期间和预览期间的按键都由 raw terminal-input 监听先处理：`Enter` 只在润色完成后生效，其余按键（包括重复的组合键）吞掉，不会漏进输入框。`Enter` 接受时先关闭 overlay，让焦点回到输入框，再改输入框文字并放行这次回车。
+During polishing and preview, keys are handled first by a raw terminal-input listener: `Enter` works only after polishing completes, and every other key (including the repeated chord) is swallowed and never leaks into the input box. Accepting with `Enter` first closes the overlay so focus returns to the input box, then changes the input box text and lets this Enter through.
 
-- **配置** `input-polish.json`：`model`、`instruction` 必填。`model` 可带 `:effort` 后缀指定 thinking，不带则关闭；`instruction` 是改写要求，只写在这个文件里，扩展代码里没有默认值，固定的保真规则由扩展另行附加，不受它影响；`key` 可选，取 `ctrl+enter`（默认）或 `alt+enter`。依次尝试 cwd 下和扩展目录下的文件，第一个存在且有效的生效；cwd 下的文件缺失或格式错误（包括缺 `instruction`）时回退到扩展目录下的，两个都无效时扩展不生效。只在会话开始或切换时读取。仓库里的值是 `opencode-go/muse-spark-1.3-contributor:high`、`ctrl+enter`，以及“在不改变原意的前提下，改写到听起来会让人更加想努力、能激动人心，但不要太夸张。”
-- **键位**：`ctrl+enter` 要求终端能把它和回车区分开（Kitty 键盘协议或 modifyOtherKeys）；区分不了的终端里它和回车一样，扩展触发不了，改用 `alt+enter`（macOS 上的 Option+Enter，终端需把 Option 当 Meta）。组合键在草稿会被润色时盖过 OMP 默认的 follow-up 绑定 `ctrl+enter`；overlay 没打开时 `Ctrl+Q` 发送 follow-up 不受影响。
-- **不润色的草稿**：空白草稿，第一个非空白字符是 `/`（斜杠命令）、`!`（bash）、`$`（python）的草稿。这些情况组合键原样交给 OMP。
-- **保真**：prompt 要求保留原语言、代码、路径、标识符和 `[Paste #N …]`、`[Image #N …]` 占位符，不新增也不丢失要求。改写里占位符数量不同或有原文没有的占位符时按失败处理，不应用。
-- **失败**：模型不可用时只弹警告，不打开 overlay。请求失败、输出为空、占位符对不上时，overlay 显示原因，`Esc` 关闭。输入框都不变。
-- **辅助会话**：无工具、内存会话、空 system prompt、不加载扩展、`taskDepth: 1`。每次润色是一次 prompt 调用，OMP 可能自动重试，按实际请求消耗所选模型的额度。
+- **Config** `input-polish.json`: `model` and `instruction` are required. `model` may carry an `:effort` suffix for thinking, which is otherwise off; `instruction` is the rewrite requirement, written only in this file with no default in the extension code, and the fixed fidelity rules the extension adds separately are unaffected by it; `key` is optional, `ctrl+enter` (default) or `alt+enter`. The file under cwd and then the one in the extension directory are tried, and the first that exists and is valid applies; a missing or malformed file under cwd (including a missing `instruction`) falls back to the extension directory's, and when both are invalid the extension does nothing. It is read only at session start or switch. The repository's values are `opencode-go/muse-spark-1.3-contributor:high`, `ctrl+enter`, and "在不改变原意的前提下，改写到听起来会让人更加想努力、能激动人心，但不要太夸张。" (without changing the meaning, rewrite it to sound more motivating and stirring, but not overdone).
+- **Key binding**: `ctrl+enter` needs a terminal that tells it apart from Enter (the Kitty keyboard protocol or modifyOtherKeys); in a terminal that cannot, it is the same as Enter and the extension cannot trigger, so use `alt+enter` (Option+Enter on macOS, with the terminal treating Option as Meta). When the draft would be polished, the chord overrides OMP's default follow-up binding `ctrl+enter`; when the overlay is not open, `Ctrl+Q` still sends a follow-up.
+- **Drafts not polished**: blank drafts, and drafts whose first non-blank character is `/` (slash command), `!` (bash) or `$` (python). In these cases the chord is passed to OMP unchanged.
+- **Fidelity**: the prompt requires keeping the original language, code, paths, identifiers and `[Paste #N …]` / `[Image #N …]` placeholders, adding no requirement and losing none. A rewrite with a different number of placeholders, or with placeholders the original lacks, counts as a failure and is not applied.
+- **Failure**: when the model is unavailable it only warns and does not open the overlay. A failed request, empty output or mismatched placeholders show the reason in the overlay, closed with `Esc`. The input box never changes.
+- **Helper session**: no tools, in memory, an empty system prompt, no extensions, `taskDepth: 1`. Each polish is one prompt call, which OMP may retry automatically, spending the chosen model's quota per actual request.
 
-### 会话迁移
+### Session moves
 
 #### wt-tool
 
-`wt-tool/` 注册 `wt` 和 `wt_remove` 两个工具，让主 agent 自己把会话移进一个新 worktree，用完再删掉它回到主 checkout。OMP 的 `/wt` 只能由人在输入框里用，TUI 里没有删 worktree 的斜杠命令（只有命令行的 `omp worktree add/list/clear`），扩展 API 也没有调用内置斜杠命令的入口。
+`wt-tool/` registers two tools, `wt` and `wt_remove`, so the main agent can move its session into a new worktree itself and, when done, delete it and return to the main checkout. OMP's `/wt` can only be used by a person in the input box, the TUI has no slash command to delete a worktree (only the command-line `omp worktree add/list/clear`), and the extension API has no entry point for invoking built-in slash commands.
 
-- **范围**：只在交互式 TUI 的主会话里启用。两个工具默认不启用（`defaultInactive`），`session_start` / `session_switch` 时才加进主会话的启用列表；subagent、`omp -p`、RPC、ACP 里都没有。headless 模式下人用的 `/wt`、`/move` 走另一条路径（`relocateHeadlessSession`），扩展够不到。
-- **时机**：`/wt`、`/move` 在会话运行时拒绝执行，而工具调用总发生在运行中，所以两个工具都只登记请求，并在结果里要求模型立即结束本轮。两个工具共用一个队列，同一时间只能有一个请求，模型在本轮结束前再登记会报错。
-  1. 一轮真正结束（`agent_end` 且不是 `willContinue`）后开始等待：每 50 毫秒检查一次，会话空闲且没有排队消息时执行一次。自动续写（todo 提醒、重试等）不算结束；新一轮开始就停止等待，等它结束再继续。
-  2. 用户按 Esc 中断的那一轮结束时取消请求：UI 弹提示，模型在下一轮看到“什么都没变”的说明。
-  3. 会话切换或退出时丢弃请求。
-- **执行人的命令时**：请求原样交给输入框提交时用的分发器 `executeBuiltinSlashCommand`，人用这些命令时的行为全部照旧。执行期间临时替换 TUI 实例的 `showError`、`showWarning`、`showStatus`、`present`，照常显示，同时记下文字回传给模型。这次命令不进人的输入历史（上箭头），不清空人正在输入的草稿，不计入斜杠命令使用统计，也不经过其他扩展的 `input` 钩子。
-- **工具说明**：两个工具的说明只讲功能，并要求模型只用这两个工具进出会话的 worktree，不自己跑 `git worktree` 或切目录。
-- **回传**：结果作为 custom 消息（`attribution: "agent"`）发出并开启新一轮。
-- **拿到 TUI 实例**：扩展 API 不暴露 InteractiveMode。TUI 下 `ctx.ui.setEditorComponent` 以 InteractiveMode 实例为 `this` 调用它的原型方法；扩展在这一次同步调用里把原型方法换成只记录 `this` 的函数，调用完立即恢复，编辑器不会真被替换。拿不到实例、会话不符或处于 collab guest 时，工具调用直接返回错误，不登记请求。
+- **Scope**: enabled only in the interactive TUI's main session. Both tools are inactive by default (`defaultInactive`) and are added to the main session's active list only at `session_start` / `session_switch`; subagents, `omp -p`, RPC and ACP never have them. In headless mode the human `/wt` and `/move` go through another path (`relocateHeadlessSession`) that the extension cannot reach.
+- **Timing**: `/wt` and `/move` refuse to run while the session is running, and a tool call always happens mid-run, so both tools only register a request and tell the model in the result to end the turn right away. The two tools share one queue holding one request at a time; registering again before the turn ends is an error.
+  1. Once a turn truly ends (`agent_end` that is not `willContinue`), it starts waiting: every 50 milliseconds it checks, and runs once when the session is idle with no queued messages. Automatic continuations (todo reminders, retries and so on) do not count as an end; when a new turn starts it stops waiting and resumes after that turn ends.
+  2. When the turn ends because the user pressed Esc, the request is cancelled: the UI shows a notice, and the model sees "nothing changed" in its next turn.
+  3. Session switch or exit discards the request.
+- **Running the human command**: the request is handed as is to `executeBuiltinSlashCommand`, the dispatcher the input box uses on submit, so everything behaves exactly as when a person uses these commands. While it runs, the TUI instance's `showError`, `showWarning`, `showStatus` and `present` are temporarily replaced to display as usual while recording the text to hand back to the model. This command does not enter the person's input history (up arrow), does not clear the draft the person is typing, does not count toward slash-command usage statistics, and does not pass through other extensions' `input` hooks.
+- **Tool descriptions**: both describe only what they do, and tell the model to enter and leave the session's worktree only with these two tools, never running `git worktree` or changing directories itself.
+- **Hand-back**: the result is sent as a custom message (`attribution: "agent"`) that starts a new turn.
+- **Getting the TUI instance**: the extension API does not expose InteractiveMode. In the TUI, `ctx.ui.setEditorComponent` calls its prototype method with the InteractiveMode instance as `this`; within that one synchronous call the extension swaps the prototype method for a function that only records `this`, then restores it immediately, so the editor is never actually replaced. When the instance cannot be obtained, the session does not match or it is a collab guest, the tool call returns an error directly and registers no request.
 
-**`wt`**：执行 OMP 内置的 `/wt`，把当前 checkout 分叉成一个新的 linked worktree，带上未提交的改动，再把会话（cwd 和会话文件）移过去。
+**`wt`**: runs OMP's built-in `/wt`, forking the current checkout into a new linked worktree with the uncommitted changes, then moving the session (cwd and session file) there.
 
-- **参数**：`branch`，可省略，省略时由 `/wt` 自己取默认的 `wt/<时间戳>`；`confirm`，只在已经身处 linked worktree 时用。
-- **已经在 worktree 里时先不建**：会话 cwd 已在某个 linked worktree 里时，这次调用什么都不建，只返回当前 worktree 的路径、分支、HEAD、未提交条目数、主 checkout，说明强行再建的后果（从当前 worktree 的 HEAD 开新分支、带走这些未提交改动、当前 worktree 保留；`worktree.cleanSource` 打开时还会把当前 worktree 重置清空），以及一个 `confirm` 值（worktree 路径和分支的哈希）。模型通常就地继续工作；确实要再建时，带上这个 `confirm` 再调用一次才登记。主 checkout 或不在 git 仓库里时直接登记，不需要第二次。
-- **继承的行为**：collab guest 下拒绝；vibe 模式或 `/btw` 进行中时拒绝；`worktree.*` 设置生效，包括 `worktree.cleanSource` 清理源 checkout；移动失败时回滚；显示汇总行；新 worktree 登记为本会话所有，退出时按 `worktree.onExit` 处理。
-- **结果**：会话 cwd 变了算成功，回传原路径、新路径和 `/wt` 的汇总行；失败时回传人看到的报错。
+- **Parameters**: `branch`, optional; when omitted `/wt` takes its own default `wt/<timestamp>`; `confirm`, used only when already inside a linked worktree.
+- **Already in a worktree, nothing is created at first**: when the session cwd is already inside a linked worktree, the call creates nothing and only returns the current worktree's path, branch, HEAD, number of uncommitted entries and the main checkout, explains the consequences of forcing another (a new branch from the current worktree's HEAD, these uncommitted changes carried along, the current worktree kept; with `worktree.cleanSource` on, the current worktree is also reset clean), and gives a `confirm` value (a hash of the worktree path and branch). The model usually keeps working in place; when it truly needs another, it calls again with that `confirm` to register. In the main checkout or outside a git repository it registers directly, without a second call.
+- **Inherited behavior**: refused for a collab guest; refused in vibe mode or while `/btw` is in progress; `worktree.*` settings apply, including `worktree.cleanSource` cleaning the source checkout; rolled back when the move fails; a summary line is shown; the new worktree is registered as owned by this session and handled at exit by `worktree.onExit`.
+- **Result**: a changed session cwd counts as success, handing back the old path, new path and `/wt`'s summary line; on failure, the error the person would see.
 
-**`wt_remove`**：删掉会话所在的 linked worktree，把会话移到仓库的主 checkout。分支一律保留。必须调用两次：
+**`wt_remove`**: deletes the linked worktree the session is in and moves the session to the repository's main checkout. The branch is always kept. It must be called twice:
 
-1. **不带 `confirm`：只检查，不改任何东西。** 报告 worktree、分支、主 checkout 路径，判定（`SAFE` / `UNSAFE` / `BLOCKED`），删除会永久丢掉的内容（已暂存、未暂存、未跟踪的文件，以及被 ignore 的文件和目录；整个被 ignore 的目录只列一行；每类最多列 50 条并给出总数；重命名按新路径计），分支上从主 checkout 的 HEAD 到不了的提交（保留在分支上，只作参考），阻塞项，以及一个 `confirm` 值。
-   - `confirm` 值是 worktree 路径、分支、上游 `planWorktreeExit` 的 worktree 指纹（HEAD、分支 tip、porcelain 状态、每个改动路径的大小和 mtime）和 ignore 条目清单的确定性哈希：状态相同就得到同一个值，不绑定某一次检查。被 ignore 的文件内容变化、主 checkout 的 HEAD 移动都不改变它。检查前后各算一次，不一致就让模型重查。
-   - 阻塞项：本会话正在运行的后台任务；正在运行的 task subagent；cwd 在这个 worktree 里的活着的 task subagent。扩展自己建的内存辅助会话（lang-nag、watchdog reviewer、bro 等）不算。
-   - 主 checkout、detached HEAD、没有提交的 worktree 直接报错。
-2. **模型看过报告、自己决定后，带上 `confirm` 再调用一次。** 这次会重新检查，值不一致（worktree 在检查后有文件增删改、HEAD 或分支动过、ignore 条目清单变了）或有阻塞项就拒绝，不登记。`UNSAFE` 也可以确认，由模型判断那些文件能不能丢。
+1. **Without `confirm`: a check that changes nothing.** It reports the worktree, branch, main checkout path, a verdict (`SAFE` / `UNSAFE` / `BLOCKED`), what deletion would lose permanently (staged, unstaged and untracked files, and ignored files and directories; a wholly ignored directory takes one line; at most 50 per category with the total; renames counted by the new path), commits on the branch unreachable from the main checkout's HEAD (kept on the branch, for reference only), blockers, and a `confirm` value.
+   - The `confirm` value is a deterministic hash of the worktree path, branch, the worktree fingerprint from upstream's `planWorktreeExit` (HEAD, branch tip, porcelain status, size and mtime of each changed path) and the list of ignored entries: the same state gives the same value, not tied to one particular check. Content changes of ignored files and a moving main-checkout HEAD do not change it. It is computed before and after the check, and when they differ the model is asked to check again.
+   - Blockers: background jobs running in this session; running task subagents; live task subagents whose cwd is inside this worktree. In-memory helper sessions the extensions create themselves (lang-nag, the watchdog reviewer, bro and so on) do not count.
+   - The main checkout, a detached HEAD or a worktree without commits errors directly.
+2. **After reading the report and deciding, the model calls again with `confirm`.** This re-checks, and refuses without registering when the value differs (files added, removed or edited in the worktree after the check, HEAD or the branch moved, the ignored-entry list changed) or there are blockers. `UNSAFE` can be confirmed too; the model judges whether those files can be lost.
 
-登记后，会话空闲时依次：再检查一次，不一致或有阻塞就停下，什么都不动；执行人的 `/move <主 checkout>`（继承 `/btw` 门、设置落盘、移动失败回滚）；确认会话 cwd 的真实路径已是主 checkout；再检查一次；最后用 OMP 内置的 VCS 接口强制删除 worktree（`worktreeRemove(path, true)`，删掉目录并清理登记，不调 git 命令行）。回传时分清是哪一步停下的：没移动、移动了但没删、删除出错（附出错阶段和目录是否还在），或已删除（附分支是否还在、移动后重新算出的主 checkout 到不了的提交）。
+Once registered and the session is idle, in order: check again, and stop without touching anything when the value differs or something blocks; run the human `/move <main checkout>` (inheriting the `/btw` gate, persisting settings, rolling back a failed move); confirm that the session cwd's real path is now the main checkout; check once more; finally force-delete the worktree through OMP's built-in VCS interface (`worktreeRemove(path, true)`, deleting the directory and cleaning up its registration without calling the git CLI). The hand-back says exactly where it stopped: not moved, moved but not deleted, deletion error (with the failing stage and whether the directory still exists), or deleted (with whether the branch still exists and the main-checkout-unreachable commits recomputed after the move).
 
-限制：
+Limits:
 
-- 只能发现本进程里的使用者。其他 OMP 进程、终端、编辑器或 `exec_command` 持久会话正在用这个目录时检测不到。
-- `wt` 在本次启动里建的 worktree 被 `wt_remove` 删掉后，InteractiveMode 私有的已拥有列表里还有它。`worktree.onExit` 是 `ask` 或 `remove` 时，退出时会为这个已不存在的 worktree 弹一次确认或报一行删除失败；分支不会因此被删。`keep` 不受影响。
+- It can only find users inside this process. Other OMP processes, terminals, editors or persistent `exec_command` sessions using the directory go undetected.
+- After `wt_remove` deletes a worktree that `wt` created in this run, InteractiveMode's private owned list still contains it. With `worktree.onExit` set to `ask` or `remove`, exit asks once for confirmation or reports one deletion failure for the worktree that no longer exists; the branch is not deleted because of this. `keep` is unaffected.
 
-### 配置同步
+### Config sync
 
 #### omp-config-autoupdate
 
-`omp-config-autoupdate/` 在 OMP 启动时触发[启动时自动更新](#启动时自动更新)，也可以随时手动更新一次。更新规则在更新器 `omp-config-update.ts` 里，这个扩展只负责开关、启动更新器、汇报结果。
+`omp-config-autoupdate/` triggers [automatic update at startup](#automatic-update-at-startup) when OMP starts, and can also update once by hand at any time. The update rules are in the updater `omp-config-update.ts`; this extension only handles the switch, starting the updater and reporting the result.
 
-- **开关**：默认关闭。
+- **Switch**: off by default.
 
-  |命令|作用|
+  |Command|What it does|
   |---|---|
-  |`/omp-config-autoupdate` 或 `… status`|显示当前状态和开关文件路径|
-  |`/omp-config-autoupdate on`|打开，下次启动起生效|
-  |`/omp-config-autoupdate off`|关闭，下次启动起生效|
-  |`/omp-config-autoupdate run`|立即更新一次，显示详细报告；不受开关影响|
+  |`/omp-config-autoupdate` or `… status`|Shows the current state and the switch file path|
+  |`/omp-config-autoupdate on`|Turns it on, from the next start|
+  |`/omp-config-autoupdate off`|Turns it off, from the next start|
+  |`/omp-config-autoupdate run`|Updates once right now and shows the detailed report; ignores the switch|
 
-  开关存在扩展目录下的 `omp-config-autoupdate.json`（`~/.omp/agent/extensions/omp-config-autoupdate/`，`{"enabled": true}`）。文件不存在、内容无效都算关闭；内容无效时启动和 `status` 都会弹 warning。这个文件属于本机：更新器不写它（只在迁移时把根目录的旧开关移过来），`/sync-omp-config` 也不收回，每台机器各自决定开不开。每次启动读一次，所以改了开关从下次启动生效。
-- **时机**：开关打开时，每个进程只运行一次，在主会话（`ctx.agent.kind` 为 `main`）的 `session_start` 里；subagent 和同进程的其他会话不重复运行。关闭时什么都不做，也不提示。
-- **做法**：用 `ctx.setTimeout` 起一个子进程 `bun <扩展目录>/omp-config-update.ts auto --agent-dir <agent 目录> --json`，不阻塞启动，读它最后一行 JSON 结果。更新器就在扩展目录里，随扩展一起安装；agent 目录取 `getAgentDir()`，跟随 profile 和 `PI_CODING_AGENT_DIR`。更新放在子进程里，是因为扩展和 OMP 在同一个进程、没有隔离，更新器出任何问题都不能拖垮 OMP。会话先结束时子进程继续跑完：写入是原子的，锁也由它自己释放。
-- **通知**：见[启动时自动更新](#启动时自动更新)。
-- **手动更新**：`run` 当场起同一个子进程，规则与启动时完全相同：从 GitHub 默认分支拉取，提交与 `.omp-config-applied` 不同才应用，拉取失败时不更新，锁被占用就跳过。开关关着也能用。跑完等会话空闲，把报告作为一条只显示、不触发模型回合的消息写进对话。真正应用了的运行，报告包括结果、agent 目录、“上次应用的提交 → 新提交”、是否需要重启，以及逐条列出的错误、写入、删除、跳过（含原因）、补装和仍缺失的插件、说明。已是最新、拉取失败（附 git 报错）、锁被占用、找不到 `bun` 或更新器时，报告只说明原因。报告只覆盖这一次运行，不回放启动时那次更新。这条消息会进入会话上下文，模型之后也能看到。
-- **失败**：启动时找不到 `bun`、更新器文件不存在、子进程没给出结果、更新失败，都只弹 warning 并写日志，不影响会话；更新器文件不存在时，提示先执行一次 `/update-omp`。应用成功但写 `.omp-config-applied` 失败时只报这个错误，下次启动会重新应用。`run` 遇到同样的情况时，原因写在报告里。
+  The switch lives in `omp-config-autoupdate.json` in the extension directory (`~/.omp/agent/extensions/omp-config-autoupdate/`, `{"enabled": true}`). A missing file or invalid content counts as off; invalid content shows a warning at startup and in `status`. The file belongs to the machine: the updater does not write it (it only moves an old switch from the agent root during relocation) and `/sync-omp-config` does not bring it back, so each machine decides for itself. It is read once per start, so a changed switch applies from the next start.
+- **Timing**: with the switch on, it runs once per process, in the main session's (`ctx.agent.kind` is `main`) `session_start`; subagents and other sessions in the same process do not run it again. With the switch off it does nothing and shows nothing.
+- **How**: through `ctx.setTimeout` it starts a child process `bun <extension dir>/omp-config-update.ts auto --agent-dir <agent dir> --json` without blocking startup and reads its last JSON line as the result. The updater sits in the extension directory and is installed with the extension; the agent directory is `getAgentDir()`, following the profile and `PI_CODING_AGENT_DIR`. The update runs in a child process because the extension shares OMP's process without isolation, and no updater problem may take OMP down. If the session ends first, the child process runs to completion: writes are atomic and it releases the lock itself.
+- **Notifications**: see [automatic update at startup](#automatic-update-at-startup).
+- **Manual update**: `run` starts the same child process on the spot, with rules identical to startup: fetch from the GitHub default branch, apply only when the commit differs from `.omp-config-applied`, no update when the fetch fails, skip when the lock is held. It works with the switch off too. When it finishes and the session is idle, the report is written into the conversation as a display-only message that starts no model turn. For a run that actually applied something, the report covers the result, the agent directory, "last applied commit → new commit", whether a restart is needed, and itemized errors, writes, deletions, skips (with reasons), installed and still-missing plugins, and notes. Up to date, a failed fetch (with the git error), a held lock, or a missing `bun` or updater are reported with the reason only. The report covers only this run and does not replay the update at startup. The message enters the session context, so the model can see it later too.
+- **Failure**: at startup, a missing `bun`, a missing updater file, a child process that gives no result or a failed update only show a warning and log, without affecting the session; for a missing updater file it suggests running `/update-omp` once first. When the apply succeeds but writing `.omp-config-applied` fails, only that error is reported and the next start applies again. When `run` hits the same situations, the reason goes into the report.
 
-### 兼容性修复
+### Compatibility fixes
 
 #### commandcode-model-spec
 
-`commandcode-model-spec/` 修复用 `--model` 指定 commandcode 模型时选错 transport 或 provider、认证失败的问题。不带 `--model` 时走插件的实时注册，没有问题。
+`commandcode-model-spec/` fixes the wrong transport or provider, and the resulting auth failure, when `--model` names a commandcode model. Without `--model`, the plugin's live registration is used and there is no problem.
 
-- **两种失败**：
-  - 缓存遮蔽：宿主自己也会发现 commandcode 模型，`models.db` 的 `model_cache` 把它们记成 `anthropic-messages`、`openai-responses` 或 `openai-completions`；`--model` 解析时信任缓存，走宿主 transport，而不是插件的 `commandcode-custom`，认证失败。
-  - 名称冲突：`google/gemini-3.5-flash-lite` 这类 id 被解析到同名的内置 provider，而这个 provider 没有凭据，报“No API key found”。只有该 provider/id 原样出现在 `ctx.models.list()`（可用的聊天模型，含不需要 key 的，不含被禁用的 provider）里时才视为内置模型可用、不处理。
-- **做法**：只在 `session_start` 检查一次，当前模型的 `api` 不是 `commandcode-custom` 时，把它重新选回插件的同名模型，成功时提示一行（交互模式用 UI 通知，headless 写 stderr）。不注册 provider，不改默认模型和缓存。插件自己现在也在 `session_start` 做类似的修复，两者不冲突。
-- **限制**：判断依据是 agent 目录下的 `commandcode-models.json`（可用 `COMMANDCODE_MODELS_CACHE` 改路径）。这个文件不迁移；扩展在第一次 `session_start` 时读它一次并缓存，读不到也缓存为空。插件在启动时等待首次初始化，新机器上通常同一次启动就能写出它，没写出来时要重启 OMP。这是绕过：`omp models refresh commandcode` 会重写缓存，但不保证改掉这些行。
+- **Two failures**:
+  - Cache shadowing: the host also discovers commandcode models itself, and the `model_cache` in `models.db` records them as `anthropic-messages`, `openai-responses` or `openai-completions`; resolving `--model` trusts the cache and uses the host transport instead of the plugin's `commandcode-custom`, so auth fails.
+  - Name collision: an id like `google/gemini-3.5-flash-lite` resolves to the same-named built-in provider, which has no credentials, reporting "No API key found". Only when that provider/id appears verbatim in `ctx.models.list()` (available chat models, including ones that need no key, excluding disabled providers) is the built-in model treated as available and left alone.
+- **How**: it checks once at `session_start`; when the current model's `api` is not `commandcode-custom`, it reselects the plugin's same-named model, and on success shows one line (a UI notification in interactive mode, stderr in headless mode). It registers no provider and changes neither the default model nor the cache. The plugin now does a similar fix at `session_start` itself; the two do not conflict.
+- **Limits**: the decision relies on `commandcode-models.json` in the agent directory (the path can be changed with `COMMANDCODE_MODELS_CACHE`). The file is not migrated; the extension reads it once at the first `session_start` and caches it, caching empty when it cannot be read. The plugin waits for its first initialization at startup, so on a new machine it usually writes the file in the same start; when it does not, restart OMP. This is a workaround: `omp models refresh commandcode` rewrites the cache but is not guaranteed to fix those rows.
 
+## Maintenance notes
 
-## 维护须知
-
-- **配置检查（CI）**：push 到 `master`、每个 PR、每天定时和手动触发时，在一次性环境里装最新 omp、用更新器应用仓库配置，再用免费模型分别跑一次完整模式和轻量模式的真实 session，收集更新器和会话的诊断以及 omp 的 warn/error 日志（安装成功时的输出不收集），去重后逐个报告；宿主自身的已知噪音单独列出、不计入。每个故障带一个 hash 标识（类别加归一化文字的 SHA-256 前 12 位），类别和归一化文字不变时跨运行稳定。检查本身不拦截合并，是否阻塞取决于 GitHub 的分支保护设置。本地用 `bun ci/check.ts` 复现。设计、判据和覆盖边界见 `ci/README.md`。检查的 prompt 不要求调用工具或派 subagent，但也不禁用、不断言它们，所以扩展行为的改动仍要用 `/update-omp` 应用工作区、重启 OMP，实际触发对应的工具、命令或钩子，看输出和副作用。改动合并前，开了自动更新的机器在根会话启动或执行 `run` 时，如果拉取成功、默认分支提交与已应用的不同，会把本机改动覆盖回去。
-- **增删托管项时同时改三处**：更新器 `omp-config-update.ts` 的 `managedPlain` / `STRUCTURED`（扩展目录里新加的非 `.ts` 文件默认属于本机，要归仓库就得加进去），`.omp/commands/sync-omp-config.md` 的同步范围，以及本文件。更新器的 `applySnapshot(options)` 接口要保持兼容：已安装的旧更新器会导入新提交里的它。更新器的位置（`UPDATER_REL`）也写死在每台机器已安装的旧更新器里，挪动它会让这些机器的自动更新失败，直到各自手动执行一次 `/update-omp`。
-- **写扩展代码**：先 `bun install`，交付前 `bun run check`，规范见[目录结构与开发规范](#目录结构与开发规范)。新引入的 `@oh-my-pi/*` 子路径要在没有 `node_modules` 的目录里真实加载一次。
-- **不要在 `omp-config-update.ts` 里写出 Otty 标记的字面量**：标记检查是“文件任意位置含有”，这个文件自己也是托管文件，写出来就会被当成应用托管文件，从此跳过更新。
-- **扩展建的辅助会话必须传 `taskDepth: 1`。** 一次性的模型调用统一走 `_shared/helper-session.ts` 的 `runHelperPrompt`，它已经传了（`bro`、`doc-polish`、`input-polish`、`lang-nag`、`watchdog-agent` 的聊天 reviewer 都用它）；自己建会话的只有 `fork-task` 的 shake，也传了。不传的话 SDK 把它当主会话，`dispose()` 时会销毁全局 `AgentLifecycleManager`，所有空闲 subagent 变成 `Unknown agent`，无法再续聊。`lang-nag` 几乎每轮都建辅助会话，漏传会让 subagent 很快失联。只调用 `completeSimple` 的扩展（`task-split-check`、`task-completion-judge`）不建会话，不涉及这条。
-- **升级 OMP 后**，在真实 TUI 里重新验证 [fork-task](#fork-task)、独立 [todo-more](#todo-more) 插件、[user-prompt-inject](#user-prompt-inject)、[turn-judge](#turn-judge)、[task-completion-judge](#task-completion-judge)、[ctx-tool](#ctx-tool)（含 compact 后注入）、[ctx-tasklog](#ctx-tasklog)、[bro](#bro) 和 [wt-tool](#wt-tool)，它们依赖 OMP 内部实现（registry、会话条目、tool/session hooks、宿主投影、TUI 与 worktree dispatcher 等）。todo-more 的 `@upstream` 对照和实现更新在其插件仓库完成；配置仓库验证只读协议与消费者结果，不收回插件源码。
-- **升级 OMP 后**，主会话开始模型回合时（`before_agent_start`）如果弹出 `system-prompt-replace: … found no target` 警告，就按新的模板文字改 `system-prompt-replace.json`；上游删掉了规则要改写的那句话时，删掉这条规则。同时确认 [system-prompt-replace](#system-prompt-replace) 依赖的扩展加载顺序没变。
-- **扩展注入用户消息时写 `attribution: "agent"`。** 不写就默认 `user`，[user-prompt-inject](#user-prompt-inject) 会把它当成用户原话注入 mentor 和 discussant。
-- **改 agent 定义前**读 `agent/agents/README.txt`；目录里的笔记用 `.txt`，不要用 `.md`。
+- **The configuration check (CI)**: on pushes to `master`, every PR, a daily schedule and manual dispatch, it installs the latest omp in a throwaway environment, applies the repository config with the updater, runs one real session each in full and light mode on a free model, collects updater and session diagnostics and omp's warn/error logs (install output is not collected when the install succeeds), and reports each one deduplicated; the host's own known noise is listed separately and not counted. Every fault carries a hash id (the first 12 characters of the SHA-256 of its kind plus normalized text), stable across runs while the kind and normalized text stay the same. The check itself does not block merges; whether it does depends on GitHub branch protection. Reproduce locally with `bun ci/check.ts`. Design, criteria and coverage boundary are in `ci/README.md`. The check's prompt asks for no tool calls or subagents but neither disables nor asserts them, so changes to extension behavior still need `/update-omp` to apply the working tree, an OMP restart, and actually triggering the matching tool, command or hook to observe output and side effects. Before a change is merged, a machine with automatic update on overwrites the machine's changes when a root session starts or `run` is executed, if the fetch succeeds and the default branch's commit differs from the applied one.
+- **Adding or removing a managed item changes three places at once**: `managedPlain` / `STRUCTURED` in the updater `omp-config-update.ts` (a new non-`.ts` file in an extension directory belongs to the machine by default and must be added there to belong to the repository), the sync range in `.omp/commands/sync-omp-config.md`, and this file together with `README.zh-CN.md`. The updater's `applySnapshot(options)` interface must stay compatible: installed older updaters import it from new commits. The updater's location (`UPDATER_REL`) is also hard-coded in every machine's installed older updater, and moving it makes those machines' automatic updates fail until each runs `/update-omp` by hand once.
+- **Writing extension code**: run `bun install` first and `bun run check` before delivering; conventions in [Layout and development conventions](#layout-and-development-conventions). A newly introduced `@oh-my-pi/*` subpath must be loaded for real once from a directory without `node_modules`.
+- **Never write the Otty marker literal in `omp-config-update.ts`**: the marker check is "contained anywhere in the file", and this file is itself a managed file, so writing it would mark the updater as app-managed and skip it in every later update.
+- **Helper sessions an extension creates must pass `taskDepth: 1`.** One-shot model calls all go through `runHelperPrompt` in `_shared/helper-session.ts`, which already passes it (`bro`, `doc-polish`, `input-polish`, `lang-nag` and `watchdog-agent`'s chat reviewer all use it); the only extension creating a session itself is `fork-task`'s shake, which passes it too. Without it the SDK treats the session as a main session, and `dispose()` tears down the global `AgentLifecycleManager`, turning every idle subagent into `Unknown agent` that can no longer be continued. `lang-nag` creates a helper session almost every turn, so missing it would cut subagents off quickly. Extensions that only call `completeSimple` (`task-split-check`, `task-completion-judge`) create no session and are not affected.
+- **After an OMP upgrade**, re-verify [fork-task](#fork-task), the independent [todo-more](#todo-more) plugin, [user-prompt-inject](#user-prompt-inject), [turn-judge](#turn-judge), [task-completion-judge](#task-completion-judge), [ctx-tool](#ctx-tool) (including after-compact injection), [ctx-tasklog](#ctx-tasklog), [bro](#bro) and [wt-tool](#wt-tool) in a real TUI; they depend on OMP internals (registry, session entries, tool/session hooks, host projections, the TUI and worktree dispatchers and so on). todo-more's `@upstream` comparisons and implementation updates happen in its plugin repository; this config repository verifies the read protocol and consumer results and never brings plugin source back.
+- **After an OMP upgrade**, if a `system-prompt-replace: … found no target` warning appears when the main session starts a model turn (`before_agent_start`), update `system-prompt-replace.json` to the new template text; when upstream deleted the sentence a rule rewrites, delete the rule. Also confirm that the extension load order [system-prompt-replace](#system-prompt-replace) relies on has not changed.
+- **Extensions that inject user messages set `attribution: "agent"`.** Otherwise it defaults to `user`, and [user-prompt-inject](#user-prompt-inject) injects it into the mentor and discussants as the user's own words.
+- **Before changing agent definitions** read `agent/agents/README.txt`; notes in that directory use `.txt`, never `.md`.
+- **This README exists in English (`README.md`, the default) and Simplified Chinese (`README.zh-CN.md`).** Change both together, section for section, so they never disagree.
