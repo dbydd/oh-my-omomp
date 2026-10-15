@@ -316,8 +316,10 @@ export default function ctxTaskLog(pi: ExtensionAPI): void {
 						safeWarn(pi, new Error(`Invalid todo-more changes: ${changes.error.message}`));
 						return;
 					}
+					const lines = formatTodoMoreChanges(changes.data, timestamp);
+					if (lines === "") return;
 					const target = resolveTaskLogPath(ctx);
-					await queueTaskLog(pi, target.path, target.agentId, formatTodoMoreChanges(changes.data, timestamp));
+					await queueTaskLog(pi, target.path, target.agentId, lines);
 					return;
 				}
 				const details = parseTodoDetails(event.details);
