@@ -12,7 +12,7 @@ description: 把本机 ~/.omp/agent 配置和 pi-bansos 状态同步进本仓库
 
 - 根目录：`config.yml`、`SYSTEM_TEMPLATE.md`、`APPEND_SYSTEM.md`、`thinking-translator.json`、`config-light.yml`、`APPEND_SYSTEM_LIGHT.md`、`omp-light.ts`，以及 `agents/` 整个目录。
 - 扩展目录里只有这些属于仓库：`extensions/<名字>/*.ts`（含 `extensions/_shared/*.ts` 和更新器 `extensions/omp-config-autoupdate/omp-config-update.ts`）、`extensions-last/<名字>/*.ts`、`extensions/user-prompt-inject/PROMPT-INJECT-*.md`、`extensions/turn-judge/TURN-JUDGE-*.md`、`extensions/tool-policy-nag/INTENT-*.md`，以及结构化配置 `extensions/lang-nag/lang-nag.json`、`extensions/input-polish/input-polish.json`、`extensions/tool-policy-nag/tool-policy-nag.json`、`extensions-last/system-prompt-replace/system-prompt-replace.json`。
-- 扩展目录里的其他文件属于本机，不收回：`extensions/doc-polish/doc-polish.json`、`extensions/bro/bro-settings.json` 和 `bro-prompt.md`、`extensions/omp-config-autoupdate/omp-config-autoupdate.json`、`extensions/append-system-model/APPEND_SYSTEM_MODEL.md`、`extensions/watchdog-agent/WATCHDOG-*.md`，以及仓库没有的同名模式模板。
+- 扩展目录里的其他文件属于本机，不收回：`extensions/doc-polish/doc-polish.json`、`extensions/bro/bro-settings.json` 和 `bro-prompt.md`、`extensions/omp-config-autoupdate/omp-config-autoupdate.json`、`extensions/append-system-model/APPEND_SYSTEM_MODEL.md`、`extensions/model-compaction/model-compaction.json`、`extensions/watchdog-agent/WATCHDOG-*.md`，以及仓库没有的同名模式模板。
 - 已退休的 Todo 源码不收回，即使旧机器仍有文件，也不进入“仓库缺失/不同/已删除”候选：`extensions/todo-more/index.ts`、`tool.ts`、`render.ts`、`reminders.ts`、`planning.ts`（后四个同属 `extensions/todo-more/`），`extensions/_shared/todo-more.ts`、`extensions/subagent-todo.ts`、`extensions/subagent-todo/index.ts`。独立插件的安装只按第 3 步处理，不复制其 package 或内部 reader。
 
 本机 `settings.json` 不在范围内：`config.yml` 存在时 OMP 不再把它的 `extensions` 当扩展包根目录，但其中的 TS/JS 扩展模块条目照样加载，属于本机。

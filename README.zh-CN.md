@@ -21,6 +21,7 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 |`agent/SYSTEM_TEMPLATE.md`|OMP 内置基础 system prompt 的 Handlebars 覆盖副本；工具、skill、规则和运行时字段仍由 OMP 实时渲染|`~/.omp/agent/`|
 |`agent/APPEND_SYSTEM.md`|完整模式的追加系统提示词|`~/.omp/agent/`|
 |`agent/extensions/append-system-model/APPEND_SYSTEM_MODEL.md`|[append-system-model](#append-system-model) 按模型追加的系统提示词；属于本机，仓库不带|`~/.omp/agent/extensions/append-system-model/`|
+|`agent/extensions/model-compaction/model-compaction.json`|[model-compaction](#model-compaction) 按模型设定的自动 compact 触发点；属于本机，仓库不带|`~/.omp/agent/extensions/model-compaction/`|
 |`agent/config-light.yml`、`agent/APPEND_SYSTEM_LIGHT.md`、`agent/omp-light.ts`|轻量模式的配置覆盖、追加提示词（目前为空）、入口源码|`~/.omp/agent/`|
 |`agent/extensions/omp-config-autoupdate/omp-config-update.ts`|仓库 → 本机的更新器，[启动时自动更新](#启动时自动更新)和 `/update-omp` 共用；放在启动它的扩展目录里，是独立脚本，不是扩展模块|`~/.omp/agent/extensions/omp-config-autoupdate/`|
 |`agent/thinking-translator.json`|[思考翻译](#思考翻译)插件的有序候选链与最低推理强度配置|`~/.omp/agent/`|
@@ -131,7 +132,7 @@ flowchart LR
 ### 两个方向共同的规则
 
 - **结构化配置按字段处理。** `config.yml`、`thinking-translator.json`、`extensions-last/system-prompt-replace/system-prompt-replace.json`、`extensions/lang-nag/lang-nag.json`、`extensions/input-polish/input-polish.json`、`extensions/tool-policy-nag/tool-policy-nag.json`、`pi-bansos-relay-state.json` 都按字段比对，只改有差异的字段。`/sync-omp-config` 写仓库时只改这些行，不整文件覆盖，也不重新序列化。仓库 → 本机由更新器写入：合并结果与仓库文件完全一致时原样复制仓库文件，否则重新序列化整个文件（键的顺序不变，格式可能与原文件不同）。两端都必须能解析：YAML 用 `Bun.YAML.parse`，JSON 用 `JSON.parse`。
-- **扩展目录里只有代码和仓库带的模板归仓库**：`extensions/<名字>/*.ts`、`extensions-last/<名字>/*.ts`、`extensions/user-prompt-inject/PROMPT-INJECT-*.md`、`extensions/turn-judge/TURN-JUDGE-*.md`，加上上面的结构化配置。同一目录里的其他文件属于本机，两个方向都不碰：`bro-settings.json`、`bro-prompt.md`、`omp-config-autoupdate.json`、`doc-polish.json`、`APPEND_SYSTEM_MODEL.md`、`WATCHDOG-*.md`，以及本机自己写的模板。Todo 的八个退休路径不再收回或作为普通模块写入，范围见 [todo-more](#todo-more)。
+- **扩展目录里只有代码和仓库带的模板归仓库**：`extensions/<名字>/*.ts`、`extensions-last/<名字>/*.ts`、`extensions/user-prompt-inject/PROMPT-INJECT-*.md`、`extensions/turn-judge/TURN-JUDGE-*.md`，加上上面的结构化配置。同一目录里的其他文件属于本机，两个方向都不碰：`bro-settings.json`、`bro-prompt.md`、`omp-config-autoupdate.json`、`doc-polish.json`、`APPEND_SYSTEM_MODEL.md`、`model-compaction.json`、`WATCHDOG-*.md`，以及本机自己写的模板。Todo 的八个退休路径不再收回或作为普通模块写入，范围见 [todo-more](#todo-more)。
 - **`config.yml` 的本机字段两个方向都不动**，例如 `modelRoles`、`theme`、`compaction.thresholdTokens`，完整列表是更新器 `omp-config-update.ts` 的 `LOCAL_CONFIG_FIELDS`。
 - **`config.yml` 的 `extensions` 由仓库和本机共用**（更新器的 `MACHINE_LIST_FIELDS`）：仓库列表里的条目归仓库，仓库列表里没有的条目（如 `~/.claude`）归本机。更新器把本机条目留在仓库条目前面，所以 `extensions-last/` 下的扩展仍是最后一项；`/sync-omp-config` 不把本机条目写回仓库。仓库删掉自己的条目时，自动更新照常删掉它（见下面的“删除”）。
 - **本机的 `settings.json` 不迁移。** OMP 对它的 `extensions` 分两种处理：当作扩展包根目录（从中加载 skills、rules、commands 等）时，本机有 `config.yml` 就不读它；当作 TS/JS 扩展模块时，不管有没有 `config.yml` 都照样加载其中的条目。
@@ -306,7 +307,7 @@ git status --short
 
 - 用 `APPEND_SYSTEM_LIGHT.md` 代替完整的追加提示词。
 - 按 `config-light.yml` 禁用 13 个行为扩展：`ctx-tasklog`、`ctx-tool`、`doc-polish`、`fork-task`、`isolation-nudge`、`lang-nag`、`task-completion-judge`、`task-split-check`、`tool-policy-nag`、`turn-judge`、`user-prompt-inject`、`watchdog-agent`、`wt-tool`。
-- 未禁用的本地扩展照常加载：`append-system-model`、`bro`、`input-polish`、`repo-rules`、[response-reading-coverage](#response-reading-coverage)、[omp-config-autoupdate](#omp-config-autoupdate)，以及兼容性修复 `commandcode-model-spec`。独立 [todo-more](#todo-more) 与其他插件从普通 discovery 加载，无须改 launcher 或额外 `-e`。`APPEND_SYSTEM_MODEL.md` 因此照样注入；自动更新开着时 `omp-light` 也会更新。原生 todo 同样关着。
+- 未禁用的本地扩展照常加载：`append-system-model`、[model-compaction](#model-compaction)、`bro`、`input-polish`、`repo-rules`、[response-reading-coverage](#response-reading-coverage)、[omp-config-autoupdate](#omp-config-autoupdate)，以及兼容性修复 `commandcode-model-spec`。独立 [todo-more](#todo-more) 与其他插件从普通 discovery 加载，无须改 launcher 或额外 `-e`。`APPEND_SYSTEM_MODEL.md` 因此照样注入，`model-compaction.json` 照样设定 compact 触发点；自动更新开着时 `omp-light` 也会更新。原生 todo 同样关着。
 - `config-light.yml` 把 `extensions` 覆盖成空列表，去掉 `config.yml` 末项的 [system-prompt-replace](#system-prompt-replace)。`disabledExtensions` 按模块名过滤，但管不到在 `extensions` 或 `-e` 里直接写成文件路径的扩展（写成目录的，目录里发现的模块仍按名字过滤），所以只能这样排除。覆盖会连带去掉本机条目（如 `~/.claude`），所以 `omp-light` 读本机 `config.yml`，把 `extensions` 里路径不含 `/extensions-last/` 的条目逐个用 `-e` 传给 `omp`；`-e` 是另一条加载通道，不受这个覆盖影响。`extensions-last/` 下的扩展因此只属于完整模式（按路径字符串判断，相对路径或目录写法不会被认出来）。
 - 插件、rules、skills、上下文文件，以及 model、thinking、profile、auth、session 设置都不变。被禁用扩展注册的工具（`ctx`、`polish_doc`、`fork_task`、`wt`、`wt_remove`）在轻量模式下不存在。
 - `omp-light` 从 agent 目录读 `config-light.yml` 和 `APPEND_SYSTEM_LIGHT.md`：设置了 `PI_CODING_AGENT_DIR` 时用它，否则用 `~/.omp/agent`。缺任何一个就直接退出，不回退到别的目录。
@@ -400,6 +401,7 @@ subagent 分三类：`task:*` 执行，`discuss:*` 只读讨论，`mentor:defaul
 |[lang-nag](#lang-nag)|回复语言不对时，在下一条输入前加提醒|否|
 |[repo-rules](#repo-rules)|补读 `.claude/rules` 等 repo 级 rule 目录|是|
 |[append-system-model](#append-system-model)|按模型 / 提供商正则追加系统提示词|是|
+|[model-compaction](#model-compaction)|按模型 / 提供商正则为每个模型设定固定的自动 compact 触发点|是|
 |[system-prompt-replace](#system-prompt-replace)|在按路径加载的扩展里最后执行，按 JSON 规则替换 system prompt 文字，用来改写内置工具说明|否|
 |[fork-task](#fork-task)|注册 `fork_task`：带着当前对话副本派 subagent|否|
 |[isolation-nudge](#isolation-nudge)|多个写入者共用目录时拦一次|否|
@@ -760,6 +762,36 @@ model: "(gpt-5|o3)"
 - **时机**：每次 `before_agent_start`，主会话和每个 subagent 都按各自的模型匹配。每条 prompt 重新读文件，所以改文件、`/model` 切换都从下一条 prompt 生效，不用重启。一轮内 auto-retry 换了模型时，沿用这一轮开始时选中的块。
 - **失败**：文件不存在时静默不注入；读不了文件时每次都记 warning（不带行号）；格式错误（未知字段、正则无效、正文为空、`---` 没闭合等）时不注入，按行号记 warning，同一错误连续出现只记一次，错误变了或中间读成功过就再记。都不阻塞 prompt。
 
+#### model-compaction
+
+`model-compaction/` 按模型设定自动 compact 的触发点。OMP 的 `compaction.thresholdTokens` / `thresholdPercent` 对所有模型一视同仁，它自己的按模型映射 `compaction.modelThresholds` 只接受精确的 `provider/id` 或以 `*` 结尾的前缀作键。这个扩展像 [append-system-model](#append-system-model) 一样按 model / provider 正则匹配模型，把结果交给这张原生映射；什么时候 compact 仍由 OMP 决定。
+
+**文件**：扩展目录（`~/.omp/agent/extensions/model-compaction/`，随 profile 变化）下的 `model-compaction.json`。这个文件属于本机，仓库不带，也不读 cwd 或项目里的副本：
+
+```json
+{
+  "rules": [
+    { "provider": "^anthropic$", "model": "opus", "thresholdTokens": 150000 },
+    { "model": "(gpt-5|o3)", "thresholdTokens": 120000 },
+    { "model": ".*", "thresholdTokens": 90000 }
+  ]
+}
+```
+
+|字段|说明|
+|---|---|
+|`model`|JavaScript 正则，匹配模型 id（如 `claude-opus-5-5`）|
+|`provider`|JavaScript 正则，匹配提供商 id（如 `anthropic`）|
+|`thresholdTokens`|必填的正整数：匹配到的模型在上下文达到多少 token 时触发自动 compact|
+
+- **匹配**：每条规则写 `model`、`provider` 或两者，都是非空正则；写了的字段都匹配才生效。正则不带 flag，也不自动锚定。没有隐含的兜底规则，要匹配所有模型就写 `"model": ".*"`。每个模型取文件顺序中第一条匹配的规则。
+- **数字的含义**：`thresholdTokens` 是触发点，不是输出上限、上下文窗口，也不是 compact 之后的大小。对匹配到的模型，它变成原生固定条目 `"<provider>/<id>": "f<N>"`，替代该模型的 `compaction.thresholdTokens` / `thresholdPercent`。触发点低于模型窗口时按原值生效；达到或超过窗口时，OMP 把它压到窗口以下。`compaction.enabled: false` 仍然关闭自动 compact，`compaction.modelThresholdsEnabled: false` 也像对待任何原生模型条目一样关掉这些条目。
+- **上下文窗口**：从不改动。原生 `compaction.modelThresholds` 条目能把带 extended 上下文档位的模型切到那一档。会切换这类模型档位的规则，对该模型拒绝并记 warning：`extendedContext` 关着时 N 达到或超过 standard 窗口；或者是用户自己的原生条目让模型处在 extended 档，而 N 低于 standard 窗口。其他模型照样应用这条规则。
+- **优先级**：没有规则匹配的模型保持原生策略，包括用户自己的 `compaction.modelThresholds` 条目。匹配到的模型，生成的精确键优先于用户给该模型写的条目。`task.agentCompactionThresholdOverrides` 对它指定的 agent 仍然优先，因为原生会在那里关掉模型条目。
+- **时机**：只有主会话的 `before_agent_start` 读这个文件，每条 prompt 都读；它把规则展开到 `ctx.models.list()` 里的每个模型，写进主会话 `compaction.modelThresholds` 的运行时设置层。不写 `config.yml`，也不写任何其他文件。OMP 每次判断是否 compact 时按当前模型取条目，所以 `/model` 切换、重试回退和 subagent（其设置实时读主会话的设置）都用各自模型的触发点。改文件、之后才可用的模型，都从主会话的下一条 prompt 生效；subagent 的 prompt 不读文件、不写任何东西，看到的是主会话最近一次写入的条目。
+- **失败**：文件不存在时静默不应用规则。JSON 无效、未知键（所以 `modle` 这类拼写错误不会放宽规则）、两种正则都没写的规则、空正则或无效正则、阈值不是正整数，都会让整个文件被拒绝：从这条 prompt 起不应用任何规则，之前写入的条目被移除，并记一条写明路径和字段的 warning，例如 `rules.0.model: must be a valid JavaScript regex (was "(")`。warning 写入日志，会话有 UI 时同时弹通知；同一条 warning 不重复，直到内容变化或中间读成功过一次。都不阻塞 prompt。
+- **共存**：其他来源事先设置的 `compaction.modelThresholds` 运行时值会保留，生成的条目加在它上面；没有条目可写时和会话关闭时恢复原值。其他写入方改动了这个运行时值时，扩展警告一次，并在该会话里不再管理它。
+
 #### system-prompt-replace
 
 `extensions-last/system-prompt-replace/` 就地修订动态渲染的内置和插件工具说明。自定义工具直接改自己的描述，让工具协议不再重复出现在基础工作流和本地附录中。
@@ -1057,7 +1089,7 @@ overlay 里上下键或滚轮滚动，解释完整生成后 `C` 复制到系统�
 - **写扩展代码**：先 `bun install`，交付前 `bun run check`，规范见[目录结构与开发规范](#目录结构与开发规范)。新引入的 `@oh-my-pi/*` 子路径要在没有 `node_modules` 的目录里真实加载一次。
 - **不要在 `omp-config-update.ts` 里写出 Otty 标记的字面量**：标记检查是“文件任意位置含有”，这个文件自己也是托管文件，写出来就会被当成应用托管文件，从此跳过更新。
 - **扩展建的辅助会话必须传 `taskDepth: 1`。** 一次性的模型调用统一走 `_shared/helper-session.ts` 的 `runHelperPrompt`，它已经传了（`bro`、`doc-polish`、`input-polish`、`lang-nag`、`watchdog-agent` 的聊天 reviewer 都用它）；自己建会话的只有 `fork-task` 的 shake，也传了。不传的话 SDK 把它当主会话，`dispose()` 时会销毁全局 `AgentLifecycleManager`，所有空闲 subagent 变成 `Unknown agent`，无法再续聊。`lang-nag` 几乎每轮都建辅助会话，漏传会让 subagent 很快失联。只调用 `completeSimple` 的扩展（`task-split-check`、`task-completion-judge`）不建会话，不涉及这条。
-- **升级 OMP 后**，在真实 TUI 里重新验证 [fork-task](#fork-task)、独立 [todo-more](#todo-more) 插件、[user-prompt-inject](#user-prompt-inject)、[turn-judge](#turn-judge)、[task-completion-judge](#task-completion-judge)、[ctx-tool](#ctx-tool)（含 compact 后注入）、[ctx-tasklog](#ctx-tasklog)、[bro](#bro) 和 [wt-tool](#wt-tool)，它们依赖 OMP 内部实现（registry、会话条目、tool/session hooks、宿主投影、TUI 与 worktree dispatcher 等）。todo-more 的 `@upstream` 对照和实现更新在其插件仓库完成；配置仓库验证只读协议与消费者结果，不收回插件源码。
+- **升级 OMP 后**，在真实 TUI 里重新验证 [fork-task](#fork-task)、独立 [todo-more](#todo-more) 插件、[user-prompt-inject](#user-prompt-inject)、[turn-judge](#turn-judge)、[task-completion-judge](#task-completion-judge)、[ctx-tool](#ctx-tool)（含 compact 后注入）、[ctx-tasklog](#ctx-tasklog)、[model-compaction](#model-compaction)、[bro](#bro) 和 [wt-tool](#wt-tool)，它们依赖 OMP 内部实现（registry、会话条目、运行时设置层与 `compaction.modelThresholds` 的解析、tool/session hooks、宿主投影、TUI 与 worktree dispatcher 等）。todo-more 的 `@upstream` 对照和实现更新在其插件仓库完成；配置仓库验证只读协议与消费者结果，不收回插件源码。
 - **升级 OMP 后**，比较 `agent/SYSTEM_TEMPLATE.md` 与 OMP 内置的 `packages/coding-agent/src/prompts/system/system-prompt.md`，有选择地合并相关上游改动。仓库覆盖模板始终是权威来源，不会随 OMP 的内置模板自动更新。
 - **升级 OMP 后**，主会话开始模型回合时（`before_agent_start`）如果弹出 `system-prompt-replace: … found no target` 警告，就按新的模板文字改 `system-prompt-replace.json`；上游删掉了规则要改写的那句话时，删掉这条规则。同时确认 [system-prompt-replace](#system-prompt-replace) 依赖的扩展加载顺序没变。
 - **扩展注入用户消息时写 `attribution: "agent"`。** 不写就默认 `user`，[user-prompt-inject](#user-prompt-inject) 会把它当成用户原话注入 mentor 和 discussant。
