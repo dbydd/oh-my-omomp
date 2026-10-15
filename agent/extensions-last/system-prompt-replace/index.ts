@@ -1,12 +1,11 @@
 // ============================================================================
 // system-prompt-replace — text replacement over the final system prompt.
 //
-// WHY THIS EXISTS. OMP bundles its built-in prompt templates (tool
-// descriptions included) into the binary, and offers no override directory.
-// For Anthropic models the built-in tool descriptions are rendered into the
-// system prompt, so a sentence there that contradicts APPEND_SYSTEM.md (the
-// `task` tool's "Omit `agent` only for default ...; NEVER specify it.") can
-// only be changed by rewriting the system prompt text.
+// WHY THIS EXISTS. SYSTEM_TEMPLATE.md owns the base workflow. Built-in and
+// plugin tool descriptions are still rendered dynamically into toolInventory
+// and xdevDocs; with inlineToolDescriptors on, this extension rewrites those
+// descriptions in place instead of repeating their instructions in the base
+// template or APPEND_SYSTEM.md. Custom tools edit their own descriptions.
 //
 // ORDER. `before_agent_start` handlers run one extension after another in
 // load order, each receiving the prompt the previous one returned. Load order

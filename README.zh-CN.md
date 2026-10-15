@@ -55,15 +55,15 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 ### 定位
 
 - 不是 ultracode 式的大型任务求解器，这类需求由其他插件实现。
-- 完整 prompt 不考虑简单小任务。措辞一放松，模型就会逃避困难模式，所以 prompt 基本不给退路。附带的定制对小任务也没多大用处。小任务用[轻量模式](#轻量模式)。
+- 完整模式以原生工作流为主，补充强制决策支持、明确证据和 runtime 验证。小改动或紧耦合工作在派工成本高于独立 ownership 收益时留在本地；不需要可选行为扩展时使用[轻量模式](#轻量模式)。
 
 ### 约束模型行为
 
 这套约束不假设模型会稳定遵循 system prompt。实际使用中，以 Claude 为首的模型会选择性执行其中的规则；一旦开始绕开工具调用规范，其他约束（包括 `CLAUDE.md` 和 `*.rule.md`）也往往一起失效。仓库因此同时约束副作用、检测偏离，并在运行时补充提醒。
 
-**用 hashline edit 约束副作用。** hashline edit 要求先读取当前文件，再明确指定编辑范围；写操作因此绑定到已经观察过的快照，而不是依赖模型确信自己的一次性命令不会出错。这能降低并发修改后的误写和覆盖风险。具体规范见 `agent/APPEND_SYSTEM.md` 的 `# Tool Call`。
+**用 hashline edit 约束副作用。** hashline edit 先读当前文件，再明确指定编辑范围，把写入绑定到观察过的快照。协议由 `read`、`edit` 工具说明负责，基础模板和附录不再重印。read 说明先解释统一的 source + view 协议，再链接完整规范 `omp://tools/read.md`。
 
-**在完整模式中，把 todo 与 ctx 作为一套联合工具。** todo 负责维护任务生命周期；模型在普通结束路径上停下而 todo 尚未完成时，todo 会要求 agent 继续（原生 TodoTracker 的提醒，现由 [todo-more](#todo-more) 照原生逻辑实现），因此不必靠 loop 反复注入 prompt。它也会减少因小挫折而过早询问用户：最后一条回复是在问用户问题时，提醒不催；其余情况下，还有 pending / in_progress 项就继续由 agent 处理。等待外部回复时显式标 blocked，是本仓库 prompt 的要求，不是提醒的判断条件。自动继续存在误判风险，但这里选择承担这项风险，而不是频繁中断操作员。
+**在完整模式中，把 todo 与 ctx 作为一套联合工具。** todo 负责维护任务生命周期；模型在普通结束路径上停下而 todo 尚未完成时，todo 会要求 agent 继续（原生 TodoTracker 的提醒，现由 [todo-more](#todo-more) 照原生逻辑实现），因此不必靠 loop 反复注入 prompt。它也会减少因小挫折而过早询问用户：最后一条回复是在问用户问题时，提醒不催；其余情况下，还有 pending / in_progress 项就继续由 agent 处理。等待外部回复时显式标 blocked，由 Todo 工具自己的协议要求，不是提醒的判断条件。自动继续存在误判风险，但这里选择承担这项风险，而不是频繁中断操作员。
 
 每次成功的 todo 修改都会被 `ctx-tasklog` 捕获；`ctx` 按这些事件重放任务的最终状态，形成不依赖模型自行总结的简短行事记录。主会话发生 compact 后，`ctx-tool` 会把这份记录连同 context 树注入新 context。这里的 `todo` 由独立插件 [omp-todo-more](#todo-more) 提供：`config.yml` 仍关掉原生 todo（`todo.enabled: false`），配置仓库不再复制其实现。每个列表带 goal 和各项 explanation，插件保留原生基础上的提醒，并恢复 `task:*` worker 的 todo；worker 定义同时要求每个切片维护自己的列表。日志与审查消费者各自消费公开契约，不导入插件 reader。
 
@@ -77,7 +77,7 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 
 **单独补偿语言设置丢失。** Claude 的 server compact 之后，重新注入的 system prompt 可能没有恢复语言约束。[lang-nag](#lang-nag) 因此独立检查回复语言，并在下一次输入前补充提醒；它不改写已经发出的回复。
 
-**把最终回复当作唯一的交付物。** 用户看不到思考、读过的文件、工具结果和 subagent 的汇报，只看到最后一条回复，所以回复的正文要用有主语的完整句子，第一次出现的对象先说明它是什么，每条结论旁边写出支撑它的观察，内容只要有结构就画图、不要打比方。完整规则见 `agent/APPEND_SYSTEM.md` 的 `# The user sees only the final reply`。
+**把最终回复当作唯一的交付物。** 正文使用有主语的完整句子，第一次出现时说明对象，每条结论旁边放决定性证据。不用类比；表格、图或正文由原生模板的适配规则选择。本地表达约束在 `agent/APPEND_SYSTEM.md` 的 `# The user sees only the final reply`。
 
 ### Context 管理
 
@@ -93,7 +93,7 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 
 **把可丢弃的工作放进 subagent context。** subagent 的 context 是可抛弃的工作分支；重要结论和证据通过 subagent IRC 返回，由主 agent 整理并写回自己的 context。这样丢弃的是执行过程，不是任务意图。
 
-**由意图负责人写文档和核心代码。** 代码任务中，文档和核心代码是设计意图的主要载体，因此每一层的当前负责人必须亲自完成，不能把设计责任下放给 worker。完整规则见 `agent/APPEND_SYSTEM.md` 的 `# Operating stance`。
+**为独立 ownership、并行或独立证据而委派。** 调查和实现属于同一连贯切片时保持在一起。`SYSTEM_TEMPLATE.md` 解释工作流及运行时委派模式，不为追求最小粒度而拆分。核心代码和文档可交给 `task:high`，其他 worker tier 保留各自声明的能力边界。
 
 **需要完整背景时 fork context。** 即使超过 150 万字的纯设计材料能够一次装入 context，也不适合让一个会话承担全部实现。把现有 context fork 给 subagent，可以让它聚焦局部任务，同时保留文件之外、已经与人类对齐的意图；这正是 `fork_task` 对原有 `task` 的补充（[fork-task](#fork-task)）。如果主 context 最终仍发生 compact，ctx 联合链路会把 context 树和由 todo 重放得到的任务记录强制注入压缩后的会话；它恢复的是已记录的进度，不是假定压缩能够无损保留原始意图。
 
@@ -330,14 +330,15 @@ subagent 分三类：`task:*` 执行，`discuss:*` 只读讨论，`mentor:defaul
 |要改的|位置|
 |---|---|
 |OMP 的基础 system prompt 结构和通用运行策略|`agent/SYSTEM_TEMPLATE.md`|
-|编排流程、各类 agent 如何配合、最终回复怎么写|`agent/APPEND_SYSTEM.md`|
+|本地用户优先级、回复表达、文档阅读规则和强制顾问|`agent/APPEND_SYSTEM.md`|
 |某个 agent 的职责（`description`）和它自己的角色提示（正文）|`agent/agents/<name>.md`|
+|内置/插件工具说明策略；自定义工具策略|`system-prompt-replace.json`；自定义工具自己的注册描述|
 |注入给某些 agent 的用户原话模板|`agent/extensions/user-prompt-inject/PROMPT-INJECT-*.md`，见 [user-prompt-inject](#user-prompt-inject)|
 |模型、推理强度、运行开关、禁用入口|`agent/config.yml`|
 
-harness 会把 `APPEND_SYSTEM.md` 和每个 agent 的 `description` 都注入主 agent，所以两处不写重复内容。subagent 收不到 `APPEND_SYSTEM.md`，它需要的规则写在自己的定义里。
+基础模板负责工作流和通用策略，渲染当前工具清单，不重复工具说明。`APPEND_SYSTEM.md` 只加本地增量；子代收不到它，所以 worker 专属要求写在自己的定义或明确派工单里。
 
-`SYSTEM_TEMPLATE.md` 是 OMP 用当前工具、skill、规则和运行时设置编译的原始 Handlebars 覆盖模板。仓库先从 OMP 内置的 `packages/coding-agent/src/prompts/system/system-prompt.md` 逐字复制，再在后续变更中统一和精简。不要改名为 `SYSTEM.md`：后者是纯文本覆盖，会让 Handlebars 表达式得不到渲染。
+`SYSTEM_TEMPLATE.md` 是从 OMP 的 `packages/coding-agent/src/prompts/system/system-prompt.md` 派生并在本地维护的 Handlebars 覆盖模板。工具、skill、规则和运行时值仍由 OMP 实时提供。`SYSTEM.md` 是另一条纯文本覆盖路径，不能编译这些表达式。
 
 改 agent 定义前先读 `agent/agents/README.txt`，里面是实测过的陷阱：`spawns` 的默认值、`task.disabledAgents` 里的名字即使列进 allowlist 也派不出去、递归深度上限、只有 `yield` 的 agent 会丢答案、目录里的非 agent `.md` 会被当成定义解析等。改动在下次派发时生效，不用重启；已经在跑的 subagent 不受影响。
 
@@ -359,12 +360,11 @@ harness 会把 `APPEND_SYSTEM.md` 和每个 agent 的 `description` 都注入主
 
 - **按成本和所需可信度选档次，不按难度选。** 默认派 `task:mid`；成本比多出的判断力更重要时（批量机械改动、查询、验证 `task:free`）降到 `task:low`。验证也算成本：需要验证才能采信的结果，用 `task:free` 加验证者比 `task:low` 做一次更贵。进仓库的改动、会被直接采信的结论和裁决都给 `task:low` 及以上。`task:free` 的结果不能互相验证。
 - **`task:free`、`task:low`、`task:mid` 不接设计和核心工作**：架构、领域类型与状态模型、接口与跨切片契约、改动的核心逻辑，以及文档、prompt、skill、agent 定义的设计。`task:high` 没有这条限制。
-- **核心代码、小改动和文档设计由当前负责人自己写**，不交给任何 `task:*`。小改动按整件工作判断：写派工单不比直接改省事，就自己改。
-- **其余工作切成最小、各有验收标准的单元，一次并行派出。** 单元能并行的条件：各有验收标准、启动不依赖其他单元的输出、文件和状态归属不重叠。只因接口或文件边界没定而不满足的，先定边界再并行。确实拆不开的，主 agent 交给一个 worker，worker 则自己做。
+- **保持连贯 ownership。** 不把核心代码或文档一律保留给主 agent；`task:high` 可以负责它们。只有并行或独立判断足以抵偿交接成本时才委派，优先让同一 agent 调查并实现，不拆成细小且互相依赖的切片。
 - **只有 `task:high` 能派 worker**，因为切单元、定验收、划文件归属本身就是契约设计。递归最多两层：`task:high` 派出的孙代只能接可直接执行的叶子任务，也派不出 mentor。
 - **派发必须写明 `agent`。** 省略时会落到 allowlist 的第一项或被禁用的内置 agent 上。
-- **派发不覆盖 `effort`。** 选 tier 就是选它在 `config.yml` 里的模型绑定，不算改模型。原生 `task` 没有 `model` 参数；它的 `effort` 参数由 `task.enableEffort` 控制，本仓库关掉了，所以模型看不到它。`fork_task` 有 `effort`，除非用户明确要求不填。这条写在 `fork-task/index.ts` 的 `fork_task` 工具说明里，`task:high` 定义里也有同一条，用户的要求要经派工单转达给它。
-- **worker 自测不算验收。** 派发方要检查产物和执行证据，自己做跨切片的集成检查；复杂验收交给没写这部分代码的独立 agent。重要决定同时问两个 discussant。
+- **派发不覆盖 `effort`。** 模型和强度跟随 `config.yml` 的 tier 绑定，除非用户明确另有要求。原生 task 的参数由 `task.enableEffort` 隐藏；`fork_task` 的可选字段保持未填。规则由各自工具说明承载。
+- **验证按派发路径区分。** 普通 `task` worker 不跑检查，除非验证本身就是明确派工内容。`fork_task` 添加 developer notice，明确要求 handoff 前完成相关 build/lint/test 和真实 runtime smoke。主 agent 负责最终验证，可以亲自执行，也可以委托独立验证者。强制 mentor 和双 discussant 决策支持保留。
 
 每个 `task:*` worker 的定义还要求：
 
@@ -380,7 +380,7 @@ harness 会把 `APPEND_SYSTEM.md` 和每个 agent 的 `description` 都注入主
 - 给隔离 worker 的路径写成仓库相对路径。OMP 的隔离只靠提示约束，绝对路径会让 worker 的命令跑回派发方的目录。
 - 隔离 worker 完成不等于改动已落地：结果显示 `Applied patches: yes` 才算应用；失败或中止的隔离运行不保留改动。
 - 隔离不能代替划分文件归属，改动重叠只会变成应用失败的 patch。
-- 规则分布：派发方的规则写在 `APPEND_SYSTEM.md` 和 `task-high.md`；worker 在隔离工作树里的路径规则写在四个 `task-*.md` 里。模型忘了隔离时，[isolation-nudge](#isolation-nudge) 拦一次作提醒。
+- 规则分布：task 工具说明的替换和 `fork_task` 注册描述规定派发方隔离；worker 定义保留父 checkout 路径边界。[isolation-nudge](#isolation-nudge) 会拦截遗漏隔离选择的调用。
 
 ### 内置的 `task` 和 `sonic`
 
@@ -761,7 +761,7 @@ model: "(gpt-5|o3)"
 
 #### system-prompt-replace
 
-`extensions-last/system-prompt-replace/` 对渲染后的 system prompt 做文字替换。本仓库用 `agent/SYSTEM_TEMPLATE.md` 覆盖 OMP 内置的基础模板，但 OMP 仍会在运行时把动态字段和内联工具说明渲染进去。`system-prompt-replace` 继续作为最后一个按路径加载的扩展，用来修补不能只靠编辑模板表达的生成文本，例如与 `APPEND_SYSTEM.md` 冲突的内置工具说明。
+`extensions-last/system-prompt-replace/` 就地修订动态渲染的内置和插件工具说明。自定义工具直接改自己的描述，让工具协议不再重复出现在基础工作流和本地附录中。
 
 **规则文件**：同目录的 `system-prompt-replace.json`：
 
@@ -777,16 +777,15 @@ model: "(gpt-5|o3)"
 - 每条规则 `literal`、`regex` 二选一，再加 `replace`；其他键、空匹配串、无效正则都让整个文件不生效。
 - `literal` 替换所有出现处，`replace` 里的 `$` 没有特殊含义。`regex` 自动加 `g`，`replace` 按 `String.prototype.replace` 解释 `$1`、`$&`。
 - 规则按文件顺序依次作用于每个 system prompt 块，后一条看到的是前一条替换后的结果。
-- 仓库里的规则（改的都是 OMP 内置 prompt 或插件工具说明里的句子）：
-  - `task` 工具那句换成 “Always set \`agent\` explicitly; never rely on the default.”，和 `APPEND_SYSTEM.md` 要求写明 agent 一致。默认 agent 名用正则匹配，所以 `spawns` 不同、默认 agent 不同的 subagent 也能命中。
-  - Engineering 的 “NEVER rerun checks to confirm them.” 换成 “NEVER rerun checks to doubt them. Reproducing to locate the cause and confirming the fix still apply.”：用户报的问题不用复跑去怀疑，但为定位原因复现、修完确认仍要做，和 Workflow 的 “reproduce before; confirm after” 不再冲突。
-  - “Compiled code: NEVER avoidable allocation, …” 补上谓语 `add`。
-  - `eval` 工具说明末尾 “On error, retry only the failed step; …” 之后追加一段：拒绝用 `eval` 调查文件。读内容（`open`、`Path.read_text`、`Bun.file`、`readFileSync`、prelude 的 `read()`）、列目录或找文件（`os.listdir`、`os.walk`、`glob.glob`、`readdirSync`）、搜文本（对文件内容跑正则、`subprocess` 调 `cat`/`ls`/`find`/`grep`/`rg`）都归 `read`、`glob`、`grep`；随手看一眼、批量处理多个文件、少调几次工具都不算例外。`eval` 只用于对已拿到的数据做计算、转换、结构化解析和库调用。`APPEND_SYSTEM.md` 的 Tool Call 一节有同类规则，但 subagent 收不到附录，工具说明里这段对所有带 `eval` 的会话生效。
-  - `exec_command`（`omp-unified-exec` 插件，挂在 `xd://` 下，system prompt 里只有截断的摘要）的开头句 “Run a command in a persistent session.” 之后插入两段。插在开头句后面而不是摘要末尾，是因为摘要按长度截断，末尾的文字进不了 system prompt。
-    - 拒绝用它调查文件：读内容（`cat`、`head`、`tail`、`sed -n`、`less`）、列目录或找文件（`ls`、`find`、`fd`、`tree`）、搜文本（`grep`、`rg`、`ag`、`awk`），不管单独跑、放进管道还是包在 `python -c` / `node -e` / `bun -e` 里，都归 `read`、`glob`、`grep`；随手看一眼、批量处理、少调几次工具都不算例外。它只留给真正的二进制程序和简短的事实型管道：构建、测试、git、外部 CLI、计数、校验和。
-    - 交互式操作用 `tty: true` 启动、用 `write_stdin` 驱动：`ssh` 会话，密码、口令和 host-key 提示，REPL 和数据库 shell，TUI，以及通过真实 TUI 测试 harness 或 CLI；管道、heredoc、`yes |` 都不能代替终端。不要过早轮询 TTY：启动程序或发送输入后，把 `yield_time_ms` 设到能覆盖预期响应的长度（shell 提示符或 `ssh` 登录几秒，harness 里一轮模型回复 20–30 秒），等这个窗口过了还没出现预期的提示或输出，才发空轮询；程序还在干活时连着轮询，只会拿到画了一半的屏幕，白白浪费轮次。
-  - `xd://` 设备的调用说明 “Write JSON args as `content` to `xd://<tool>` via `<写工具>`.” 之后追加：设备不是函数，不存在 `xd__<tool>`、`xd_<tool>` 或裸 `<tool>` 函数，不要调用；唯一的调用方式是用这个写工具、`path` 设为 `xd://<tool>`。
-- 关于某个工具怎么用的规则，优先改写该工具的说明，而不是写进 `APPEND_SYSTEM.md`：subagent 收不到附录，但能看到工具说明，规则只写一处就覆盖所有会话。附录只保留编排逻辑和最终回复的写法，并要求遵守 `todo` 工具的规则。
+- 仓库里的规则：
+  - `read` 正面解释单一 path 的 source + view/query 寻址、先看结构再精读、hashline 快照、截断恢复和 `omp://tools/read.md`；原有 selector/source 列表保留。
+  - `task` 加入按成本/可信度选档、显式 `agent`、只按用户要求覆盖 `effort` 和并行写入隔离。移除过时的一律不跑检查句子；普通 task 遵循原生子代工作流，fork notice 则明确派发验证。
+  - 同一条清理规则移除原生子代 wrapper 的 “No TODO tracking, no progress updates.”，避免它与 worker 定义强制 Todo 的要求冲突。
+  - Engineering 保留用户报错的澄清：不复跑去怀疑报告，但可以为定位复现并确认修复；同时给编译代码规则补上缺失的 `add`。
+  - `eval` 只处理已取回数据的计算、转换、结构化解析和库调用，文件读取、发现、搜索交给对应工具。
+  - `exec_command` 负责二进制执行和 PTY 生命周期：通过专用工具取回/搜索内容，交互使用真实终端，等待提示，关闭会话，区分一次性命令。说明插在第一句后，确保进入 xd 摘要。
+  - xd 设备说明明确通过 write JSON 派发，而不是编造函数名。
+- 工具规则只放在注入的工具描述里，不写入 `SYSTEM_TEMPLATE.md` 或 `APPEND_SYSTEM.md`；附录只保留原生工作流和工具尚未提供的本地策略。
 - 改写工具说明依赖 `config.yml` 的 `inlineToolDescriptors: "on"`：打开时完整工具说明都写进 system prompt。默认的 `auto` 只对 Gemini 这样做，`off` 一律不做；不写进 system prompt、又走原生 tool calling 时，system prompt 只列工具名，说明随 `tools[]` 发送，这类规则就失效了。
 - 内置 prompt 的规则句常省略主语，以覆盖所有场景；改写时保持这种写法，只补意思，不加明确主语。
 
@@ -811,13 +810,14 @@ model: "(gpt-5|o3)"
 - `isolated` 默认 `true`，写 `isolated: false` 才共享目录。父会话处于 plan mode 时一律共享。隔离的子代理结束后不能续聊。
 - 每项可选 `shake: true`，对副本执行和手动 `/shake` 相同的 `session.shake("elide")`。
 - `name` 会加 `_xxxx` 后缀，子代理 id 以结果为准。
+- fork worker 必须在 handoff 前验证改动路径；路由专属 developer notice 把它明确列为派工要求。普通 `task` worker 把检查留给父代或单独派出的验证者。只读角色仍遵守工具限制。
 - 需要 `async.enabled: true`，否则报错。
 
 **shake 的效果**：最近约 4,000 token 受保护，但其中被标记为 useless 的非错误工具结果照样会被省略。更早的部分里，所有文本工具结果、消息中不少于 400 token 的围栏代码块和顶层小写 XML 元素，被替换成 `[shaken ~N tokens — recover: artifact://<id> (region K)]`，子代理可以 `read` 取回原文；原文存进 artifact 失败时只剩 `[shaken ~N tokens]`，取不回来。`skill` 结果、`skill://` 读取、`local://PLAN.md` 的读取、块外正文、thinking 和工具调用参数不动，已被 compaction 概括的历史不处理；父会话用的是别的 plan 文件路径时，那份 plan 的读取不受保护。
 
 **实现**：
 
-1. 把调用方会话 fork 到 `$TMPDIR/omp-fork-task/<uuid>/`：清零继承的费用，给未返回的工具调用补上中止结果，清空 todo（[todo-more](#todo-more) 的 goal 随之清空），追加一条 `<system-notice cause="fork_task">`，说明这段对话只是背景。
+1. 把调用方会话 fork 到 `$TMPDIR/omp-fork-task/<uuid>/`：清零继承费用，修复中断的工具调用，清空 todo，追加 `<system-notice cause="fork_task">`，明确历史只作背景并强制 fork worker 验证。
 2. 删掉父会话的运行时条目（`session_init`、`model_change`、`thinking_level_change`、`service_tier_change`、shake 辅助会话的 `session_exit`），其子条目挂到上一级。
 3. 共享子代理保留父会话的 cwd；隔离子代理的 cwd 置空，由执行器绑定到 worktree。shake 的 artifact 写进父会话的 artifact 目录，子代理共用。
 4. `task` 异步派发时先分配 id，再触发 `before_subagent_spawn`；扩展在这里把副本移到 `<父会话文件去掉 .jsonl>/<子代理 id>.jsonl`，执行器打开的就是它。没派出去的副本在出错或会话结束时清理。

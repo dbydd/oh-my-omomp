@@ -55,15 +55,15 @@ Run all of the following after starting OMP at the repository root.
 ### Scope
 
 - This is not an ultracode-style solver for large tasks; other plugins cover that.
-- The full prompt does not cater to small, simple tasks. As soon as the wording relaxes, models dodge the demanding mode, so the prompt leaves almost no way out. The bundled customizations are of little use for small tasks either. Use [light mode](#light-mode) for small tasks.
+- Full mode keeps the native workflow and adds mandatory decision support, explicit evidence and runtime checks. Small or tightly coupled changes stay local when delegation adds more handoff cost than useful ownership. Use [light mode](#light-mode) when the optional behavior extensions are unnecessary.
 
 ### Constraining model behavior
 
 These constraints do not assume that a model follows the system prompt reliably. In practice, models led by Claude follow its rules selectively; once they start bypassing the tool-call conventions, the other constraints (including `CLAUDE.md` and `*.rule.md`) tend to fail with them. The repository therefore constrains side effects, detects drift and adds reminders at runtime, all at once.
 
-**Constrain side effects with hashline edit.** A hashline edit must first read the current file and then name the edit range explicitly; a write is thus bound to a snapshot that was actually observed, instead of relying on the model's confidence that its one-shot command cannot go wrong. This lowers the risk of miswrites and overwrites after concurrent changes. The rules are in `# Tool Call` of `agent/APPEND_SYSTEM.md`.
+**Constrain side effects with hashline edit.** A hashline edit first reads the current file and names the edit range explicitly, binding the write to an observed snapshot. The `read` and `edit` tool descriptions own that protocol; neither the base template nor the appendix reprints it. The read description explains the unified source-and-view protocol and links its complete specification at `omp://tools/read.md`.
 
-**In full mode, treat todo and ctx as one combined tool set.** todo maintains the task lifecycle; when the model stops on an ordinary end path while the todo is not finished, todo makes the agent continue (the native TodoTracker reminder, now implemented by [todo-more](#todo-more) following the native logic), so no loop has to inject prompts again and again. It also reduces asking the user too early after a small setback: when the last reply asks the user a question, the reminder does not push; otherwise, as long as pending / in_progress items remain, the agent keeps going. Marking an item blocked while waiting for an outside answer is a requirement of this repository's prompt, not a condition the reminder checks. Automatic continuation can misjudge, and here we choose to take that risk rather than interrupt the operator often.
+**In full mode, treat todo and ctx as one combined tool set.** todo maintains the task lifecycle; when the model stops on an ordinary end path while the todo is not finished, todo makes the agent continue (the native TodoTracker reminder, now implemented by [todo-more](#todo-more) following the native logic), so no loop has to inject prompts again and again. It also reduces asking the user too early after a small setback: when the last reply asks the user a question, the reminder does not push; otherwise, as long as pending / in_progress items remain, the agent keeps going. Marking an item blocked while waiting for an outside answer is part of the Todo tool's own protocol, not a condition the reminder checks. Automatic continuation can misjudge, and here we choose to take that risk rather than interrupt the operator often.
 
 Every successful todo change is captured by `ctx-tasklog`; `ctx` replays those events into the final task state, giving a short work record that does not depend on the model summarizing itself. After the main session compacts, `ctx-tool` injects that record, together with the context tree, into the new context. `todo` here comes from the independent plugin [omp-todo-more](#todo-more): `config.yml` still turns native todo off (`todo.enabled: false`), and the config repository no longer copies its implementation. Every list carries a goal and an explanation per item; the plugin keeps the native reminders and restores todo for `task:*` workers, whose definitions also require each slice to keep its own list. The log and review consumers each consume a public contract and do not import the plugin's reader.
 
@@ -77,7 +77,7 @@ Every successful todo change is captured by `ctx-tasklog`; `ctx` replays those e
 
 **Compensate separately for a lost language setting.** After Claude's server-side compact, the re-injected system prompt may not restore the language constraint. [lang-nag](#lang-nag) therefore checks the reply language on its own and adds a reminder before the next input; it never rewrites a reply that was already sent.
 
-**Treat the final reply as the only deliverable.** The user sees neither the thinking nor the files read, tool results or subagent reports, only the last reply. Its prose therefore uses complete sentences with explicit subjects, says what each item is when it first appears, writes the supporting observation next to every conclusion, and draws a figure whenever content has structure instead of reaching for analogies. The full rules are in `# The user sees only the final reply` of `agent/APPEND_SYSTEM.md`.
+**Treat the final reply as the only deliverable.** Its prose uses complete sentences with explicit subjects, identifies objects on first mention and puts decisive evidence beside conclusions. It avoids analogies; the native template chooses whether a table, diagram or prose fits. The local register lives in `# The user sees only the final reply` of `agent/APPEND_SYSTEM.md`.
 
 ### Context management
 
@@ -93,7 +93,7 @@ Prefer the tools' own paging and default ordering, which keep output size under 
 
 **Put disposable work in subagent contexts.** A subagent's context is a disposable working branch; important conclusions and evidence come back over subagent IRC, and the main agent distills them into its own context. What gets discarded is the execution, not the task intent.
 
-**The owner of the intent writes the documents and the core code.** In a coding task, documents and core code are the main carriers of design intent, so each level's current owner must write them personally and must not push design responsibility down to a worker. The full rules are in `# Operating stance` of `agent/APPEND_SYSTEM.md`.
+**Delegate for ownership, parallelism or independent evidence.** Keep investigation and implementation together when they form one cohesive slice. `SYSTEM_TEMPLATE.md` explains the workflow and its runtime delegation modes; do not split merely to minimize unit size. Core code and documents may be assigned to `task:high`; the other worker tiers retain their declared capability boundaries.
 
 **Fork the context when the full background is needed.** Even if more than 1.5 million characters of pure design material fit into one context, one session should not carry the entire implementation. Forking the existing context to a subagent lets it focus on a local task while keeping intent that lives outside the files and was already aligned with the human; this is what `fork_task` adds to the original `task` ([fork-task](#fork-task)). If the main context still compacts in the end, the ctx chain forces the context tree and the task record replayed from todo into the compacted session; it restores recorded progress and does not assume that compaction preserves the original intent losslessly.
 
@@ -329,14 +329,15 @@ Subagents come in three kinds: `task:*` execute, `discuss:*` hold read-only disc
 |What to change|Where|
 |---|---|
 |OMP's base system-prompt structure and general runtime policy|`agent/SYSTEM_TEMPLATE.md`|
-|Orchestration flow, how the agent kinds work together, how the final reply is written|`agent/APPEND_SYSTEM.md`|
+|Local user precedence, reply register, document-reading rules and mandatory advisors|`agent/APPEND_SYSTEM.md`|
 |An agent's responsibilities (`description`) and its own role prompt (body)|`agent/agents/<name>.md`|
+|Built-in/plugin tool-description policy; custom tool policy|`system-prompt-replace.json`; the custom tool's own registration|
 |Templates of the user's own words injected into some agents|`agent/extensions/user-prompt-inject/PROMPT-INJECT-*.md`, see [user-prompt-inject](#user-prompt-inject)|
 |Models, reasoning effort, runtime switches, disabled entries|`agent/config.yml`|
 
-The harness injects both `APPEND_SYSTEM.md` and every agent's `description` into the main agent, so the two never repeat each other. Subagents do not receive `APPEND_SYSTEM.md`; the rules they need are written into their own definitions.
+The base template owns workflow and general policy. It renders the current tool inventory rather than duplicating tool instructions. `APPEND_SYSTEM.md` adds only local deltas; children do not receive it, so worker-specific requirements belong in their definitions or an explicit assignment.
 
-`SYSTEM_TEMPLATE.md` is the raw Handlebars override that OMP compiles with the current tools, skills, rules and runtime settings. It was copied byte-for-byte from OMP's bundled `packages/coding-agent/src/prompts/system/system-prompt.md` before repository-specific simplification. Do not rename it to `SYSTEM.md`: that override is plain text and would leave Handlebars expressions unrendered.
+`SYSTEM_TEMPLATE.md` is a locally maintained Handlebars override derived from OMP's `packages/coding-agent/src/prompts/system/system-prompt.md`. OMP still supplies live tools, skills, rules and runtime values. `SYSTEM.md` is a different, plain-text override and cannot compile those expressions.
 
 Read `agent/agents/README.txt` before changing an agent definition; it lists pitfalls verified in practice: the default of `spawns`, names in `task.disabledAgents` cannot be spawned even when allowlisted, the recursion depth cap, a `yield`-only agent can lose its answer, a non-agent `.md` in the directory is parsed as a definition, and so on. Changes apply on the next dispatch without a restart; subagents already running are unaffected.
 
@@ -358,12 +359,11 @@ The second column below is what each agent's `description` says, i.e. the tier a
 
 - **Pick a tier by cost and required trust, not by difficulty.** Dispatch `task:mid` by default; drop to `task:low` when cost matters more than the extra judgment (bulk mechanical edits, lookups, validating `task:free`). Validation is a cost too: a result that must be validated before it can be trusted costs more from `task:free` plus a validator than from `task:low` doing it once. Changes that land in the repository, conclusions acted on directly and verdicts go to `task:low` or above. `task:free` results never validate each other.
 - **`task:free`, `task:low` and `task:mid` take no design or core work**: architecture, domain types and state model, interfaces and cross-slice contracts, the core logic of the change, and the design of documents, prompts, skills and agent definitions. `task:high` has no such limit.
-- **Core code, small changes and document design are written by the current owner**, never by any `task:*`. A small change is judged on the whole piece of work: when writing the assignment is no easier than making the change, make it yourself.
-- **Cut the remaining work into the smallest units that each have acceptance criteria, and dispatch them in parallel in one go.** Units can run in parallel when each has its own acceptance criteria, none needs another unit's output to start, and their file and state ownership does not overlap. Units that fail this only because an interface or file boundary is unsettled get the boundary settled first and then run in parallel. Work that truly cannot be split goes to one worker from the main agent, while a worker does it itself.
+- **Keep cohesive ownership.** Do not categorically reserve core code or documents for the main agent; `task:high` may own them. Delegate when parallelism or independent judgment repays the handoff, and prefer one investigator/implementer over tiny dependent slices.
 - **Only `task:high` can spawn workers**, because cutting units, defining acceptance and assigning file ownership is contract design. Recursion is at most two levels: the grandchildren that `task:high` spawns take only directly executable leaf tasks and cannot spawn a mentor.
 - **Every dispatch names `agent`.** When omitted, it falls to the first allowlist entry or to a disabled built-in agent.
-- **Dispatch does not override `effort`.** Choosing a tier means choosing its model binding in `config.yml`, which does not count as changing the model. The native `task` has no `model` parameter; its `effort` parameter is controlled by `task.enableEffort`, which this repository turns off, so the model does not see it. `fork_task` has `effort`, left unset unless the user explicitly asks. This rule is in the `fork_task` tool description in `fork-task/index.ts` and also in the `task:high` definition; the user's request has to reach it through the assignment.
-- **A worker's self-test is not acceptance.** The dispatcher inspects artifacts and execution evidence and runs the cross-slice integration check itself; complex acceptance goes to an independent agent that did not write that code. Consequential decisions go to both discussants.
+- **Dispatch does not override `effort`.** Model and effort follow `config.yml`'s tier binding unless the user explicitly asks otherwise. The native task parameter is hidden by `task.enableEffort`; `fork_task` leaves its optional field unset. Their tool descriptions carry the rule.
+- **Verification follows the spawn route.** Ordinary `task` workers do not run checks unless verification is their explicit assignment. `fork_task` adds a developer notice that explicitly requires scoped build/lint/tests and a real runtime smoke before handoff. The main agent owns final verification and may perform it or delegate an independent verifier. Mandatory mentor and two-discussant decision support remain.
 
 Every `task:*` worker definition also requires:
 
@@ -379,7 +379,7 @@ The dispatcher decides isolation for every spawn; it is not written into agent d
 - Give isolated workers repository-relative paths. OMP's isolation is enforced only by prompting, and an absolute path sends the worker's commands back into the dispatcher's directory.
 - An isolated worker finishing does not mean its changes landed: they are applied only when the result shows `Applied patches: yes`; a failed or aborted isolated run keeps no changes.
 - Isolation does not replace file ownership; overlapping changes just become patches that fail to apply.
-- Where the rules live: the dispatcher's rules are in `APPEND_SYSTEM.md` and `task-high.md`; the path rules for workers in isolated worktrees are in the four `task-*.md` files. When the model forgets isolation, [isolation-nudge](#isolation-nudge) blocks once as a reminder.
+- Where the rules live: the task-description rewrites and `fork_task` registration define dispatcher isolation; worker definitions carry the parent-checkout boundary. [isolation-nudge](#isolation-nudge) catches a missing isolation choice.
 
 ### The built-in `task` and `sonic`
 
@@ -760,7 +760,7 @@ Appended for GPT-5 and o3 from any provider.
 
 #### system-prompt-replace
 
-`extensions-last/system-prompt-replace/` replaces text in the rendered system prompt. The repository replaces OMP's bundled base template with `agent/SYSTEM_TEMPLATE.md`, but OMP still renders dynamic fields and inline tool descriptions into it at runtime. `system-prompt-replace` remains the last path-loaded extension so it can patch generated text that cannot be expressed by editing the template alone, such as a built-in tool description that conflicts with `APPEND_SYSTEM.md`.
+`extensions-last/system-prompt-replace/` patches dynamically rendered built-in and plugin tool descriptions in place. Custom tools change their own descriptions instead. This keeps tool protocols out of the base workflow and local appendix.
 
 **Rules file**: `system-prompt-replace.json` in the same directory:
 
@@ -776,16 +776,15 @@ Appended for GPT-5 and o3 from any provider.
 - Each rule has exactly one of `literal` or `regex`, plus `replace`; any other key, an empty match string or an invalid regex disables the whole file.
 - `literal` replaces every occurrence, and `$` in `replace` has no special meaning. `regex` gets `g` automatically, and `replace` interprets `$1` and `$&` as `String.prototype.replace` does.
 - Rules apply in file order to every system-prompt block; each rule sees the result of the previous one.
-- The repository's rules (all changing sentences in OMP's built-in prompts or plugin tool descriptions):
-  - The `task` tool's sentence becomes "Always set \`agent\` explicitly; never rely on the default.", matching `APPEND_SYSTEM.md`'s requirement to name the agent. The default agent name is matched by regex, so subagents with different `spawns` and different default agents are hit too.
-  - Engineering's "NEVER rerun checks to confirm them." becomes "NEVER rerun checks to doubt them. Reproducing to locate the cause and confirming the fix still apply.": a problem the user reports needs no rerun to doubt it, but reproducing to locate the cause and confirming after the fix still happen, so it no longer conflicts with Workflow's "reproduce before; confirm after".
-  - "Compiled code: NEVER avoidable allocation, …" gets its missing verb `add`.
-  - After "On error, retry only the failed step; …" at the end of the `eval` tool description, a paragraph is appended: refuse to investigate files through `eval`. Reading content (`open`, `Path.read_text`, `Bun.file`, `readFileSync`, the prelude's `read()`), listing or finding files (`os.listdir`, `os.walk`, `glob.glob`, `readdirSync`) and searching text (regex over file content, `subprocess` running `cat`/`ls`/`find`/`grep`/`rg`) belong to `read`, `glob` and `grep`; a quick look, batch processing of many files or fewer tool calls are not exceptions. `eval` is only for computation, transformation, structured parsing and library calls on data already in hand. `APPEND_SYSTEM.md`'s Tool Call section has a similar rule, but subagents do not receive the appendix, whereas this paragraph in the tool description applies to every session with `eval`.
-  - Two paragraphs are inserted after the opening sentence "Run a command in a persistent session." of `exec_command` (from the `omp-unified-exec` plugin, mounted under `xd://`, so the system prompt has only a truncated summary). They go after the opening sentence rather than at the end of the summary because the summary is truncated by length, and text at its end never reaches the system prompt.
-    - Refuse to investigate files with it: reading content (`cat`, `head`, `tail`, `sed -n`, `less`), listing or finding files (`ls`, `find`, `fd`, `tree`) and searching text (`grep`, `rg`, `ag`, `awk`), whether run alone, in a pipeline or wrapped in `python -c` / `node -e` / `bun -e`, belong to `read`, `glob` and `grep`; a quick look, batch processing or fewer tool calls are not exceptions. It is reserved for real binaries and short factual pipelines: builds, tests, git, external CLIs, counts and checksums.
-    - Interactive work starts with `tty: true` and is driven with `write_stdin`: `ssh` sessions, password, passphrase and host-key prompts, REPLs and database shells, TUIs, and testing a harness or CLI through its real TUI; pipes, heredocs and `yes |` cannot stand in for a terminal. Do not poll a TTY early: after starting the program or sending input, set `yield_time_ms` long enough to cover the expected response (a few seconds for a shell prompt or `ssh` login, 20–30 seconds for a model turn in a harness), and send an empty poll only when that window has passed without the expected prompt or output; back-to-back polls while the program is still working only return half-drawn screens and waste turns.
-  - After the `xd://` device call instruction "Write JSON args as `content` to `xd://<tool>` via `<write tool>`.", it appends: devices are not functions; no `xd__<tool>`, `xd_<tool>` or bare `<tool>` function exists, so never call one; the only call is that write tool with `path` set to `xd://<tool>`.
-- Rules about how to use a tool go preferably into that tool's description rather than `APPEND_SYSTEM.md`: subagents do not receive the appendix but do see tool descriptions, so a rule written once covers every session. The appendix keeps only orchestration logic and how to write the final reply, and requires following the `todo` tool's rules.
+- The repository's rules:
+  - `read` gains a positive introduction to one-path source + view/query addressing, structural discovery followed by precise reads, hashline snapshots, truncation recovery and `omp://tools/read.md`; its existing selector/source list stays intact.
+  - `task` gains cost/trust tier choice, explicit `agent`, user-only `effort` overrides and concurrent-writer isolation. The obsolete blanket skip-check sentence is removed; native child workflow governs ordinary tasks and the fork notice explicitly assigns verification.
+  - The same suppression rule removes the native child wrapper's “No TODO tracking, no progress updates.” so it cannot contradict the worker definitions' mandatory Todo requirement.
+  - Engineering retains the user-error clarification: do not rerun to doubt the report, but reproduce to locate the cause and confirm the fix. The missing `add` in the compiled-code rule is corrected.
+  - `eval` is limited to computation, transforms, structured parsing and library calls on data already obtained; file retrieval/discovery/search belongs to its dedicated tools.
+  - `exec_command` owns binary execution and PTY lifecycle: retrieve/search through dedicated tools, interact only with a real terminal, wait for prompts, close sessions and distinguish one-shot commands. This is inserted after its first sentence so the xd summary exposes it.
+  - The xd device instruction states that devices are dispatched by writing JSON, not by inventing function names.
+- Tool instructions live in their injected descriptions, never in `SYSTEM_TEMPLATE.md` or `APPEND_SYSTEM.md`. The appendix contains only local policy not already supplied by the native workflow or a tool.
 - Rewriting tool descriptions relies on `config.yml`'s `inlineToolDescriptors: "on"`: when on, full tool descriptions are written into the system prompt. The default `auto` does this only for Gemini, and `off` never does; when descriptions are not in the system prompt and native tool calling is used, the system prompt lists only tool names and the descriptions travel with `tools[]`, so such rules stop working.
 - Rule sentences in built-in prompts often omit the subject to cover every situation; rewrites keep that style, adding meaning without adding an explicit subject.
 
@@ -810,13 +809,14 @@ Differences from `task`:
 - `isolated` defaults to `true`; only `isolated: false` shares the directory. While the parent session is in plan mode the directory is always shared. An isolated subagent cannot be continued after it finishes.
 - Each item may set `shake: true`, which runs `session.shake("elide")` on the copy, the same as a manual `/shake`.
 - `name` gets a `_xxxx` suffix; the subagent id in the result is authoritative.
+- Forked workers must verify their changed path before handoff. The route-specific developer notice makes this an explicit assignment, while ordinary `task` workers leave checks to the parent or a separately assigned verifier. Read-only roles keep their tool restrictions.
 - It needs `async.enabled: true`, otherwise it errors.
 
 **What shake does**: the most recent ~4,000 tokens are protected, though non-error tool results marked useless inside them are still elided. In the earlier part, every text tool result, every fenced code block and top-level lowercase XML element of at least 400 tokens in messages is replaced with `[shaken ~N tokens — recover: artifact://<id> (region K)]`, and the subagent can `read` the original back; when saving the original to an artifact fails, only `[shaken ~N tokens]` remains and it cannot be recovered. `skill` results, `skill://` reads, reads of `local://PLAN.md`, prose outside blocks, thinking and tool-call arguments are untouched, and history already summarized by compaction is not processed; when the parent session uses another plan file path, reads of that plan are not protected.
 
 **Implementation**:
 
-1. Fork the caller's session into `$TMPDIR/omp-fork-task/<uuid>/`: zero the inherited cost, add aborted results for tool calls that never returned, clear the todo (the goal of [todo-more](#todo-more) goes with it), and append a `<system-notice cause="fork_task">` saying this conversation is only background.
+1. Fork the caller's session into `$TMPDIR/omp-fork-task/<uuid>/`: zero inherited cost, repair interrupted tool calls, clear todo, and append a `<system-notice cause="fork_task">` defining background-only inheritance and mandatory fork-worker verification.
 2. Delete the parent session's runtime entries (`session_init`, `model_change`, `thinking_level_change`, `service_tier_change`, and the `session_exit` of shake's helper session), reattaching their children to the level above.
 3. A shared subagent keeps the parent session's cwd; an isolated subagent's cwd is cleared and bound to the worktree by the executor. Shake's artifacts are written into the parent session's artifact directory and shared by the subagents.
 4. When `task` dispatches asynchronously it assigns the id first and then fires `before_subagent_spawn`; here the extension moves the copy to `<parent session file without .jsonl>/<subagent id>.jsonl`, which is exactly what the executor opens. Copies that were never dispatched are cleaned up on error or at session end.

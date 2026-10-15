@@ -108,6 +108,7 @@ Recommended per item: keep \`isolated\` at its default \`true\` and pass \`shake
 - \`shake: true\` runs \`/shake\` on the inherited copy before the child starts, cutting its starting context.
 - \`effort\`: omit unless the user explicitly asks; the agent's configured binding decides model and effort.
 - The child runs its own agent's system prompt and model; it sees the conversation as background and its own assignment as the task. It does not inherit this session's todo list.
+- Verification is mandatory for forked workers: the fork notice explicitly requires scoped build/lint/test and real runtime checks before handoff, overriding ordinary task's no-verification default. The parent still owns final acceptance and may verify itself or assign an independent verifier.
 - Each item's \`name\` gets a short unique suffix; address the child by the id reported in the result.
 
 \`context\` and each item's \`task\` follow the same rules as \`task\`. The conversation copy is background, so the assignment is a directive — what to do, what is in and out, what siblings handle — not a restatement of it, and still states the target, change, and acceptance.`;
@@ -118,6 +119,7 @@ const forkNotice = (parentCwd: string, isolated: boolean): string =>
 		"Above: the conversation of the parent agent that spawned you, copied as background. It ran under its own role, tools, and rules; yours are the ones in your system prompt.",
 		"- Use it only for the facts, decisions, and constraints it established.",
 		"- Your job is the assignment that follows this notice, nothing else. NEVER continue, resume, or complete other work from the conversation; its todo lists and plans belong to the parent.",
+		"- Verification is explicitly required for this fork_task assignment: run the relevant scoped build, lint, tests, and real runtime smoke path before handoff. This overrides ordinary task's default to leave verification to the parent. Observe the changed behavior and report commands, outputs, and limitations; do not claim completion while required runtime verification is missing. Read-only roles remain read-only: report evidence from their permitted inspection instead of running execution tools.",
 		"- The parent keeps working concurrently.",
 		isolated
 			? `- You run in an isolated copy of the workspace. Paths under \`${parentCwd}\` in the conversation name the parent's checkout: use the same repository-relative paths inside your own working directory, and NEVER read or write under \`${parentCwd}\`.`
