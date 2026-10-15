@@ -306,7 +306,7 @@ git status --short
 
 - 用 `APPEND_SYSTEM_LIGHT.md` 代替完整的追加提示词。
 - 按 `config-light.yml` 禁用 13 个行为扩展：`ctx-tasklog`、`ctx-tool`、`doc-polish`、`fork-task`、`isolation-nudge`、`lang-nag`、`task-completion-judge`、`task-split-check`、`tool-policy-nag`、`turn-judge`、`user-prompt-inject`、`watchdog-agent`、`wt-tool`。
-- 未禁用的本地扩展照常加载：`append-system-model`、`bro`、`input-polish`、`repo-rules`、[omp-config-autoupdate](#omp-config-autoupdate)，以及兼容性修复 `commandcode-model-spec`。独立 [todo-more](#todo-more) 与其他插件从普通 discovery 加载，无须改 launcher 或额外 `-e`。`APPEND_SYSTEM_MODEL.md` 因此照样注入；自动更新开着时 `omp-light` 也会更新。原生 todo 同样关着。
+- 未禁用的本地扩展照常加载：`append-system-model`、`bro`、`input-polish`、`repo-rules`、[response-reading-coverage](#response-reading-coverage)、[omp-config-autoupdate](#omp-config-autoupdate)，以及兼容性修复 `commandcode-model-spec`。独立 [todo-more](#todo-more) 与其他插件从普通 discovery 加载，无须改 launcher 或额外 `-e`。`APPEND_SYSTEM_MODEL.md` 因此照样注入；自动更新开着时 `omp-light` 也会更新。原生 todo 同样关着。
 - `config-light.yml` 把 `extensions` 覆盖成空列表，去掉 `config.yml` 末项的 [system-prompt-replace](#system-prompt-replace)。`disabledExtensions` 按模块名过滤，但管不到在 `extensions` 或 `-e` 里直接写成文件路径的扩展（写成目录的，目录里发现的模块仍按名字过滤），所以只能这样排除。覆盖会连带去掉本机条目（如 `~/.claude`），所以 `omp-light` 读本机 `config.yml`，把 `extensions` 里路径不含 `/extensions-last/` 的条目逐个用 `-e` 传给 `omp`；`-e` 是另一条加载通道，不受这个覆盖影响。`extensions-last/` 下的扩展因此只属于完整模式（按路径字符串判断，相对路径或目录写法不会被认出来）。
 - 插件、rules、skills、上下文文件，以及 model、thinking、profile、auth、session 设置都不变。被禁用扩展注册的工具（`ctx`、`polish_doc`、`fork_task`、`wt`、`wt_remove`）在轻量模式下不存在。
 - `omp-light` 从 agent 目录读 `config-light.yml` 和 `APPEND_SYSTEM_LIGHT.md`：设置了 `PI_CODING_AGENT_DIR` 时用它，否则用 `~/.omp/agent`。缺任何一个就直接退出，不回退到别的目录。
@@ -396,6 +396,7 @@ subagent 分三类：`task:*` 执行，`discuss:*` 只读讨论，`mentor:defaul
 |[watchdog-agent](#watchdog-agent)|按目标投放的第三方审查者|否|
 |[user-prompt-inject](#user-prompt-inject)|按模板把用户原话注入指定的 subagent|否|
 |[turn-judge](#turn-judge)|主会话每轮结束后用原生 JUDGE 判断这一轮，达到阈值就输入预设 prompt，否则显示判定|否|
+|[response-reading-coverage](#response-reading-coverage)|按搜索/阅读组计算返回的搜索文件随后被 read 的比例；子报告同时进入根主会话的上下文|是|
 |[lang-nag](#lang-nag)|回复语言不对时，在下一条输入前加提醒|否|
 |[repo-rules](#repo-rules)|补读 `.claude/rules` 等 repo 级 rule 目录|是|
 |[append-system-model](#append-system-model)|按模型 / 提供商正则追加系统提示词|是|
@@ -796,6 +797,22 @@ model: "(gpt-5|o3)"
 - **时机**：每次 `before_agent_start`，主会话和每个 subagent 都执行，轻量模式除外（见[轻量模式](#轻量模式)）。每条 prompt 重新读规则文件，改规则不用重启；改扩展本身要重启。
 - **失败**：规则文件不存在时不替换。JSON 或规则格式错误时不替换，记 warning，同一错误连续出现只记一次。某条规则的目标在主会话的 system prompt 里一处都找不到时（升级 OMP 后模板文字变了，或规则写错），每条规则每个进程警告一次：交互模式弹 UI 警告，headless 写 stderr，同时记日志。subagent 不做这项检查，它们的 prompt 本来就可能没有目标文字（比如不能派发的 worker 没有 `task` 工具说明）。都不阻塞 prompt。
 - **范围**：只改 system prompt，不改随请求单独发送的工具 schema。`config.yml` 里的路径写死 `~/.omp/agent`，用 `PI_CODING_AGENT_DIR` 换 agent 目录时要同步改这一项。
+
+### 来源阅读充实度
+
+#### response-reading-coverage
+
+`response-reading-coverage/` 在完整和轻量模式下观察原生 `grep`、`glob`、`find`、`read` 调用。它估算返回的搜索来源是否经过阅读，不衡量读了多少行、理解深度、引用准确性或答案是否真的使用了来源。同名 SDK、MCP、extension 工具不计；shell、`eval`、浏览器和 AST 操作全部忽略，也不影响分组。只有被 `tool_call` 观察到的调用才能进入统计。
+
+- **分组**：连续搜索合并返回的文件身份；后续 read 属于该组，直到下一次搜索开始。文件和阅读只在本组内去重。搜索之前、上组或上轮读过的文件，以及目录列表，都不给本组 credit。失败 attempt 保留搜索/阅读的状态转换；失败 read 不给 credit。
+- **分数**：每个非空组是“已读的匹配文件 / 搜索文件”；回复取各组比率的算术平均，不合并分子分母。因此 `1/2`、`1/10` 两组得到 **30.0%**。仅展示时保留一位小数。已知空组是 N/A、不参与均值；没有可计算搜索文件时显示 N/A，不是 100%。metadata 缺失或无效、未结束调用、失败搜索、相关阅读身份有歧义时，回复显示**统计不完整**，不冒充完整百分比。
+- **身份**：搜索使用 `files` 或 `hits[].rel`，相对路径以结果 `cwd` 为基准（缺失时用调用时 cwd）。成功 read 回执提供 `meta.source`、`resolvedPath`；range、tail、raw 或摘要阅读均计一次。路径只做 lexical normalization，不探测文件系统或推断 symlink。内部 URI 只保留回执明确给出的 backing 别名，URL 不扩展别名。archive 回执只能给精确 input member credit，不能污染 sibling；有歧义的 member selector、非空组中的 composite read 均显示不完整。部分搜索结果有明确标记，只统计返回的文件。
+- **顺序**：调用时预留槽，按 `toolCallId` 填结果，只消费已完成的有序前缀。完成顺序不能把 read 移到另一个回复窗口。终止 settle 将未结束调用记为 unknown；迟到结果不能进入下一窗口。
+- **回复**：主会话只在终止且成功的 assistant 正文后报告，commentary、工具调用消息、错误和取消回复都不算。子 agent 的原生 `write agent://…` 有已接受的 recipient receipt 时，以及每次成功的原生 `yield`（含 incremental），分别结算窗口。失败发送/yield、没有收件人的 broadcast 不结算。终止的子回复尚有未消费的新来源时报告 `irc-auto`；它只确认 sender settle，不声称自动 relay 已送达。
+- **输出**：每份报告写正常的 `response-reading-coverage` session custom entry。主会话收到一条包含总结果和全部组的 info 通知；headless `--no-ui` 会隐藏通知。子 agent 另发可显示的 custom message，正文和结构化详情都进入 live root main，不只 immediate parent。根投递使用宿主正常消息 API，`triggerTurn: false` 在 idle main 不开启 turn；busy main 可能收到 steer 并继续。投递失败只记本地 warning，不重试、不 revive main，也不把已结束回复并入下一轮。
+- **生命周期**：内存按 live session 与 agent 隔离。真人/RPC 输入丢弃未完成窗口；extension 输入、IRC wake、compaction 不清空。session start/switch/branch/tree/shutdown 清理 live 状态。扩展不读或重放 session 历史、不写每次调用快照，也不恢复旧进程的未完成工作；custom entry 只作输出记录。
+
+扩展没有配置、模型调用、阻断阈值或额外安装列表条目。`/update-omp` 按现有扩展托管规则携带它的三个 `.ts` 模块，重启 OMP 后加载。升级宿主后，要在真实会话里重验原生 provenance/metadata、调用顺序、终止 phase、子 IRC/yield/wake 边界与根投递；静态类型检查不能证明这些契约。
 
 ### 派发与交付
 
