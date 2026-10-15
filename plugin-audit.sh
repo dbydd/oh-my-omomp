@@ -54,8 +54,9 @@ hist_keys() {
 }
 head_keys() { entries_at HEAD | norm_stream | sort -u; }
 installed_keys() {
+  # grep 的 1 表示空列表；仅忽略这个状态，保留命令或管道的实际错误。
   omp plugin list --json \
-    | grep -oE '"name"[[:space:]]*:[[:space:]]*"[^"]+"' \
+    | { grep -oE '"name"[[:space:]]*:[[:space:]]*"[^"]+"' || test "$?" -eq 1; } \
     | sed -E 's/.*:[[:space:]]*"([^"]+)".*/\1/' | sort -u
 }
 
