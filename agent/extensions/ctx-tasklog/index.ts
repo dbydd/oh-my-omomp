@@ -1,8 +1,8 @@
 /**
  * Records successful todo/goal mutations from tool_result for main and sub sessions.
- * Appends timestamped lines to local://task-log/<agent-id>.md, with a todo-more
- * set line after each todo mutation carrying a valid goal. Reads that file's
- * metadata to add its heading once. Read-only operations are not logged.
+ * Appends timestamped lines to local://task-log/<agent-id>.md, expanding committed
+ * todo-more changes in order and adding a set line only for an operation's own
+ * goal. Reads that file's metadata to add its heading once. Read-only operations are not logged.
  * Writes are serialized and failures are warned without failing the host hook.
  */
 import { appendFile, mkdir, stat } from "node:fs/promises";
@@ -43,6 +43,48 @@ interface TodoCounts {
 }
 const inputItemsSchema = z.array(z.object({ title: z.string() }));
 const inputPhasesSchema = z.array(z.object({ phase: z.string(), items: inputItemsSchema }));
+
+const changeNameSchema = z.string().min(1);
+const changeItemsSchema = z.array(z.object({ title: changeNameSchema, explanation: z.string() })).min(1);
+const changeGoalSchema = taskLogGoalSchema.optional();
+const todoMoreChangeSchema = z.union([
+	z.object({
+		op: z.literal("init"),
+		goal: taskLogGoalSchema,
+		list: z.array(z.object({ phase: z.string(), items: changeItemsSchema })).min(1),
+	}),
+	z.object({ op: z.literal("append"), phase: changeNameSchema, items: changeItemsSchema, goal: changeGoalSchema }),
+	z.object({ op: z.literal("start"), task: changeNameSchema, goal: changeGoalSchema }),
+	z.object({ op: z.literal("explain"), task: changeNameSchema, explanation: z.string(), goal: changeGoalSchema }),
+	z
+		.object({
+			op: z.enum(["done", "drop", "rm"]),
+			task: changeNameSchema.optional(),
+			phase: changeNameSchema.optional(),
+			goal: changeGoalSchema,
+		})
+		.refine((change) => change.task === undefined || change.phase === undefined, "must target at most one task or phase"),
+	z
+		.object({
+			op: z.literal("block"),
+			task: changeNameSchema.optional(),
+			phase: changeNameSchema.optional(),
+			reason: z.string().optional(),
+			goal: changeGoalSchema,
+		})
+		.refine((change) => (change.task === undefined) !== (change.phase === undefined), "must target one task or phase"),
+	z
+		.object({
+			op: z.literal("unblock"),
+			task: changeNameSchema.optional(),
+			phase: changeNameSchema.optional(),
+			goal: changeGoalSchema,
+		})
+		.refine((change) => (change.task === undefined) !== (change.phase === undefined), "must target one task or phase"),
+	z.object({ op: z.literal("goal"), goal: taskLogGoalSchema }),
+]);
+const todoMoreChangesSchema = z.array(todoMoreChangeSchema).min(1);
+type TodoMoreChange = z.infer<typeof todoMoreChangeSchema>;
 
 let writeTail: Promise<void> = Promise.resolve();
 
@@ -166,6 +208,19 @@ function formatTodoDetail(op: TodoOperation, input: Record<string, unknown>, det
 	}
 }
 
+function formatTodoMoreChanges(changes: TodoMoreChange[], timestamp: string): string {
+	const lines: string[] = [];
+	for (const change of changes) {
+		if (change.op !== "goal") {
+			// Each change describes its own operation, not the batch's final projection.
+			const detail = formatTodoDetail(change.op, change, undefined);
+			if (detail !== undefined) lines.push(`- ${timestamp} todo ${change.op}: ${detail}`);
+		}
+		if (change.goal !== undefined) lines.push(`- ${timestamp} todo-more set: ${JSON.stringify(change.goal)}`);
+	}
+	return lines.join("\n");
+}
+
 function formatGoalDetail(op: GoalOperation, input: Record<string, unknown>, details: GoalResultDetails | undefined): string | undefined {
 	switch (op) {
 		case "create":
@@ -245,6 +300,17 @@ export default function ctxTaskLog(pi: ExtensionAPI): void {
 			let detail: string | undefined;
 			let operation: TodoOperation | GoalOperation | undefined;
 			if (event.toolName === "todo") {
+				if (isRecord(event.details) && event.details.todoMore === true) {
+					if (event.details.op === "view" && event.details.changes === undefined) return;
+					const changes = todoMoreChangesSchema.safeParse(event.details.changes);
+					if (!changes.success) {
+						safeWarn(pi, new Error(`Invalid todo-more changes: ${changes.error.message}`));
+						return;
+					}
+					const target = resolveTaskLogPath(ctx);
+					await queueTaskLog(pi, target.path, target.agentId, formatTodoMoreChanges(changes.data, timestamp));
+					return;
+				}
 				const details = parseTodoDetails(event.details);
 				const op = todoOperation(input.op) ?? details?.op;
 				if (op === undefined) return;
