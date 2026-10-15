@@ -45,7 +45,14 @@ const inputItemsSchema = z.array(z.object({ title: z.string() }));
 const inputPhasesSchema = z.array(z.object({ phase: z.string(), items: inputItemsSchema }));
 
 const changeNameSchema = z.string().min(1);
-const changeItemsSchema = z.array(z.object({ title: changeNameSchema, explanation: z.string() })).min(1);
+const changeMinutesSchema = z
+	.number()
+	.int()
+	.positive()
+	.max(Math.floor(Number.MAX_SAFE_INTEGER / 60_000));
+const changeItemsSchema = z
+	.array(z.object({ title: changeNameSchema, explanation: z.string(), estimatedMinutes: changeMinutesSchema }))
+	.min(1);
 const changeGoalSchema = taskLogGoalSchema.optional();
 const todoMoreChangeSchema = z.union([
 	z.object({
@@ -56,6 +63,7 @@ const todoMoreChangeSchema = z.union([
 	z.object({ op: z.literal("append"), phase: changeNameSchema, items: changeItemsSchema, goal: changeGoalSchema }),
 	z.object({ op: z.literal("start"), task: changeNameSchema, goal: changeGoalSchema }),
 	z.object({ op: z.literal("explain"), task: changeNameSchema, explanation: z.string(), goal: changeGoalSchema }),
+	z.object({ op: z.literal("estimate"), task: changeNameSchema, estimatedMinutes: changeMinutesSchema, goal: changeGoalSchema }),
 	z
 		.object({
 			op: z.enum(["done", "drop", "rm"]),
@@ -211,11 +219,12 @@ function formatTodoDetail(op: TodoOperation, input: Record<string, unknown>, det
 function formatTodoMoreChanges(changes: TodoMoreChange[], timestamp: string): string {
 	const lines: string[] = [];
 	for (const change of changes) {
-		if (change.op !== "goal") {
+		if (change.op !== "goal" && change.op !== "estimate") {
 			// Each change describes its own operation, not the batch's final projection.
 			const detail = formatTodoDetail(change.op, change, undefined);
 			if (detail !== undefined) lines.push(`- ${timestamp} todo ${change.op}: ${detail}`);
 		}
+		// The existing history vocabulary has no estimate event; retain that policy without dropping the rest of a batch.
 		if (change.goal !== undefined) lines.push(`- ${timestamp} todo-more set: ${JSON.stringify(change.goal)}`);
 	}
 	return lines.join("\n");
