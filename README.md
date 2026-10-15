@@ -18,6 +18,7 @@ The reviewable, portable part of an Oh My Pi (OMP) configuration, tuned for heav
 |Path|Content|Location on the machine|
 |---|---|---|
 |`agent/config.yml`|OMP config, UI behavior, subagent model bindings|`~/.omp/agent/`|
+|`agent/SYSTEM_TEMPLATE.md`|Vendored Handlebars replacement for OMP's bundled base system prompt; live tool, skill, rule and runtime fields are still rendered by OMP|`~/.omp/agent/`|
 |`agent/APPEND_SYSTEM.md`|Appended system prompt for full mode|`~/.omp/agent/`|
 |`agent/extensions/append-system-model/APPEND_SYSTEM_MODEL.md`|Per-model appended system prompt for [append-system-model](#append-system-model); belongs to the machine, the repository ships none|`~/.omp/agent/extensions/append-system-model/`|
 |`agent/config-light.yml`, `agent/APPEND_SYSTEM_LIGHT.md`, `agent/omp-light.ts`|Light mode's config overlay, appended prompt (currently empty) and launcher source|`~/.omp/agent/`|
@@ -161,7 +162,7 @@ What is left alone:
 
 **Concurrency.** The updater serializes "fetch + apply" with the lock directory `~/.omp/omp-config-update.lock`; other OMP processes starting at the same time and `/update-omp` skip when they cannot take the lock. The lock records the holder's pid: a lock whose holder has exited is stale and can be taken over; a process only releases a lock it holds.
 
-**When changes take effect.** The update lands while the current session is running. `config.yml` hot-reloads, and changes to its `extensions` / `disabledExtensions` immediately suspend or resume extensions this process already loaded; `APPEND_SYSTEM_MODEL.md`, `system-prompt-replace.json`, `TURN-JUDGE-*.md`, `tool-policy-nag.json`, `PROMPT-INJECT-*.md` and `agents/` apply from the next prompt, the next turn, the next shell / eval call or the next dispatch. `APPEND_SYSTEM.md`, extension code changes (including extension files deleted or moved during relocation), new extensions and plugins wait for the next start; when such changes landed and the update had no error, the notification reminds you to restart. In other words, one session may briefly run new data with old extension code; after a restart they agree.
+**When changes take effect.** The update lands while the current session is running. `config.yml` hot-reloads, and changes to its `extensions` / `disabledExtensions` immediately suspend or resume extensions this process already loaded; `APPEND_SYSTEM_MODEL.md`, `system-prompt-replace.json`, `TURN-JUDGE-*.md`, `tool-policy-nag.json`, `PROMPT-INJECT-*.md` and `agents/` apply from the next prompt, the next turn, the next shell / eval call or the next dispatch. `SYSTEM_TEMPLATE.md`, `APPEND_SYSTEM.md`, extension code changes (including extension files deleted or moved during relocation), new extensions and plugins wait for the next start; when such changes landed and the update had no error, the notification reminds you to restart. In other words, one session may briefly run new data under old prompt or extension code; restart makes them consistent.
 
 **Notifications.** With changes and no error, one info notification states which commit it updated to and how many files were written, moved and deleted and how many plugins were installed, with a restart reminder when needed; with errors, a single warning shows the first error and no restart reminder (partial writes may already have landed; use `/omp-config-autoupdate run` for the detailed report). Already up to date, a failed fetch and a held lock are only logged. Headless mode shows no notification and only logs. The notification is a summary; the detailed report of `/omp-config-autoupdate run` lists only that run's own result: after an update applied successfully at startup, `run` only reports up to date; after an apply error at startup (no `.omp-config-applied` written), `run` applies again and lists every item, see [omp-config-autoupdate](#omp-config-autoupdate). A fetch that keeps failing produces no reminder at startup; use `run` to see the git error.
 
@@ -180,7 +181,7 @@ It reports actual writes, moves, deletions, plugin installs and uninstalls, and 
 
 It only reads the machine and never writes `~/.omp`, `~/.pi`, the `omp` install directory, PATH or shell config; the machine's file mtimes stay unchanged.
 
-- **Scope**: the root `config.yml`, `APPEND_SYSTEM.md`, `thinking-translator.json`, the three light-mode assets, `agents/`, the files inside extension directories that belong to the repository (see [Rules shared by both directions](#rules-shared-by-both-directions); the updater is among them), and `~/.pi/agent/pi-bansos-relay-state.json`. This matches the updater's managed set. `config.yml`'s machine-local fields and the machine's `extensions` entries are not written back to the repository.
+- **Scope**: the root `config.yml`, `SYSTEM_TEMPLATE.md`, `APPEND_SYSTEM.md`, `thinking-translator.json`, the three light-mode assets, `agents/`, the files inside extension directories that belong to the repository (see [Rules shared by both directions](#rules-shared-by-both-directions); the updater is among them), and `~/.pi/agent/pi-bansos-relay-state.json`. This matches the updater's managed set. `config.yml`'s machine-local fields and the machine's `extensions` entries are not written back to the repository.
 - **Not synced back**: the `omp-light`, `omp-light.ts` and `omp-light.cmd` installed beside `omp` (the three light-mode items are taken only from `~/.omp/agent`); files inside extension directories that belong to the machine; `.omp-config-applied`; the eight retired paths of [todo-more](#todo-more), which are never candidates even when an old machine still has them.
 - When the machine is still on the flat layout (a `.ts` named after one of this repository's extensions directly under `extensions/`), it stops and asks for `/update-omp` to migrate first: comparing against the flat layout would misread the repository's whole set of extension directories as deleted on the machine. The excluded retired Todo paths do not trigger this flat-layout check.
 - When the machine has no `pi-bansos-relay-state.json` (settings were never changed through `/bansos`), that does not count as "deleted on the machine"; the repository stays as it is.
@@ -264,8 +265,9 @@ The whole-file copy below is only for a new machine with no OMP config and no ol
 
 ```bash
 mkdir -p "$HOME/.omp/agent"
-cp agent/config.yml agent/APPEND_SYSTEM.md agent/thinking-translator.json \
-  agent/config-light.yml agent/APPEND_SYSTEM_LIGHT.md agent/omp-light.ts \
+cp agent/config.yml agent/SYSTEM_TEMPLATE.md agent/APPEND_SYSTEM.md \
+  agent/thinking-translator.json agent/config-light.yml \
+  agent/APPEND_SYSTEM_LIGHT.md agent/omp-light.ts \
   "$HOME/.omp/agent/"
 cp -a agent/agents agent/extensions agent/extensions-last "$HOME/.omp/agent/"
 mkdir -p "$HOME/.pi/agent"
@@ -326,12 +328,15 @@ Subagents come in three kinds: `task:*` execute, `discuss:*` hold read-only disc
 
 |What to change|Where|
 |---|---|
+|OMP's base system-prompt structure and general runtime policy|`agent/SYSTEM_TEMPLATE.md`|
 |Orchestration flow, how the agent kinds work together, how the final reply is written|`agent/APPEND_SYSTEM.md`|
 |An agent's responsibilities (`description`) and its own role prompt (body)|`agent/agents/<name>.md`|
 |Templates of the user's own words injected into some agents|`agent/extensions/user-prompt-inject/PROMPT-INJECT-*.md`, see [user-prompt-inject](#user-prompt-inject)|
 |Models, reasoning effort, runtime switches, disabled entries|`agent/config.yml`|
 
 The harness injects both `APPEND_SYSTEM.md` and every agent's `description` into the main agent, so the two never repeat each other. Subagents do not receive `APPEND_SYSTEM.md`; the rules they need are written into their own definitions.
+
+`SYSTEM_TEMPLATE.md` is the raw Handlebars override that OMP compiles with the current tools, skills, rules and runtime settings. It was copied byte-for-byte from OMP's bundled `packages/coding-agent/src/prompts/system/system-prompt.md` before repository-specific simplification. Do not rename it to `SYSTEM.md`: that override is plain text and would leave Handlebars expressions unrendered.
 
 Read `agent/agents/README.txt` before changing an agent definition; it lists pitfalls verified in practice: the default of `spawns`, names in `task.disabledAgents` cannot be spawned even when allowlisted, the recursion depth cap, a `yield`-only agent can lose its answer, a non-agent `.md` in the directory is parsed as a definition, and so on. Changes apply on the next dispatch without a restart; subagents already running are unaffected.
 
@@ -755,7 +760,7 @@ Appended for GPT-5 and o3 from any provider.
 
 #### system-prompt-replace
 
-`extensions-last/system-prompt-replace/` replaces text in the system prompt. OMP's built-in prompt templates (tool descriptions included) are bundled into the program with no override directory; this repository turns on `inlineToolDescriptors`, so built-in tool descriptions are part of the system prompt. Sentences that conflict with `APPEND_SYSTEM.md`, such as the `task` tool's "Omit \`agent\` only for default (\`task\`); NEVER specify it.", can only be fixed by rewriting system-prompt text.
+`extensions-last/system-prompt-replace/` replaces text in the rendered system prompt. The repository replaces OMP's bundled base template with `agent/SYSTEM_TEMPLATE.md`, but OMP still renders dynamic fields and inline tool descriptions into it at runtime. `system-prompt-replace` remains the last path-loaded extension so it can patch generated text that cannot be expressed by editing the template alone, such as a built-in tool description that conflicts with `APPEND_SYSTEM.md`.
 
 **Rules file**: `system-prompt-replace.json` in the same directory:
 
@@ -1034,6 +1039,7 @@ Limits:
 - **Never write the Otty marker literal in `omp-config-update.ts`**: the marker check is "contained anywhere in the file", and this file is itself a managed file, so writing it would mark the updater as app-managed and skip it in every later update.
 - **Helper sessions an extension creates must pass `taskDepth: 1`.** One-shot model calls all go through `runHelperPrompt` in `_shared/helper-session.ts`, which already passes it (`bro`, `doc-polish`, `input-polish`, `lang-nag` and `watchdog-agent`'s chat reviewer all use it); the only extension creating a session itself is `fork-task`'s shake, which passes it too. Without it the SDK treats the session as a main session, and `dispose()` tears down the global `AgentLifecycleManager`, turning every idle subagent into `Unknown agent` that can no longer be continued. `lang-nag` creates a helper session almost every turn, so missing it would cut subagents off quickly. Extensions that only call `completeSimple` (`task-split-check`, `task-completion-judge`) create no session and are not affected.
 - **After an OMP upgrade**, re-verify [fork-task](#fork-task), the independent [todo-more](#todo-more) plugin, [user-prompt-inject](#user-prompt-inject), [turn-judge](#turn-judge), [task-completion-judge](#task-completion-judge), [ctx-tool](#ctx-tool) (including after-compact injection), [ctx-tasklog](#ctx-tasklog), [bro](#bro) and [wt-tool](#wt-tool) in a real TUI; they depend on OMP internals (registry, session entries, tool/session hooks, host projections, the TUI and worktree dispatchers and so on). todo-more's `@upstream` comparisons and implementation updates happen in its plugin repository; this config repository verifies the read protocol and consumer results and never brings plugin source back.
+- **After an OMP upgrade**, compare `agent/SYSTEM_TEMPLATE.md` with OMP's bundled `packages/coding-agent/src/prompts/system/system-prompt.md` and deliberately merge relevant upstream changes. The repository override remains authoritative and does not update itself when OMP changes its bundled template.
 - **After an OMP upgrade**, if a `system-prompt-replace: … found no target` warning appears when the main session starts a model turn (`before_agent_start`), update `system-prompt-replace.json` to the new template text; when upstream deleted the sentence a rule rewrites, delete the rule. Also confirm that the extension load order [system-prompt-replace](#system-prompt-replace) relies on has not changed.
 - **Extensions that inject user messages set `attribution: "agent"`.** Otherwise it defaults to `user`, and [user-prompt-inject](#user-prompt-inject) injects it into the mentor and discussants as the user's own words.
 - **Before changing agent definitions** read `agent/agents/README.txt`; notes in that directory use `.txt`, never `.md`.

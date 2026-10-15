@@ -18,6 +18,7 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 |路径|内容|本机位置|
 |---|---|---|
 |`agent/config.yml`|OMP 配置、UI 行为、subagent 模型绑定|`~/.omp/agent/`|
+|`agent/SYSTEM_TEMPLATE.md`|OMP 内置基础 system prompt 的 Handlebars 覆盖副本；工具、skill、规则和运行时字段仍由 OMP 实时渲染|`~/.omp/agent/`|
 |`agent/APPEND_SYSTEM.md`|完整模式的追加系统提示词|`~/.omp/agent/`|
 |`agent/extensions/append-system-model/APPEND_SYSTEM_MODEL.md`|[append-system-model](#append-system-model) 按模型追加的系统提示词；属于本机，仓库不带|`~/.omp/agent/extensions/append-system-model/`|
 |`agent/config-light.yml`、`agent/APPEND_SYSTEM_LIGHT.md`、`agent/omp-light.ts`|轻量模式的配置覆盖、追加提示词（目前为空）、入口源码|`~/.omp/agent/`|
@@ -162,7 +163,7 @@ flowchart LR
 
 **并发**：更新器用锁目录 `~/.omp/omp-config-update.lock` 把“拉取 + 应用”串行化，同时启动的其他 OMP 和 `/update-omp` 拿不到锁就跳过。锁里记着持有者的 pid：持有进程已经退出的锁视为残留，可以抢占；进程只释放自己持有的锁。
 
-**生效时机**：更新在当前会话运行期间落地。`config.yml` 实时重载，其中 `extensions` / `disabledExtensions` 的改动会立即停用或恢复本进程已经加载过的扩展；`APPEND_SYSTEM_MODEL.md`、`system-prompt-replace.json`、`TURN-JUDGE-*.md`、`tool-policy-nag.json`、`PROMPT-INJECT-*.md`、`agents/` 从下一条 prompt、下一轮、下一次 shell / eval 调用或下一次派发开始生效。`APPEND_SYSTEM.md`、扩展代码的改动（包括迁移时删掉或移动的扩展文件）、新增的扩展和插件要到下次启动；有这类改动且更新没有出错时，通知会提醒重启。也就是说，同一个会话里可能暂时是新数据配旧扩展代码，重启后一致。
+**生效时机**：更新在当前会话运行期间落地。`config.yml` 实时重载，其中 `extensions` / `disabledExtensions` 的改动会立即停用或恢复本进程已经加载过的扩展；`APPEND_SYSTEM_MODEL.md`、`system-prompt-replace.json`、`TURN-JUDGE-*.md`、`tool-policy-nag.json`、`PROMPT-INJECT-*.md`、`agents/` 从下一条 prompt、下一轮、下一次 shell / eval 调用或下一次派发开始生效。`SYSTEM_TEMPLATE.md`、`APPEND_SYSTEM.md`、扩展代码的改动（包括迁移时删掉或移动的扩展文件）、新增的扩展和插件要到下次启动；有这类改动且更新没有出错时，通知会提醒重启。也就是说，同一个会话里可能暂时是新数据配旧提示词或扩展代码，重启后一致。
 
 **通知**：有改动且没有出错时弹一条 info，说明更新到哪个提交、写了几个、移动了几个、删了几个、补装了几个插件，需要时提醒重启；有错误时只弹一条 warning，给出第一条错误，不带重启提醒（部分写入可能已经落地，用 `/omp-config-autoupdate run` 看详细报告）。已是最新、拉取失败、锁被占用这三种情况只写日志。headless 模式不弹通知，只写日志。通知只给汇总；`/omp-config-autoupdate run` 的详细报告只列它自己那次运行的结果：启动时已成功应用的更新，再 `run` 只会报告已是最新；启动时应用出错（不写 `.omp-config-applied`）时，`run` 会重新应用并逐条列出，见 [omp-config-autoupdate](#omp-config-autoupdate)。一直拉取失败时启动不会提醒，用 `run` 看 git 报错。
 
@@ -181,7 +182,7 @@ flowchart LR
 
 只读本机，不写 `~/.omp`、`~/.pi`、`omp` 安装目录、PATH 或 shell 配置，本机文件的 mtime 前后不变。
 
-- **范围**：根目录的 `config.yml`、`APPEND_SYSTEM.md`、`thinking-translator.json`、轻量模式三项资产、`agents/`，扩展目录里归仓库的文件（见[两个方向共同的规则](#两个方向共同的规则)，更新器也在其中），以及 `~/.pi/agent/pi-bansos-relay-state.json`。与更新器的托管范围一致。`config.yml` 的本机字段和 `extensions` 的本机条目不写回仓库。
+- **范围**：根目录的 `config.yml`、`SYSTEM_TEMPLATE.md`、`APPEND_SYSTEM.md`、`thinking-translator.json`、轻量模式三项资产、`agents/`，扩展目录里归仓库的文件（见[两个方向共同的规则](#两个方向共同的规则)，更新器也在其中），以及 `~/.pi/agent/pi-bansos-relay-state.json`。与更新器的托管范围一致。`config.yml` 的本机字段和 `extensions` 的本机条目不写回仓库。
 - **不收回**：安装到 `omp` 旁边的 `omp-light`、`omp-light.ts`、`omp-light.cmd`（轻量模式三项只从 `~/.omp/agent` 取）；扩展目录里属于本机的文件；`.omp-config-applied`；[todo-more](#todo-more) 的八个退休路径，即使旧机器仍有它们也不进入收回候选。
 - 本机还是平铺布局（`extensions/` 下直接有本仓库扩展同名的 `.ts`）时直接停下，要求先执行 `/update-omp` 迁移：拿平铺布局比对会把仓库的整套扩展目录误判为本机已删除。已排除的退休 Todo 路径不触发这项旧布局检查。
 - 本机没有 `pi-bansos-relay-state.json`（从没用 `/bansos` 改过设置）时，不算“本机已删除”，仓库保持原样。
@@ -266,8 +267,9 @@ extensions/subagent-todo/index.ts
 
 ```bash
 mkdir -p "$HOME/.omp/agent"
-cp agent/config.yml agent/APPEND_SYSTEM.md agent/thinking-translator.json \
-  agent/config-light.yml agent/APPEND_SYSTEM_LIGHT.md agent/omp-light.ts \
+cp agent/config.yml agent/SYSTEM_TEMPLATE.md agent/APPEND_SYSTEM.md \
+  agent/thinking-translator.json agent/config-light.yml \
+  agent/APPEND_SYSTEM_LIGHT.md agent/omp-light.ts \
   "$HOME/.omp/agent/"
 cp -a agent/agents agent/extensions agent/extensions-last "$HOME/.omp/agent/"
 mkdir -p "$HOME/.pi/agent"
@@ -327,12 +329,15 @@ subagent 分三类：`task:*` 执行，`discuss:*` 只读讨论，`mentor:defaul
 
 |要改的|位置|
 |---|---|
+|OMP 的基础 system prompt 结构和通用运行策略|`agent/SYSTEM_TEMPLATE.md`|
 |编排流程、各类 agent 如何配合、最终回复怎么写|`agent/APPEND_SYSTEM.md`|
 |某个 agent 的职责（`description`）和它自己的角色提示（正文）|`agent/agents/<name>.md`|
 |注入给某些 agent 的用户原话模板|`agent/extensions/user-prompt-inject/PROMPT-INJECT-*.md`，见 [user-prompt-inject](#user-prompt-inject)|
 |模型、推理强度、运行开关、禁用入口|`agent/config.yml`|
 
 harness 会把 `APPEND_SYSTEM.md` 和每个 agent 的 `description` 都注入主 agent，所以两处不写重复内容。subagent 收不到 `APPEND_SYSTEM.md`，它需要的规则写在自己的定义里。
+
+`SYSTEM_TEMPLATE.md` 是 OMP 用当前工具、skill、规则和运行时设置编译的原始 Handlebars 覆盖模板。仓库先从 OMP 内置的 `packages/coding-agent/src/prompts/system/system-prompt.md` 逐字复制，再在后续变更中统一和精简。不要改名为 `SYSTEM.md`：后者是纯文本覆盖，会让 Handlebars 表达式得不到渲染。
 
 改 agent 定义前先读 `agent/agents/README.txt`，里面是实测过的陷阱：`spawns` 的默认值、`task.disabledAgents` 里的名字即使列进 allowlist 也派不出去、递归深度上限、只有 `yield` 的 agent 会丢答案、目录里的非 agent `.md` 会被当成定义解析等。改动在下次派发时生效，不用重启；已经在跑的 subagent 不受影响。
 
@@ -756,7 +761,7 @@ model: "(gpt-5|o3)"
 
 #### system-prompt-replace
 
-`extensions-last/system-prompt-replace/` 对 system prompt 做文字替换。OMP 内置的提示词模板（包括工具说明）打包在程序里，没有覆盖目录；本仓库打开了 `inlineToolDescriptors`，内置工具的说明拼在 system prompt 里。和 `APPEND_SYSTEM.md` 冲突的句子，例如 `task` 工具的 “Omit \`agent\` only for default (\`task\`); NEVER specify it.”，只能靠改写 system prompt 文字修正。
+`extensions-last/system-prompt-replace/` 对渲染后的 system prompt 做文字替换。本仓库用 `agent/SYSTEM_TEMPLATE.md` 覆盖 OMP 内置的基础模板，但 OMP 仍会在运行时把动态字段和内联工具说明渲染进去。`system-prompt-replace` 继续作为最后一个按路径加载的扩展，用来修补不能只靠编辑模板表达的生成文本，例如与 `APPEND_SYSTEM.md` 冲突的内置工具说明。
 
 **规则文件**：同目录的 `system-prompt-replace.json`：
 
@@ -1036,6 +1041,7 @@ overlay 里上下键或滚轮滚动，解释完整生成后 `C` 复制到系统�
 - **不要在 `omp-config-update.ts` 里写出 Otty 标记的字面量**：标记检查是“文件任意位置含有”，这个文件自己也是托管文件，写出来就会被当成应用托管文件，从此跳过更新。
 - **扩展建的辅助会话必须传 `taskDepth: 1`。** 一次性的模型调用统一走 `_shared/helper-session.ts` 的 `runHelperPrompt`，它已经传了（`bro`、`doc-polish`、`input-polish`、`lang-nag`、`watchdog-agent` 的聊天 reviewer 都用它）；自己建会话的只有 `fork-task` 的 shake，也传了。不传的话 SDK 把它当主会话，`dispose()` 时会销毁全局 `AgentLifecycleManager`，所有空闲 subagent 变成 `Unknown agent`，无法再续聊。`lang-nag` 几乎每轮都建辅助会话，漏传会让 subagent 很快失联。只调用 `completeSimple` 的扩展（`task-split-check`、`task-completion-judge`）不建会话，不涉及这条。
 - **升级 OMP 后**，在真实 TUI 里重新验证 [fork-task](#fork-task)、独立 [todo-more](#todo-more) 插件、[user-prompt-inject](#user-prompt-inject)、[turn-judge](#turn-judge)、[task-completion-judge](#task-completion-judge)、[ctx-tool](#ctx-tool)（含 compact 后注入）、[ctx-tasklog](#ctx-tasklog)、[bro](#bro) 和 [wt-tool](#wt-tool)，它们依赖 OMP 内部实现（registry、会话条目、tool/session hooks、宿主投影、TUI 与 worktree dispatcher 等）。todo-more 的 `@upstream` 对照和实现更新在其插件仓库完成；配置仓库验证只读协议与消费者结果，不收回插件源码。
+- **升级 OMP 后**，比较 `agent/SYSTEM_TEMPLATE.md` 与 OMP 内置的 `packages/coding-agent/src/prompts/system/system-prompt.md`，有选择地合并相关上游改动。仓库覆盖模板始终是权威来源，不会随 OMP 的内置模板自动更新。
 - **升级 OMP 后**，主会话开始模型回合时（`before_agent_start`）如果弹出 `system-prompt-replace: … found no target` 警告，就按新的模板文字改 `system-prompt-replace.json`；上游删掉了规则要改写的那句话时，删掉这条规则。同时确认 [system-prompt-replace](#system-prompt-replace) 依赖的扩展加载顺序没变。
 - **扩展注入用户消息时写 `attribution: "agent"`。** 不写就默认 `user`，[user-prompt-inject](#user-prompt-inject) 会把它当成用户原话注入 mentor 和 discussant。
 - **改 agent 定义前**读 `agent/agents/README.txt`；目录里的笔记用 `.txt`，不要用 `.md`。

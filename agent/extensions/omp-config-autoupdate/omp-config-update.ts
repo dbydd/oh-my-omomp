@@ -255,7 +255,7 @@ const STRUCTURED: readonly StructuredItem[] = [
 function managedPlain(rel: string): boolean {
 	if (rel.split("/").some((part) => part.startsWith("."))) return false;
 	return (
-		/^agent\/(APPEND_SYSTEM|APPEND_SYSTEM_LIGHT)\.md$/.test(rel) ||
+		/^agent\/(SYSTEM_TEMPLATE|APPEND_SYSTEM|APPEND_SYSTEM_LIGHT)\.md$/.test(rel) ||
 		/^agent\/(config-light\.yml|omp-light\.ts)$/.test(rel) ||
 		/^agent\/agents\/.+$/.test(rel) ||
 		/^agent\/(extensions|extensions-last)\/[^/]+\/[^/]+\.ts$/.test(rel) ||
@@ -266,7 +266,7 @@ function managedPlain(rel: string): boolean {
 }
 
 /** Extension code takes effect on the next start; the updater script itself runs fresh each time. */
-const RESTART_SCOPED = /^agent\/(APPEND_SYSTEM\.md|extensions\/.+\.ts|extensions-last\/.+\.ts)$/;
+const RESTART_SCOPED = /^agent\/(SYSTEM_TEMPLATE\.md|APPEND_SYSTEM\.md|extensions\/.+\.ts|extensions-last\/.+\.ts)$/;
 
 // --- report -----------------------------------------------------------------
 
@@ -1158,7 +1158,7 @@ function formatReport(report: ApplyReport, check: boolean): string {
 	for (const note of report.notes) lines.push(`note: ${note}`);
 	for (const error of report.errors) lines.push(`error: ${error}`);
 	if (report.written.length + report.moved.length + report.deleted.length === 0) lines.push("no file changes");
-	if (report.restartNeeded && report.errors.length === 0) lines.push("restart OMP: APPEND_SYSTEM.md, extensions or plugins changed");
+	if (report.restartNeeded && report.errors.length === 0) lines.push("restart OMP: system prompt, extensions or plugins changed");
 	return lines.join("\n");
 }
 

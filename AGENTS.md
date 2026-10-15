@@ -4,10 +4,11 @@
 
 `omp-config` is the auditable, version-controlled slice of the user's Oh My Pi
 (`omp`) coding-harness configuration — **not** a full `~/.omp` backup
-(`README.md:5`). It holds only reviewable inputs: harness config, full and
-light system prompts, light-mode config and launcher source, custom subagent
-definitions, local TypeScript extensions (one directory each, with the
-extension's own config files and templates beside its code), the agent-root
+(`README.md:5`). It holds only reviewable inputs: harness config, the vendored
+Handlebars base system-prompt template, full and light system-prompt appendices,
+light-mode config and launcher source, custom subagent definitions, local
+TypeScript extensions (one directory each, with the extension's own config files
+and templates beside its code), the agent-root
 `thinking-translator.json` for `omp-thinking-translator`, the `pi-bansos`
 plugin state (`pi/agent/pi-bansos-relay-state.json`), the plugin install
 list, the repo → machine updater (`agent/extensions/omp-config-autoupdate/omp-config-update.ts`) with its
@@ -34,6 +35,7 @@ The repo is consumed by `omp` in two directions:
 flowchart LR
   subgraph repo["omp-config (this repo)"]
     A["agent/config.yml"]
+    S["agent/SYSTEM_TEMPLATE.md"]
     P["agent/APPEND_SYSTEM.md"]
     PM["agent/extensions/&lt;name&gt;/ (index.ts, modules, own config + templates)"]
     L1["agent/config-light.yml"]
@@ -49,7 +51,7 @@ flowchart LR
   end
   GH["GitHub default branch → ~/.omp/omp-config-src"]
   subgraph machine["~/.omp/agent"]
-    LA["config.yml / APPEND_SYSTEM.md"]
+    LA["config.yml / SYSTEM_TEMPLATE.md / APPEND_SYSTEM.md"]
     LT["thinking-translator.json"]
     LG["agents/"]
     LE["extensions/&lt;name&gt;/ / extensions/_shared/ / extensions-last/"]
@@ -106,9 +108,10 @@ flowchart LR
   `glob` walk returns — no sort, not filename order — so filename prefixes
   cannot order extensions.
 - **Two one-way syncs, never one "sync".** `/sync-omp-config` never writes the
-  machine; its sync range includes the three light assets, the agent-root
-  `thinking-translator.json`, the extension modules (the updater script included) and shipped templates, the structured
-  extension configs, and `~/.pi/agent/pi-bansos-relay-state.json`, but excludes installed
+  machine; its sync range includes the root `SYSTEM_TEMPLATE.md`, the three light
+  assets, the agent-root `thinking-translator.json`, the extension modules (the
+  updater script included) and shipped templates, the structured extension
+  configs, and `~/.pi/agent/pi-bansos-relay-state.json`, but excludes installed
   PATH launchers, `.omp-config-applied`, and every host-owned file inside an extension
   directory. It stops on a machine still on the flat extension layout and asks for
   `/update-omp` first. Repo → machine is the updater
@@ -382,6 +385,13 @@ exercised in a real omp session.
   feature toggles (`astGrep.enabled: true`, `github.enabled: true`,
   `fetch.enabled: true`, `browser.enabled: false`, `todo.enabled: false` — native
   todo is off; the installed `omp-todo-more` plugin provides `todo`).
+- `agent/SYSTEM_TEMPLATE.md` — the repository's raw Handlebars replacement for OMP's
+  bundled base system prompt. OMP compiles it with the current tools, skills, rules and
+  runtime settings; `SYSTEM.md` is not equivalent because it is plain text. The file is
+  initially a byte-for-byte copy of
+  `packages/coding-agent/src/prompts/system/system-prompt.md`. After an OMP upgrade,
+  compare the bundled source and deliberately merge relevant upstream changes; the
+  repository override does not update itself.
 - `agent/APPEND_SYSTEM.md` — global system-prompt appendix (user-instruction precedence, the final-reply
   contract, orchestration stance, no-token-saving rule, design-document read-in-full rule, spawn briefing,
   agent chat and lifecycle, agent tiers, shared-checkout vs `isolated: true` rules, tool policy). Task children
@@ -513,8 +523,9 @@ Direct-migration copy set (never copy the whole `agent/`; `README.md`):
 
 ```bash
 mkdir -p "$HOME/.omp/agent"
-cp agent/config.yml agent/APPEND_SYSTEM.md agent/thinking-translator.json \
-  agent/config-light.yml agent/APPEND_SYSTEM_LIGHT.md agent/omp-light.ts \
+cp agent/config.yml agent/SYSTEM_TEMPLATE.md agent/APPEND_SYSTEM.md \
+  agent/thinking-translator.json agent/config-light.yml \
+  agent/APPEND_SYSTEM_LIGHT.md agent/omp-light.ts \
   "$HOME/.omp/agent/"
 cp -a agent/agents agent/extensions agent/extensions-last "$HOME/.omp/agent/"
 mkdir -p "$HOME/.pi/agent"
@@ -556,8 +567,9 @@ restart, whose first automatic apply (no `.omp-config-applied` yet) installs
   lock dir (`~/.omp/omp-config-update.lock`) sit one level above it.
 - The installed `omp-light` entry is not stored in `~/.omp/agent`: it is
   placed beside the resolved `omp` executable so the existing `PATH` finds it.
-- **Restart required:** `APPEND_SYSTEM.md`, extension code, new extensions, and plugins take effect on
-  the next `omp` start (`.omp/commands/update-omp.md`, 生效时机); `config.yml`
+- **Restart required:** `SYSTEM_TEMPLATE.md`, `APPEND_SYSTEM.md`, extension code, new extensions,
+  and plugins take effect on the next `omp` start (`.omp/commands/update-omp.md`, 生效时机);
+  `config.yml`
   hot-reloads, so `extensions` / `disabledExtensions` changes suspend or resume
   already-loaded extensions live, and agent `*.md` edits apply on next spawn
   without restart. An automatic update lands during the
