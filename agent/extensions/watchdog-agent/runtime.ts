@@ -311,7 +311,7 @@ function describe(runtime: Runtime, spec: WatchdogSpec): string {
 	const override = runtime.overrides.get(spec.filePath);
 	const state = !targetsHere(runtime, spec) ? "not for this session" : effectiveEnabled(runtime, spec) ? "ON" : "OFF";
 	const session = override === undefined ? "—" : override ? "on" : "off";
-	const backend = spec.kind === "jev" ? `jev ${spec.judge.provider}/${spec.judge.modelId}` : `chat ${spec.model ?? "@advisor"}`;
+	const backend = spec.kind === "jev" ? "native @judge" : `chat ${spec.model ?? "@advisor"}`;
 	return `${spec.name}: ${state} · global ${spec.enabled ? "on" : "off"} · session ${session} · target ${spec.targets.join(",")} · every ${spec.every} · scope ${spec.scope} · ${backend}\n  ${spec.filePath}`;
 }
 

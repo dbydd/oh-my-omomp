@@ -200,15 +200,12 @@ export async function runReviewer(
 	}
 }
 
-/** Native Jev answers a typed choice, not a chat message. The injected text is the chosen option's author-written prompt. */
+/** Native JUDGE answers a typed choice; the chosen option supplies the injected text. */
 export async function runJev(pi: ExtensionAPI, ctx: ExtensionContext, spec: JevWatchdog, transcript: string): Promise<Verdict | null> {
 	const signal = AbortSignal.timeout(REVIEW_TIMEOUT_MS);
-	const opened = await openNativeJudge(ctx, spec.judge, signal);
-	if (opened.kind === "unavailable") {
-		pi.logger.warn(`watchdog "${spec.name}": native judge unavailable — skipping`, { error: opened.reason });
-		return null;
-	}
-	const { model, judge } = opened;
+	const opened = await openNativeJudge(ctx);
+	if (opened.kind === "inactive") return null;
+	const { judge, model } = opened;
 	try {
 		const criteria: Record<string, string | null> = {};
 		for (const option of spec.options) criteria[option.label] = option.criteria;
@@ -220,7 +217,7 @@ export async function runJev(pi: ExtensionAPI, ctx: ExtensionContext, spec: JevW
 			{ signal },
 		);
 		if (result.usage.cost.total === 0) {
-			// Judgments report input/output tokens; price missing costs at the model's base rates.
+			// Native judgments may omit price; preserve the model's base-rate estimate.
 			const cost = result.usage.cost;
 			cost.input = (model.cost.input / 1_000_000) * result.usage.input;
 			cost.output = (model.cost.output / 1_000_000) * result.usage.output;

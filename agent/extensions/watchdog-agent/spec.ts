@@ -18,15 +18,6 @@ const GRANTABLE_TOOLS: Record<string, true> = {
 	bash: true,
 	eval: true,
 };
-const THINKING_SUFFIXES: Record<string, true> = {
-	off: true,
-	minimal: true,
-	low: true,
-	medium: true,
-	high: true,
-	xhigh: true,
-	max: true,
-};
 
 const DEFAULT_MAX_PER_CONTEXT = Number.POSITIVE_INFINITY; // advisories per watchdog per context; unlimited unless configured.
 const DEFAULT_EVERY = 30; // watched actions (tool calls + text replies) between runs.
@@ -69,7 +60,6 @@ type JevOption = {
 
 export type JevWatchdog = WatchdogBase & {
 	readonly kind: "jev";
-	readonly judge: { readonly provider: string; readonly modelId: string };
 	readonly instructions: string;
 	readonly options: readonly JevOption[];
 };
@@ -163,21 +153,11 @@ export function parseWatchdogFile(path: string): WatchdogParse {
 		guidance: body.trim(),
 		filePath: path,
 	};
-	if (fields.judge !== undefined) {
-		const judge = unquote(fields.judge);
-		const slash = judge.indexOf("/");
-		if (
-			fields.model !== undefined ||
-			fields.tools !== undefined ||
-			fields.note !== undefined ||
-			!common.guidance ||
-			slash <= 0 ||
-			slash === judge.length - 1 ||
-			THINKING_SUFFIXES[judge.slice(judge.lastIndexOf(":") + 1).toLowerCase()] === true
-		) {
+	if (Object.keys(fields).some((key) => key.startsWith("option."))) {
+		if (fields.model !== undefined || fields.tools !== undefined || fields.note !== undefined || !common.guidance) {
 			return {
 				kind: "invalid",
-				reason: "judge requires provider/model and a nonempty body; model, tools, note and thinking suffixes are not allowed",
+				reason: "native JUDGE options require a nonempty body; model, tools and note are not allowed",
 			};
 		}
 		const parsed = parseJevOptions(fields, delivery);
@@ -188,7 +168,6 @@ export function parseWatchdogFile(path: string): WatchdogParse {
 			spec: {
 				...common,
 				kind: "jev",
-				judge: { provider: judge.slice(0, slash), modelId: judge.slice(slash + 1) },
 				instructions: instructions || DEFAULT_JEV_INSTRUCTIONS,
 				options: parsed.options,
 			},

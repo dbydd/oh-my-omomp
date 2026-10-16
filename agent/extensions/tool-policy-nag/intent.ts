@@ -23,10 +23,9 @@
 
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { JudgmentState } from "@oh-my-pi/pi-ai";
-import { type ExtensionContext, z } from "@oh-my-pi/pi-coding-agent";
+import type { Judge, JudgmentState } from "@oh-my-pi/pi-ai";
+import { z } from "@oh-my-pi/pi-coding-agent";
 import { errorText } from "../_shared/errors.ts";
-import { type JudgeRef, openNativeJudge } from "../_shared/judge.ts";
 import type { WatchedCall } from "./calls.ts";
 
 const JUDGE_TIMEOUT_MS = 90_000;
@@ -50,6 +49,7 @@ export type IntentSpec = {
 export type IntentSpecLoad =
 	| { readonly kind: "found"; readonly spec: IntentSpec }
 	| { readonly kind: "missing" }
+	| { readonly kind: "disabled" }
 	| { readonly kind: "invalid"; readonly reason: string };
 
 const optionSchema = z.object({
@@ -64,10 +64,7 @@ const specSchema = z.object({
 });
 const frontmatterSchema = z.record(z.string(), z.unknown());
 
-/**
- * The spec beside this module, read per call. `enabled: false` reports the
- * spec as missing so the lane goes quiet without touching its configuration.
- */
+/** The spec beside this module, read per call; explicit off stays distinct from missing. */
 export async function loadIntentSpec(directory: string): Promise<IntentSpecLoad> {
 	let names: string[];
 	try {
@@ -95,7 +92,7 @@ export function parseIntentSpec(path: string, raw: string): IntentSpecLoad {
 	if (!fields.success) return { kind: "invalid", reason: "frontmatter is not a mapping" };
 	const parsed = specSchema.safeParse(fields.data);
 	if (!parsed.success) return { kind: "invalid", reason: parsed.error.message };
-	if (!parsed.data.enabled) return { kind: "missing" };
+	if (!parsed.data.enabled) return { kind: "disabled" };
 	const options: IntentOption[] = [];
 	for (const [label, option] of Object.entries(parsed.data.options)) {
 		options.push({ label, title: option.title, tool: option.tool, rubric: option.rubric });
@@ -112,24 +109,7 @@ export type IntentVerdict =
 	| { readonly kind: "failed"; readonly reason: string };
 
 /** One request, one choice question: the model picks the call's intent. */
-export async function judgeIntent(
-	ctx: ExtensionContext,
-	ref: JudgeRef,
-	spec: IntentSpec,
-	call: WatchedCall,
-	signal: AbortSignal,
-): Promise<IntentVerdict> {
-	const opened = await openNativeJudge(ctx, ref, signal);
-	switch (opened.kind) {
-		case "unavailable":
-			return { kind: "failed", reason: opened.reason };
-		case "ready":
-			break;
-		default: {
-			const unreachable: never = opened;
-			return unreachable;
-		}
-	}
+export async function judgeIntent(judge: Judge, spec: IntentSpec, call: WatchedCall, signal: AbortSignal): Promise<IntentVerdict> {
 	try {
 		const criteria: Record<string, string> = {};
 		for (const option of spec.options) criteria[option.label] = option.rubric;
@@ -137,7 +117,7 @@ export async function judgeIntent(
 			call.kind === "shell"
 				? { tool: call.tool, command: call.command, tty: call.tty }
 				: { tool: "eval", language: call.language, code: call.code };
-		const result = await opened.judge.judge(
+		const result = await judge.judge(
 			{ state, questions: { intent: { type: "choice", instructions: spec.instructions, criteria } } },
 			{ signal },
 		);

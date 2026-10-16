@@ -28,22 +28,23 @@
  *   programs and the writing steps. Deterministic and independent of the other
  *   lanes: a call can be a tool violation, a risk, both, or neither.
  *
- * DELIVERY IS SHARED. At most one reminder per watched call: when the intent
- * lane is enabled it owns delivery, because its reminder names the intent and
- * the tool; the form lane still counts, logs and keeps its state, and sends its
- * generic nudge only when the intent lane is not enabled. Both lanes log their
- * own verdicts.
+ * DELIVERY IS SHARED. At most one tool reminder per watched call: configured
+ * intent with a valid enabled spec and native JUDGE owns delivery. Otherwise
+ * form delivers its generic nudge. A native request failure does not fall back
+ * to form. Risk runs independently before intent preparation.
  *
  * Registers session lifecycle and tool_call hooks; appends counter entries to
  * the session branch and injects attributed user reminders. Main sessions only.
  * Hook failures are logged and do not escape into omp.
  */
+import type { Judge } from "@oh-my-pi/pi-ai";
 import { type ExtensionAPI, type ExtensionContext, z } from "@oh-my-pi/pi-coding-agent";
 import { errorText } from "../_shared/errors.ts";
+import { openNativeJudge } from "../_shared/judge.ts";
 import { type WatchedCall, watchedCallOf } from "./calls.ts";
 import { type IntentLane, type Lanes, loadLanes } from "./detector-config.ts";
 import { detectEvalViolations, detectShellViolations } from "./heuristic.ts";
-import { intentReminder, intentViolation, JUDGE_TIMEOUT_MS, judgeIntent, loadIntentSpec } from "./intent.ts";
+import { type IntentSpec, intentReminder, intentViolation, JUDGE_TIMEOUT_MS, judgeIntent, loadIntentSpec } from "./intent.ts";
 import { inspectRisk, riskReminder } from "./risk.ts";
 
 const NAG_TEXT = "你为什么不遵守system prompt。";
@@ -155,10 +156,10 @@ function heuristicCheck(
 		"warning",
 	);
 }
-function runForMainSession(pi: ExtensionAPI, ctx: ExtensionContext, handler: () => void): void {
+async function runForMainSession(pi: ExtensionAPI, ctx: ExtensionContext, handler: () => void | Promise<void>): Promise<void> {
 	if (ctx.agent.kind !== "main") return;
 	try {
-		handler();
+		await handler();
 	} catch (error) {
 		pi.logger.warn("Tool-policy nag hook failed", { error: errorText(error) });
 	}
@@ -196,17 +197,18 @@ export default function toolPolicyNag(pi: ExtensionAPI): void {
 		if (ctx.hasUI) ctx.ui.notify(text, "warning");
 	};
 
-	/** Runs beside the tool call; the verdict lands after it, so the reminder goes out as an aside. */
-	const intentCheck = async (ctx: ExtensionContext, lane: IntentLane, call: WatchedCall): Promise<void> => {
-		const startedAt = epoch;
+	/** Resolve all activation inputs once, before deciding which tool lane owns delivery. */
+	const prepareIntent = async (ctx: ExtensionContext): Promise<{ readonly judge: Judge; readonly spec: IntentSpec } | null> => {
 		const loaded = await loadIntentSpec(SPEC_DIR);
 		switch (loaded.kind) {
 			case "missing":
 				warnOnce(ctx, `tool-policy-nag: 意向 spec 缺失（${SPEC_DIR}/INTENT-*.md），意向通道不提醒`);
-				return;
+				return null;
 			case "invalid":
 				warnOnce(ctx, `tool-policy-nag: 意向 spec 无效（${loaded.reason}），意向通道不提醒`);
-				return;
+				return null;
+			case "disabled":
+				return null;
 			case "found":
 				break;
 			default: {
@@ -214,8 +216,14 @@ export default function toolPolicyNag(pi: ExtensionAPI): void {
 				return unreachable;
 			}
 		}
-		const spec = loaded.spec;
-		const verdict = await judgeIntent(ctx, lane.judge, spec, call, AbortSignal.timeout(JUDGE_TIMEOUT_MS));
+		const opened = await openNativeJudge(ctx);
+		return opened.kind === "inactive" ? null : { judge: opened.judge, spec: loaded.spec };
+	};
+
+	/** Runs beside the tool call; the verdict lands after it, so the reminder goes out as an aside. */
+	const intentCheck = async (ctx: ExtensionContext, judge: Judge, lane: IntentLane, spec: IntentSpec, call: WatchedCall): Promise<void> => {
+		const startedAt = epoch;
+		const verdict = await judgeIntent(judge, spec, call, AbortSignal.timeout(JUDGE_TIMEOUT_MS));
 		switch (verdict.kind) {
 			case "failed":
 				warnOnce(ctx, `tool-policy-nag: 意向判定失败（${verdict.reason}）`);
@@ -269,7 +277,7 @@ export default function toolPolicyNag(pi: ExtensionAPI): void {
 	);
 
 	pi.on("tool_call", (event, ctx) =>
-		runForMainSession(pi, ctx, () => {
+		runForMainSession(pi, ctx, async () => {
 			if (event.toolName !== "write" && nestedDeviceCalls.delete(event.toolCallId)) return;
 			const call = watchedCallOf(event.toolName, event.input);
 			if (call === null) return;
@@ -277,12 +285,6 @@ export default function toolPolicyNag(pi: ExtensionAPI): void {
 			if (event.toolName === "write") nestedDeviceCalls.add(event.toolCallId);
 			const { lanes, warnings }: { lanes: Lanes; warnings: readonly string[] } = loadLanes(ctx.cwd);
 			for (const warning of warnings) warnOnce(ctx, warning);
-			if (lanes.form !== null) heuristicCheck(pi, ctx, call, state, commit, lanes.intent === null);
-			if (lanes.intent !== null) {
-				void intentCheck(ctx, lanes.intent, call).catch((error) => {
-					pi.logger.warn("Tool-policy nag hook failed", { error: errorText(error) });
-				});
-			}
 			if (lanes.risk !== null && call.kind === "shell") {
 				const finding = inspectRisk(call.command, lanes.risk);
 				if (finding !== null) {
@@ -298,6 +300,21 @@ export default function toolPolicyNag(pi: ExtensionAPI): void {
 						);
 					}
 				}
+			}
+			const startedAt = epoch;
+			const intent =
+				lanes.intent === null
+					? null
+					: await prepareIntent(ctx).catch((error) => {
+							warnOnce(ctx, `tool-policy-nag: JUDGE 准备失败（${errorText(error)}）`);
+							return null;
+						});
+			if (epoch !== startedAt) return;
+			if (lanes.form !== null) heuristicCheck(pi, ctx, call, state, commit, intent === null);
+			if (lanes.intent !== null && intent !== null) {
+				void intentCheck(ctx, intent.judge, lanes.intent, intent.spec, call).catch((error) => {
+					pi.logger.warn("Tool-policy nag hook failed", { error: errorText(error) });
+				});
 			}
 		}),
 	);

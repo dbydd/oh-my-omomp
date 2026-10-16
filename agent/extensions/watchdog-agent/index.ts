@@ -11,10 +11,10 @@
 // `WATCHDOG.md` / `WATCHDOG.yml`. What it does NOT do is route the *guidance
 // content itself* to a specific target: every advised session receives the
 // whole discovered roster. This extension adds exactly that — a `WATCHDOG-*.md`
-// file declares in its frontmatter WHICH agent it watches (`target: main` or a
-// subagent name) and WHICH model reviews, and its body only ever reaches that
-// target. There is no ExtensionAPI hook into the native advisor, so this is a
-// small self-contained reviewer, not an extension of the native subsystem.
+// file declares WHICH agent it watches (`target: main` or a subagent name).
+// Chat reviewers may choose a model; option-based judgments follow OMP's JUDGE
+// role. Its body only reaches that target. There is no ExtensionAPI hook into
+// the native advisor, so this is a small self-contained reviewer.
 //
 // FILE FORMAT. `WATCHDOG-<label>.md`, discovered at:
 //   - user level:  <agent dir>/extensions/watchdog-agent/WATCHDOG-*.md
@@ -24,10 +24,9 @@
 //   target: main            # main | <subagent-name> | * | subagents | CSV list
 //   model:  anthropic/claude-sonnet-4-5:medium   # chat reviewer; else @advisor role
 //   tools:  [read, grep, glob]                   # optional; chat reviewer's tools
-//   judge:  typesafe/jev-latest                  # alternative native Jev backend
-//   instructions: Judge only the latest work.    # optional Jev question text
-//   option.<label>: <criteria>                   # Jev choice option (>= 2); empty = name suffices
-//   option.<label>.prompt: <text>                # injected when Jev picks <label>; omit = silent
+//   instructions: Judge only the latest work.    # optional native question text
+//   option.<label>: <criteria>                   # selects native JUDGE backend (>= 2)
+//   option.<label>.prompt: <text>                # injected when JUDGE picks <label>; omit = silent
 //   option.<label>.delivery: steer               # optional per-option delivery override
 //   name:   Architecture                          # optional label; `/watchdog` addresses it by name
 //   enabled: true                                 # optional, default true; `/watchdog on|off <name> global` rewrites it
@@ -35,11 +34,11 @@
 //   maxPerContext: 6                              # optional per-watchdog cap; default unlimited
 //   every:  30                                    # run after this many watched actions (default 30)
 //   scope:  full                                  # full (whole branch, default) | window (since own last run)
-// Body = review priorities for chat; judgment criterion for Jev. Jev evaluates
-// only the supplied transcript and picks one configured option; the injected
-// text is that option's author-written prompt. Jev has no tools, free-form
-// explanation, or implicit chat fallback. Labels are lowercased (the frontmatter
-// parser lowercases keys) and each value is a single line.
+// Body = review priorities for chat; judgment criterion for native JUDGE.
+// Option-based watchdogs need OMP's JUDGE role to resolve first to a native
+// judgment backend; otherwise they stay inactive. Native JUDGE has no tools,
+// free-form explanation, or implicit chat fallback. Labels are lowercased
+// (the frontmatter parser lowercases keys); each value is a single line.
 //
 // RUNTIME. Every discovered watchdog matching the session identity runs
 // independently with its own counter, cursor and cap. The counter
@@ -52,7 +51,7 @@
 // whole branch; `scope: window` reviews only messages after the cursor, which
 // advances only when a review reaches a verdict and is persisted as a session
 // entry. The transcript is never truncated. Chat reviewers use a
-// tool-capable `createAgentSession`; native Jev uses `Judge.judge` and only
+// tool-capable `createAgentSession`; native JUDGE uses `Judge.judge` and only
 // selects one configured option whose prewritten prompt (if any) is injected.
 // Findings go through `sendUserMessage`, bounded per watchdog per context when
 // `maxPerContext` is set; `nextTurn` findings wait for the user's next prompt
