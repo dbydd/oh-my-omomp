@@ -10,10 +10,10 @@ description: 把本机 ~/.omp/agent 配置和 pi-bansos 状态同步进本仓库
 
 本机 `~/.omp/agent` 与仓库 `agent/` 按同名一一对应，范围与更新器 `agent/extensions/omp-config-autoupdate/omp-config-update.ts` 的 `managedPlain` 和 `STRUCTURED` 一致，改一边就要改另一边：
 
-- 根目录：`config.yml`、`SYSTEM_TEMPLATE.md`、`APPEND_SYSTEM.md`、`thinking-translator.json`、`config-light.yml`、`APPEND_SYSTEM_LIGHT.md`、`omp-light.ts`，以及 `agents/` 整个目录。
-- 扩展目录里只有这些属于仓库：`extensions/<名字>/*.ts`（含 `extensions/_shared/*.ts` 和更新器 `extensions/omp-config-autoupdate/omp-config-update.ts`）、`extensions-last/<名字>/*.ts`、`extensions/user-prompt-inject/PROMPT-INJECT-*.md`、`extensions/turn-judge/TURN-JUDGE-*.md`、`extensions/tool-policy-nag/INTENT-*.md`，以及结构化配置 `extensions/lang-nag/lang-nag.json`、`extensions/input-polish/input-polish.json`、`extensions/tool-policy-nag/tool-policy-nag.json`、`extensions-last/system-prompt-replace/system-prompt-replace.json`。
-- 扩展目录里的其他文件属于本机，不收回：`extensions/doc-polish/doc-polish.json`、`extensions/bro/bro-settings.json` 和 `bro-prompt.md`、`extensions/omp-config-autoupdate/omp-config-autoupdate.json`、`extensions/append-system-model/APPEND_SYSTEM_MODEL.md`、`extensions/model-compaction/model-compaction.json`、`extensions/watchdog-agent/WATCHDOG-*.md`，以及仓库没有的同名模式模板。
-- 已退休的 Todo 源码不收回，即使旧机器仍有文件，也不进入“仓库缺失/不同/已删除”候选：`extensions/todo-more/index.ts`、`tool.ts`、`render.ts`、`reminders.ts`、`planning.ts`（后四个同属 `extensions/todo-more/`），`extensions/_shared/todo-more.ts`、`extensions/subagent-todo.ts`、`extensions/subagent-todo/index.ts`。独立插件的安装只按第 3 步处理，不复制其 package 或内部 reader。
+- 根目录：`config.yml`、`SYSTEM_TEMPLATE.md`、`APPEND_SYSTEM.md`、`PERSONALITY.md`、`thinking-translator.json`、`config-light.yml`、`APPEND_SYSTEM_LIGHT.md`、`omp-light.ts`，以及 `agents/` 整个目录。
+- 扩展目录里只有这些属于仓库：`extensions/<名字>/*.ts`（含 `extensions/_shared/*.ts` 和更新器 `extensions/omp-config-autoupdate/omp-config-update.ts`）、`extensions-last/<名字>/*.ts`、`extensions/user-prompt-inject/PROMPT-INJECT-*.md`、`extensions/turn-judge/TURN-JUDGE-*.md`、`extensions/tool-policy-nag/INTENT-*.md`，以及结构化配置 `extensions/lang-nag/lang-nag.json`、`extensions/input-polish/input-polish.json`、`extensions/tool-policy-nag/tool-policy-nag.json`、`extensions/task-completion-judge/task-completion-judge.json`、`extensions-last/system-prompt-replace/system-prompt-replace.json`。
+- 扩展目录里的其他文件属于本机，不收回：`extensions/doc-polish/doc-polish.json`、`extensions/omp-config-autoupdate/omp-config-autoupdate.json`、`extensions/append-system-model/APPEND_SYSTEM_MODEL.md`、`extensions/model-compaction/model-compaction.json`、`extensions/watchdog-agent/WATCHDOG-*.md`，以及仓库没有的同名模式模板。
+- 已退休的 Todo 源码不收回，即使旧机器仍有文件，也不进入“仓库缺失/不同/已删除”候选：`extensions/todo-more/index.ts`、`tool.ts`、`render.ts`、`reminders.ts`、`planning.ts`（后四个同属 `extensions/todo-more/`），`extensions/_shared/todo-more.ts`、`extensions/subagent-todo.ts`、`extensions/subagent-todo/index.ts`。已迁入 omp-todo-more 的 ctx 源码同样不收回：`extensions/ctx-tool/index.ts`、`inventory.ts`、`post-compact-hint.ts`、`extensions/ctx-tasklog/index.ts`、`extensions/_shared/task-log.ts`。独立插件的安装只按第 3 步处理，不复制其 package 或内部 reader。
 
 本机 `settings.json` 不在范围内：`config.yml` 存在时 OMP 不再把它的 `extensions` 当扩展包根目录，但其中的 TS/JS 扩展模块条目照样加载，属于本机。
 
@@ -34,7 +34,7 @@ description: 把本机 ~/.omp/agent 配置和 pi-bansos 状态同步进本仓库
 3. `~/.omp/plugins/package.json` 的依赖与 `install-plugins.sh` 的列表不一致时，重写列表：URL/Git 依赖原样保留，npm 依赖去掉版本号。列表里注释掉的条目是可选插件，本机装了也保持注释、不改成有效条目，也不算差异。
 4. 校验：
    - 普通文件与本机 `cmp` 一致；结构化配置除 `config.yml` 的本机字段和本机列表条目外，与本机逐字段一致。
-   - `config.yml`、`config-light.yml` 能用 `Bun.YAML.parse` 解析，`thinking-translator.json`、`system-prompt-replace.json`、`lang-nag.json`、`input-polish.json`、`tool-policy-nag.json`、`pi-bansos-relay-state.json` 能用 `JSON.parse` 解析；`bun run check` 通过（收回的扩展代码要能过格式、lint 和类型检查）。
+   - `config.yml`、`config-light.yml` 能用 `Bun.YAML.parse` 解析，`thinking-translator.json`、`system-prompt-replace.json`、`lang-nag.json`、`input-polish.json`、`tool-policy-nag.json`、`task-completion-judge.json`、`pi-bansos-relay-state.json` 能用 `JSON.parse` 解析；`bun run check` 通过（收回的扩展代码要能过格式、lint 和类型检查）。
    - 仓库里没有明文凭据：`sk-`、`ghp_`、超长的 `apiKey:` 值。
    - `git status --short` 里没有运行时文件、插件运行时文件或已安装入口。
 5. 提交并推送，commit message 用 `chore: sync snapshot with local omp config`，正文列出本机实际变化。

@@ -19,7 +19,7 @@ The following properties come from measurements in an isolated HOME (omp 18.8.7,
 
 1. **omp does not report config faults through its exit code.** An extension import that throws, a `session_start` or `before_agent_start` that throws, or a system-prompt-replace rule that finds no target all exit the process with 0. Faults show up in only three places: stderr (such as `Failed to load extension …` or `system-prompt-replace: … found no target …`), RPC `extension_error` events, and `warn` / `error` records in `$HOME/.omp/logs/omp.<date>.<pid>.log`.
 2. **Some faults appear only with a real model request.** `before_agent_start` runs only when a prompt is prepared, and omp checks model credentials before that; without a usable model, startup-only checks never reach these hooks.
-3. **Every model the config references needs paid credentials.** `task.agentModelOverrides`, `extensions/lang-nag/lang-nag.json`, `extensions/input-polish/input-polish.json` and `thinking-translator.json` reference models of openai-codex, anthropic, opencode-go and bansos; CI has none of these credentials, and helpers referencing them report "model unavailable" on their own.
+3. **Every model the config references needs paid credentials.** `task.agentModelOverrides`, `extensions/lang-nag/lang-nag.json`, `extensions/input-polish/input-polish.json`, `extensions/task-completion-judge/task-completion-judge.json` and `thinking-translator.json` reference models of openai-codex, anthropic, opencode-go and bansos; CI has none of these credentials, and helpers referencing them report "model unavailable" on their own.
 4. **The Kilo gateway's `:free` models allow anonymous calls at no charge** (kilo.ai docs: 200 per IP per hour). `nvidia/nemotron-3-ultra-550b-a55b:free` handles the full config's system prompt (about 20k tokens). Measured at the same time: the free `bansos` Muse in the config and Zen big-pickle returned 429 `FreeUsageLimitError`; `opencode-go` charges by its official price list; Kilo `cohere/north-mini-code:free` returned 422 for the full config's request.
 5. **The repository is public.** PR code from forks is untrusted, and workflows for fork PRs get no secrets.
 
@@ -138,7 +138,7 @@ The check does not cover:
 
 - tool calls and subagent dispatch paths (the behavior of tools such as `fork_task`, `todo-more`'s `todo` and its reminders, `isolation-nudge`, `task-split-check`, `task-completion-judge` and `ctx`);
 - the availability and credentials of the paid models themselves;
-- TUI-only behavior (`input-polish`'s keys and overlay, `omp-thinking-translator`'s rendering, `bro`'s overlay);
+- TUI-only behavior (`input-polish`'s keys and overlay, `omp-thinking-translator`'s rendering);
 - the networked path of automatic update (`auto`, `/omp-config-autoupdate run`) and the maintenance commands (`/update-omp`, `/sync-omp-config`, `/migrate-omp-keys`);
 - `omp-light.cmd` on Windows.
 

@@ -1,11 +1,10 @@
 extensions: []
 disabledExtensions:
-  - extension-module:ctx-tasklog
-  - extension-module:ctx-tool
   - extension-module:doc-polish
   - extension-module:fork-task
   - extension-module:isolation-nudge
   - extension-module:lang-nag
+  - extension-module:response-reading-coverage
   - extension-module:task-completion-judge
   - extension-module:task-split-check
   - extension-module:tool-policy-nag
@@ -13,3 +12,5 @@ disabledExtensions:
   - extension-module:user-prompt-inject
   - extension-module:watchdog-agent
   - extension-module:wt-tool
+task:
+  eager: "default"

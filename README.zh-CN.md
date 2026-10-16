@@ -20,6 +20,7 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 |`agent/config.yml`|OMP 配置、UI 行为、subagent 模型绑定|`~/.omp/agent/`|
 |`agent/SYSTEM_TEMPLATE.md`|OMP 内置基础 system prompt 的 Handlebars 覆盖副本；工具、skill、规则和运行时字段仍由 OMP 实时渲染|`~/.omp/agent/`|
 |`agent/APPEND_SYSTEM.md`|完整模式的追加系统提示词|`~/.omp/agent/`|
+|`agent/PERSONALITY.md`|完整模式的说话风格块：OMP `personality: default` 预设文字逐字照抄，其后是本仓库针对研究与分析文体的 `# Writing` 行文风格|`~/.omp/agent/`|
 |`agent/extensions/append-system-model/APPEND_SYSTEM_MODEL.md`|[append-system-model](#append-system-model) 按模型追加的系统提示词；属于本机，仓库不带|`~/.omp/agent/extensions/append-system-model/`|
 |`agent/extensions/model-compaction/model-compaction.json`|[model-compaction](#model-compaction) 按模型设定的自动 compact 触发点；属于本机，仓库不带|`~/.omp/agent/extensions/model-compaction/`|
 |`agent/config-light.yml`、`agent/APPEND_SYSTEM_LIGHT.md`、`agent/omp-light.ts`|轻量模式的配置覆盖、追加提示词（目前为空）、入口源码|`~/.omp/agent/`|
@@ -28,7 +29,7 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 |`agent/extensions/user-prompt-inject/PROMPT-INJECT-*.md`|[user-prompt-inject](#user-prompt-inject) 的模板：把用户原话注入 mentor 和 discussant|`~/.omp/agent/extensions/user-prompt-inject/`|
 |`agent/extensions/turn-judge/TURN-JUDGE-*.md`|[turn-judge](#turn-judge) 的判定配置：每轮结束后通过 OMP 的 JUDGE 角色判断一个问题；仓库不带文件，只判本机自己写的|`~/.omp/agent/extensions/turn-judge/`|
 |`agent/agents/`|subagent 定义；`README.txt` 记录编写陷阱|`~/.omp/agent/agents/`|
-|`agent/extensions/`|本地扩展，每个扩展一个目录：`<名字>/index.ts` 是入口，同目录的其他 `.ts` 是它自己的模块，它自己的配置和模板也放在这里；`_shared/` 是多个扩展共用的代码。扩展配置 `lang-nag/lang-nag.json`、`input-polish/input-polish.json`、`tool-policy-nag/tool-policy-nag.json` 随更新器同步；`doc-polish/doc-polish.json` 属于本机，只作示例，见 [`/update-omp`](#update-omp仓库--本机)|`~/.omp/agent/extensions/`|
+|`agent/extensions/`|本地扩展，每个扩展一个目录：`<名字>/index.ts` 是入口，同目录的其他 `.ts` 是它自己的模块，它自己的配置和模板也放在这里；`_shared/` 是多个扩展共用的代码。扩展配置 `lang-nag/lang-nag.json`、`input-polish/input-polish.json`、`tool-policy-nag/tool-policy-nag.json`、`task-completion-judge/task-completion-judge.json` 随更新器同步；`doc-polish/doc-polish.json` 属于本机，只作示例，见 [`/update-omp`](#update-omp仓库--本机)|`~/.omp/agent/extensions/`|
 |`agent/extensions-last/`|要在其他按路径加载的扩展之后执行的扩展，由 `config.yml` 的 `extensions` 末项显式加载；目前只有 [system-prompt-replace](#system-prompt-replace)，替换规则 `system-prompt-replace.json` 在它的目录里。那里的 `README.md` 和 `README.zh-CN.md` 只给仓库看，不同步|`~/.omp/agent/extensions-last/`|
 |`pi/agent/pi-bansos-relay-state.json`|`pi-bansos` 插件状态|`~/.pi/agent/`|
 |`install-plugins.sh`、`plugin-audit.sh`|插件安装、插件漂移检查|—|
@@ -64,9 +65,9 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 
 **用 hashline edit 约束副作用。** hashline edit 先读当前文件，再明确指定编辑范围，把写入绑定到观察过的快照。协议由 `read`、`edit` 工具说明负责，基础模板和附录不再重印。read 说明先解释统一的 source + view 协议，再链接完整规范 `omp://tools/read.md`。
 
-**在完整模式中，把 todo 与 ctx 作为一套联合工具。** todo 负责维护任务生命周期；模型在普通结束路径上停下而 todo 尚未完成时，todo 会要求 agent 继续（原生 TodoTracker 的提醒，现由 [todo-more](#todo-more) 照原生逻辑实现），因此不必靠 loop 反复注入 prompt。它也会减少因小挫折而过早询问用户：最后一条回复是在问用户问题时，提醒不催；其余情况下，还有 pending / in_progress 项就继续由 agent 处理。等待外部回复时显式标 blocked，由 Todo 工具自己的协议要求，不是提醒的判断条件。自动继续存在误判风险，但这里选择承担这项风险，而不是频繁中断操作员。
+**两种模式下，把 todo 与 ctx 作为一套联合工具。** todo 负责维护任务生命周期；模型在普通结束路径上停下而 todo 尚未完成时，todo 会要求 agent 继续（原生 TodoTracker 的提醒，现由 [todo-more](#todo-more) 照原生逻辑实现），因此不必靠 loop 反复注入 prompt。它也会减少因小挫折而过早询问用户：最后一条回复是在问用户问题时，提醒不催；其余情况下，还有 pending / in_progress 项就继续由 agent 处理。等待外部回复时显式标 blocked，由 Todo 工具自己的协议要求，不是提醒的判断条件。自动继续存在误判风险，但这里选择承担这项风险，而不是频繁中断操作员。
 
-每次成功的 todo 修改都会被 `ctx-tasklog` 捕获；`ctx` 按这些事件重放任务的最终状态，形成不依赖模型自行总结的简短行事记录。主会话发生 compact 后，`ctx-tool` 会把这份记录连同 context 树注入新 context。这里的 `todo` 由独立插件 [omp-todo-more](#todo-more) 提供：`config.yml` 仍关掉原生 todo（`todo.enabled: false`），配置仓库不再复制其实现。每个列表带 goal 和各项 explanation，插件保留原生基础上的提醒，并恢复 `task:*` worker 的 todo；worker 定义同时要求每个切片维护自己的列表。日志与审查消费者各自消费公开契约，不导入插件 reader。
+每次成功的 todo 修改都会被 [omp-todo-more](#todo-more) 插件内的 task log hook（`src/ctx/tasklog.ts`）捕获；`ctx` 由同一插件注册，按这些事件重放任务的最终状态，形成不依赖模型自行总结的简短行事记录。主会话发生 compact 后，插件把这份记录连同 context 树注入新 context。这里的 `todo` 由独立插件 [omp-todo-more](#todo-more) 提供：`config.yml` 仍关掉原生 todo（`todo.enabled: false`），配置仓库不再复制其实现。每个列表带 goal 和各项 explanation，插件保留原生基础上的提醒，并恢复 `task:*` worker 的 todo；worker 定义同时要求每个切片维护自己的列表。完成判定消费者只消费公开契约 `omp-todo-more:read`，不导入插件 reader。
 
 **把非法工具调用当作整体偏离的信号。** [tool-policy-nag](#tool-policy-nag) 检测模型是否绕开内置工具，只提醒，不拦截命令。OMP 的 JUDGE 角色可用且首选为原生判定模型时，意图通道自动参与，每次调用判断该用哪个工具；否则由字符串通道计数，超过阈值后发通用提醒。目标不是追求形式上完美的“古典”工具调用，而是在偏离扩散到其他规则之前及时校正。
 
@@ -79,6 +80,8 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 **单独补偿语言设置丢失。** Claude 的 server compact 之后，重新注入的 system prompt 可能没有恢复语言约束。[lang-nag](#lang-nag) 因此独立检查回复语言，并在下一次输入前补充提醒；它不改写已经发出的回复。
 
 **把最终回复当作唯一的交付物。** 正文使用有主语的完整句子，第一次出现时说明对象，每条结论旁边放决定性证据。不用类比；表格、图或正文由原生模板的适配规则选择。本地表达约束在 `agent/APPEND_SYSTEM.md` 的 `# The user sees only the final reply`。
+
+**给书面产出单独的表达约束。** 报告、文章和分析由信息密度决定，而不是由叙述决定：证据优先，机制和商业后果先于故事，允许复杂推理，删掉解释性重复。段落开头直接给结论、数字或机制；一句话交代时间、主体、行为、规模和来源；多个对象或多个指标用一张表，不逐行复述；章节按研究问题划分，不为结构完整保留引言。这条约束同时列出要删的内容——过程叙述和自我评价、对已经交代来源、范围和含义的事实再解释一遍、反复的免责声明、意义段、教程式逐步讲解、在自己表格之后重述的章节、重复全文的总结——并给出段落删除测试：删掉一个段落后，读者对事实、数字、机制、适用条件和结论的理解不变，这个段落就不该保留。该行文风格在 `agent/PERSONALITY.md` 的 `# Writing`，与仓库照抄的 OMP 默认人格块放在一起。
 
 ### Context 管理
 
@@ -131,8 +134,8 @@ flowchart LR
 
 ### 两个方向共同的规则
 
-- **结构化配置按字段处理。** `config.yml`、`thinking-translator.json`、`extensions-last/system-prompt-replace/system-prompt-replace.json`、`extensions/lang-nag/lang-nag.json`、`extensions/input-polish/input-polish.json`、`extensions/tool-policy-nag/tool-policy-nag.json`、`pi-bansos-relay-state.json` 都按字段比对，只改有差异的字段。`/sync-omp-config` 写仓库时只改这些行，不整文件覆盖，也不重新序列化。仓库 → 本机由更新器写入：合并结果与仓库文件完全一致时原样复制仓库文件，否则重新序列化整个文件（键的顺序不变，格式可能与原文件不同）。两端都必须能解析：YAML 用 `Bun.YAML.parse`，JSON 用 `JSON.parse`。
-- **扩展目录里只有代码和仓库带的模板归仓库**：`extensions/<名字>/*.ts`、`extensions-last/<名字>/*.ts`、`extensions/user-prompt-inject/PROMPT-INJECT-*.md`、`extensions/turn-judge/TURN-JUDGE-*.md`，加上上面的结构化配置。同一目录里的其他文件属于本机，两个方向都不碰：`bro-settings.json`、`bro-prompt.md`、`omp-config-autoupdate.json`、`doc-polish.json`、`APPEND_SYSTEM_MODEL.md`、`model-compaction.json`、`WATCHDOG-*.md`，以及本机自己写的模板。Todo 的八个退休路径不再收回或作为普通模块写入，范围见 [todo-more](#todo-more)。
+- **结构化配置按字段处理。** `config.yml`、`thinking-translator.json`、`extensions-last/system-prompt-replace/system-prompt-replace.json`、`extensions/lang-nag/lang-nag.json`、`extensions/input-polish/input-polish.json`、`extensions/tool-policy-nag/tool-policy-nag.json`、`extensions/task-completion-judge/task-completion-judge.json`、`pi-bansos-relay-state.json` 都按字段比对，只改有差异的字段。`/sync-omp-config` 写仓库时只改这些行，不整文件覆盖，也不重新序列化。仓库 → 本机由更新器写入：合并结果与仓库文件完全一致时原样复制仓库文件，否则重新序列化整个文件（键的顺序不变，格式可能与原文件不同）。两端都必须能解析：YAML 用 `Bun.YAML.parse`，JSON 用 `JSON.parse`。
+- **扩展目录里只有代码和仓库带的模板归仓库**：`extensions/<名字>/*.ts`、`extensions-last/<名字>/*.ts`、`extensions/user-prompt-inject/PROMPT-INJECT-*.md`、`extensions/turn-judge/TURN-JUDGE-*.md`，加上上面的结构化配置。同一目录里的其他文件属于本机，两个方向都不碰：`omp-config-autoupdate.json`、`doc-polish.json`、`APPEND_SYSTEM_MODEL.md`、`model-compaction.json`、`WATCHDOG-*.md`，以及本机自己写的模板。Todo 的八个退休路径和 ctx 的五个路径不再收回或作为普通模块写入，范围见 [todo-more](#todo-more)。
 - **`config.yml` 的本机字段两个方向都不动**，例如 `modelRoles`、`theme`、`compaction.thresholdTokens`，完整列表是更新器 `omp-config-update.ts` 的 `LOCAL_CONFIG_FIELDS`。
 - **`config.yml` 的 `extensions` 由仓库和本机共用**（更新器的 `MACHINE_LIST_FIELDS`）：仓库列表里的条目归仓库，仓库列表里没有的条目（如 `~/.claude`）归本机。更新器把本机条目留在仓库条目前面，所以 `extensions-last/` 下的扩展仍是最后一项；`/sync-omp-config` 不把本机条目写回仓库。仓库删掉自己的条目时，自动更新照常删掉它（见下面的“删除”）。
 - **本机的 `settings.json` 不迁移。** OMP 对它的 `extensions` 分两种处理：当作扩展包根目录（从中加载 skills、rules、commands 等）时，本机有 `config.yml` 就不读它；当作 TS/JS 扩展模块时，不管有没有 `config.yml` 都照样加载其中的条目。
@@ -146,8 +149,8 @@ flowchart LR
 1. **取仓库**：更新器在 `~/.omp/omp-config-src` 维护一份自己的浅克隆，从 `https://github.com/oh-my-omp/omp-config.git` 拉 `master` 分支（仓库的默认分支，写死在更新器的 `DEFAULT_BRANCH` 里）。克隆的 origin 还是仓库迁移前的地址 `https://github.com/mouriya-s-lab/omp-config.git` 时，先把它改到新地址再拉；这个目录存在但不是这个仓库的克隆时不碰它，直接报错。拉取失败（如断网，包括还没有克隆时的首次克隆失败）时这次不更新：克隆只是上次拉取时的副本，不能代替 GitHub 上的默认分支，下次启动再拉。
 2. **只在提交变化时应用**：新提交和 `<agent 目录>/.omp-config-applied` 记录的上次应用提交相同就什么都不做，所以没有新提交时，`/settings`、`/bansos` 改过的托管值不会被每次启动改回去。应用规则取自新提交里的 `omp-config-update.ts`，改了更新规则的提交按自己的规则应用。
 3. **规划与插件就绪**：先校验仓库里的所有结构化配置（含 `config-light.yml`）能解析成映射，再规划文件写入、迁移和删除；preflight 有错就不切换。然后补装缺失插件，再从 OMP owner catalog 核对独立 Todo 的 enabled、manifest entry 和实际入口文件。缺插件且不允许安装、安装失败、disabled、坏 entry 或退休对象冲突时，不写消费者、不删旧实现、不记完成。
-4. **写入与删除**：插件就绪后先移动，再依次写普通文件、JSON、`config.yml`，最后删除。Todo 切换的 move/write 阶段只要有错误，整个 delete 阶段都不执行，保留旧 reader/实现，已成功的部分写入如实报告、不回滚。每个文件先写同目录临时文件再 rename；普通目标是 symlink 时写到它指向的文件，symlink 保留。一般删除只按 git 记录的“上次应用的提交 → 新提交”计算：托管文件、结构化配置里仓库删掉的键，以及 `extensions` 条目；本机自己的键和字段保留，删完为空才删映射，整个结构化配置文件被删时本机文件不动。首次运行或旧提交不可读时，不做 git-derived 删除，但平铺迁移和插件就绪后的八路径 Todo 退休照常规划；退休仅 unlink 已知叶，不删除目录或链接 backing。
-5. **从平铺布局迁移**（自动更新和 `/update-omp` 都做，规则在更新器文件头的 RELOCATIONS）：本机还有平铺的 `extensions/<名字>.ts`、而仓库带了 `extensions/<名字>/index.ts` 时，删掉平铺文件，否则同一个扩展会加载两次（`ctx-post-compact-hint.ts` 由 `ctx-tool/` 取代）；平铺文件是应用托管的就报错，不删。根目录旧的更新器 `omp-config-update.ts` 也删掉，由 `extensions/omp-config-autoupdate/` 里的取代。结构化配置从旧位置（如 `extensions/lang-nag.json`、根目录的 `system-prompt-replace.json`）读出本机的值，合并写到新位置后删掉旧文件，本机自己加的键保留。根目录的本机数据（`APPEND_SYSTEM_MODEL.md`、`bro-prompt.md`、`bro-settings.json`、`omp-config-autoupdate.json`、`WATCHDOG-*.md`、本机自己写的 `PROMPT-INJECT-*.md` / `TURN-JUDGE-*.md`）和 `extensions/doc-polish.json` 在新位置空着时改名移进各自的扩展目录；新位置已有文件时留在原处并在报告里说明；symlink 不移动。仓库带的模板（现在或上次应用的提交里有的）旧副本直接删掉。`config.yml` 的 `extensions` 里旧的 `~/.omp/agent/extensions-last/system-prompt-replace.ts` 条目删掉。
+4. **写入与删除**：插件就绪后先移动，再依次写普通文件、JSON、`config.yml`，最后删除。Todo 切换的 move/write 阶段只要有错误，整个 delete 阶段都不执行，保留旧 reader/实现，已成功的部分写入如实报告、不回滚。每个文件先写同目录临时文件再 rename；普通目标是 symlink 时写到它指向的文件，symlink 保留。一般删除只按 git 记录的“上次应用的提交 → 新提交”计算：托管文件、结构化配置里仓库删掉的键，以及 `extensions` 条目；本机自己的键和字段保留，删完为空才删映射，整个结构化配置文件被删时本机文件不动。首次运行或旧提交不可读时，不做 git-derived 删除，但平铺迁移、插件就绪后的八路径 Todo 退休，以及插件含 `src/ctx` 时的 ctx 退休照常规划；退休仅 unlink 已知叶，不删除目录或链接 backing。
+5. **从平铺布局迁移**（自动更新和 `/update-omp` 都做，规则在更新器文件头的 RELOCATIONS）：本机还有平铺的 `extensions/<名字>.ts`、而仓库带了 `extensions/<名字>/index.ts` 时，删掉平铺文件，否则同一个扩展会加载两次；平铺文件是应用托管的就报错，不删。根目录旧的更新器 `omp-config-update.ts` 也删掉，由 `extensions/omp-config-autoupdate/` 里的取代。结构化配置从旧位置（如 `extensions/lang-nag.json`、根目录的 `system-prompt-replace.json`）读出本机的值，合并写到新位置后删掉旧文件，本机自己加的键保留。根目录的本机数据（`APPEND_SYSTEM_MODEL.md`、`omp-config-autoupdate.json`、`WATCHDOG-*.md`、本机自己写的 `PROMPT-INJECT-*.md` / `TURN-JUDGE-*.md`）和 `extensions/doc-polish.json` 在新位置空着时改名移进各自的扩展目录；新位置已有文件时留在原处并在报告里说明；symlink 不移动。仓库带的模板（现在或上次应用的提交里有的）旧副本直接删掉。`config.yml` 的 `extensions` 里旧的 `~/.omp/agent/extensions-last/system-prompt-replace.ts` 条目删掉。
 
    装着旧更新器（还在根目录）的机器，自动更新会去拉取结果的 `agent/omp-config-update.ts` 找新更新器，找不到就报 `has no agent/omp-config-update.ts`，什么都不应用。这样的机器要在仓库里手动执行一次 `/update-omp`，装上新位置的更新器，之后自动更新恢复正常。
 6. **插件**：`install-plugins.sh` 声明缺失项，由 `omp install` 在文件 ops 之前补装，从不卸载或顺手升级。一般按依赖列表比较；Todo 另外以 OMP catalog 的包身份和入口确认接管就绪，不能用 dependency 字符串代替。
@@ -158,13 +161,13 @@ flowchart LR
 不动的东西：
 
 - `config.yml` 里仓库没有的键和本机字段，`extensions` 里仓库列表没有、也不是仓库刚删掉的条目，结构化配置里只有本机才有的键。本机字段即使本机没有，也不从仓库补；仓库把本机字段的上级键改成非映射值时，本机的映射保留。例外：仓库把自己的某个键从映射改成标量时以仓库为准，本机在这个映射下加的键随之消失。
-- 托管范围以外的文件：本机多出来的扩展、agent、模板，扩展目录里属于本机的文件（`doc-polish/doc-polish.json` 等初始化项、`bro-settings.json`、开关文件），运行时状态。
+- 托管范围以外的文件：本机多出来的扩展、agent、模板，扩展目录里属于本机的文件（`doc-polish/doc-polish.json` 等初始化项、开关文件），运行时状态。
 - 应用托管的文件：每次覆盖和删除前都检查标记，结构化配置也一样。
 - 本机解析不了的按字段合并配置（上面列出的七个结构化配置）：不覆盖并报告错误；preflight 有错误时整次不执行切换。`config-light.yml` 按普通文件整份复制，本机那份坏了会被直接覆盖。
 
 **并发**：更新器用锁目录 `~/.omp/omp-config-update.lock` 把“拉取 + 应用”串行化，同时启动的其他 OMP 和 `/update-omp` 拿不到锁就跳过。锁里记着持有者的 pid：持有进程已经退出的锁视为残留，可以抢占；进程只释放自己持有的锁。
 
-**生效时机**：更新在当前会话运行期间落地。`config.yml` 实时重载，其中 `extensions` / `disabledExtensions` 的改动会立即停用或恢复本进程已经加载过的扩展；`APPEND_SYSTEM_MODEL.md`、`system-prompt-replace.json`、`TURN-JUDGE-*.md`、`tool-policy-nag.json`、`PROMPT-INJECT-*.md`、`agents/` 从下一条 prompt、下一轮、下一次 shell / eval 调用或下一次派发开始生效。`SYSTEM_TEMPLATE.md`、`APPEND_SYSTEM.md`、扩展代码的改动（包括迁移时删掉或移动的扩展文件）、新增的扩展和插件要到下次启动；有这类改动且更新没有出错时，通知会提醒重启。也就是说，同一个会话里可能暂时是新数据配旧提示词或扩展代码，重启后一致。
+**生效时机**：更新在当前会话运行期间落地。`config.yml` 实时重载，其中 `extensions` / `disabledExtensions` 的改动会立即停用或恢复本进程已经加载过的扩展；`APPEND_SYSTEM_MODEL.md`、`system-prompt-replace.json`、`TURN-JUDGE-*.md`、`tool-policy-nag.json`、`PROMPT-INJECT-*.md`、`agents/` 从下一条 prompt、下一轮、下一次 shell / eval 调用或下一次派发开始生效。`SYSTEM_TEMPLATE.md`、`APPEND_SYSTEM.md`、`PERSONALITY.md`、扩展代码的改动（包括迁移时删掉或移动的扩展文件）、新增的扩展和插件要到下次启动；有这类改动且更新没有出错时，通知会提醒重启。也就是说，同一个会话里可能暂时是新数据配旧提示词或扩展代码，重启后一致。
 
 **通知**：有改动且没有出错时弹一条 info，说明更新到哪个提交、写了几个、移动了几个、删了几个、补装了几个插件，需要时提醒重启；有错误时只弹一条 warning，给出第一条错误，不带重启提醒（部分写入可能已经落地，用 `/omp-config-autoupdate run` 看详细报告）。已是最新、拉取失败、锁被占用这三种情况只写日志。headless 模式不弹通知，只写日志。通知只给汇总；`/omp-config-autoupdate run` 的详细报告只列它自己那次运行的结果：启动时已成功应用的更新，再 `run` 只会报告已是最新；启动时应用出错（不写 `.omp-config-applied`）时，`run` 会重新应用并逐条列出，见 [omp-config-autoupdate](#omp-config-autoupdate)。一直拉取失败时启动不会提醒，用 `run` 看 git 报错。
 
@@ -183,8 +186,8 @@ flowchart LR
 
 只读本机，不写 `~/.omp`、`~/.pi`、`omp` 安装目录、PATH 或 shell 配置，本机文件的 mtime 前后不变。
 
-- **范围**：根目录的 `config.yml`、`SYSTEM_TEMPLATE.md`、`APPEND_SYSTEM.md`、`thinking-translator.json`、轻量模式三项资产、`agents/`，扩展目录里归仓库的文件（见[两个方向共同的规则](#两个方向共同的规则)，更新器也在其中），以及 `~/.pi/agent/pi-bansos-relay-state.json`。与更新器的托管范围一致。`config.yml` 的本机字段和 `extensions` 的本机条目不写回仓库。
-- **不收回**：安装到 `omp` 旁边的 `omp-light`、`omp-light.ts`、`omp-light.cmd`（轻量模式三项只从 `~/.omp/agent` 取）；扩展目录里属于本机的文件；`.omp-config-applied`；[todo-more](#todo-more) 的八个退休路径，即使旧机器仍有它们也不进入收回候选。
+- **范围**：根目录的 `config.yml`、`SYSTEM_TEMPLATE.md`、`APPEND_SYSTEM.md`、`PERSONALITY.md`、`thinking-translator.json`、轻量模式三项资产、`agents/`，扩展目录里归仓库的文件（见[两个方向共同的规则](#两个方向共同的规则)，更新器也在其中），以及 `~/.pi/agent/pi-bansos-relay-state.json`。与更新器的托管范围一致。`config.yml` 的本机字段和 `extensions` 的本机条目不写回仓库。
+- **不收回**：安装到 `omp` 旁边的 `omp-light`、`omp-light.ts`、`omp-light.cmd`（轻量模式三项只从 `~/.omp/agent` 取）；扩展目录里属于本机的文件；`.omp-config-applied`；[todo-more](#todo-more) 的八个 Todo 退休路径和五个 ctx 路径，即使旧机器仍有它们也不进入收回候选。
 - 本机还是平铺布局（`extensions/` 下直接有本仓库扩展同名的 `.ts`）时直接停下，要求先执行 `/update-omp` 迁移：拿平铺布局比对会把仓库的整套扩展目录误判为本机已删除。已排除的退休 Todo 路径不触发这项旧布局检查。
 - 本机没有 `pi-bansos-relay-state.json`（从没用 `/bansos` 改过设置）时，不算“本机已删除”，仓库保持原样。
 - `~/.omp/plugins/package.json` 的依赖和 `install-plugins.sh` 不一致时，重写脚本里的插件列表：URL/Git 依赖原样保留，npm 依赖去掉版本号；注释掉的可选插件保持注释，见[插件](#插件)。
@@ -196,7 +199,7 @@ flowchart LR
 插件包是运行时状态，不进仓库（仓库只收 `pi-bansos` 的状态文件，见[手动迁移](#手动迁移)）。`install-plugins.sh` 声明插件列表，并对每一项执行 `omp install`：
 
 - npm：`pi-commandcode-provider`、`pi-package-search`、`pi-pretty-codeblocks`、`pi-schedule`。
-- GitHub：`mouriya-s-lab/pi-bansos`、`oh-my-omp/omp-unified-exec`、`oh-my-omp/omp-todo-more`、`oh-my-omp/omp-thinking-translator`、`oh-my-omp/omp-codex-image-gen`。
+- GitHub：`mouriya-s-lab/pi-bansos`、`oh-my-omp/omp-unified-exec`、`oh-my-omp/omp-todo-more`、`oh-my-omp/omp-thinking-translator`、`oh-my-omp/omp-playbooks`、`oh-my-omp/omp-codex-image-gen`。
 - 可选，注释掉、默认不装：`oh-my-omp/omp-remote-build`，给每个 git worktree 在远端 Docker 主机上建 Mutagen 副本和 Komodo 管理的构建容器。不是谁都需要，而且依赖太多：`omp-unified-exec`、Mutagen、km CLI、Komodo Core/Periphery 和可 SSH 的构建主机，配置见它仓库的 README。需要时给该行加上单引号取消注释。
 
 所有插件都不钉版本：npm 包由 OMP 解析当前版本，GitHub URL 跟随默认分支，重复执行可能升级插件。结果写进 `~/.omp/plugins/`（`package.json`、`bun.lock`、`node_modules/`、`omp-plugins.lock.json`）。脚本需要联网，会下载并加载第三方代码。
@@ -244,9 +247,9 @@ providers:
 - 在 OMP/Tern 输入 `/todo-more` 编辑 goal 或 explanation。Save 按当前分支只提交目标字段，保留最新 status/phase/blocker/order；删除标题不复活。Enter 换行、Tab/Shift+Tab 切换、Ctrl+Enter 保存，Escape/Cancel 丢弃；不替换宿主 `/todo`，不启动额外模型 turn。switch/branch/tree/shutdown 取消旧草稿。
 - 当前 session branch 的 `mouriya.omp.todo-more` snapshot 是状态记录，宿主 TodoTracker 和历史卡片只是投影/副本；reader 保持 native edits 标题联结和 empty barrier。同步提交确认 branch 接受，不等于磁盘 durable-write；正常保留以实际退出/resume 验证。
 - 配置侧 completion judge 只请求同步 `omp-todo-more:read` 投影，不导入插件内部模块；task log 只记录成功工具事件中的 goal-set，不是当前状态。
-- 插件 async factory 先等待 Tern owner 的正常复制安装和复查，再注册功能。matching ready/disabled 副本不重装；保留 disabled，linked 冲突不自动 unlink。无 Tern 时 ANSI 可用，不能据此声称 GUI 已启用。native UI、历史/提醒差异、read wire 和资产生命周期详见[插件 README](https://github.com/oh-my-omp/omp-todo-more#readme)。
+- 插件同时注册 `ctx`（只读上下文树及其 compact 后注入）和 task log hook，源码在 `src/ctx/`，分别见 [ctx](#ctx) 与 [task log](#task-log)。轻量模式仍加载它们，因为 `disabledExtensions` 管不到插件条目。
 
-更新器在独立插件就绪后，手动和自动模式都退休以下八个路径：
+插件就绪后，手动和自动模式都退休以下八个 Todo 路径。插件同时含 `src/ctx` 时，再退休下面的五个 ctx 路径；在此之前旧 ctx 文件保留，既不丢上下文，也不会重复加载：
 
 ```text
 extensions/todo-more/index.ts
@@ -257,6 +260,11 @@ extensions/todo-more/planning.ts
 extensions/_shared/todo-more.ts
 extensions/subagent-todo.ts
 extensions/subagent-todo/index.ts
+extensions/ctx-tool/index.ts
+extensions/ctx-tool/inventory.ts
+extensions/ctx-tool/post-compact-hint.ts
+extensions/ctx-tasklog/index.ts
+extensions/_shared/task-log.ts
 ```
 
 仅 unlink 已知文件或叶链接本身，保留目录、host-owned 邻居和 backing file。app-managed 叶、父目录链接或异常叶对象报错并阻止切换；就绪门禁不满足时同样保留消费者和旧模块。Reverse sync 明确排除这组路径，不把旧机器实现收回。切换无错误后重启 OMP 才加载新代码。
@@ -269,7 +277,7 @@ extensions/subagent-todo/index.ts
 ```bash
 mkdir -p "$HOME/.omp/agent"
 cp agent/config.yml agent/SYSTEM_TEMPLATE.md agent/APPEND_SYSTEM.md \
-  agent/thinking-translator.json agent/config-light.yml \
+  agent/PERSONALITY.md agent/thinking-translator.json agent/config-light.yml \
   agent/APPEND_SYSTEM_LIGHT.md agent/omp-light.ts \
   "$HOME/.omp/agent/"
 cp -a agent/agents agent/extensions agent/extensions-last "$HOME/.omp/agent/"
@@ -306,8 +314,10 @@ git status --short
 `omp-light` 启动一个精简的 OMP 进程，适合简单小任务：
 
 - 用 `APPEND_SYSTEM_LIGHT.md` 代替完整的追加提示词。
-- 按 `config-light.yml` 禁用 13 个行为扩展：`ctx-tasklog`、`ctx-tool`、`doc-polish`、`fork-task`、`isolation-nudge`、`lang-nag`、`task-completion-judge`、`task-split-check`、`tool-policy-nag`、`turn-judge`、`user-prompt-inject`、`watchdog-agent`、`wt-tool`。
-- 未禁用的本地扩展照常加载：`append-system-model`、[model-compaction](#model-compaction)、`bro`、`input-polish`、`repo-rules`、[response-reading-coverage](#response-reading-coverage)、[child-memory-warning](#child-memory-warning)、[omp-config-autoupdate](#omp-config-autoupdate)，以及兼容性修复 `commandcode-model-spec`。独立 [todo-more](#todo-more) 与其他插件从普通 discovery 加载，无须改 launcher 或额外 `-e`。`APPEND_SYSTEM_MODEL.md` 因此照样注入，`model-compaction.json` 照样设定 compact 触发点；自动更新开着时 `omp-light` 也会更新。原生 todo 同样关着。
+- 按 `config-light.yml` 禁用 12 个行为扩展：`doc-polish`、`fork-task`、`isolation-nudge`、`lang-nag`、`response-reading-coverage`、`task-completion-judge`、`task-split-check`、`tool-policy-nag`、`turn-judge`、`user-prompt-inject`、`watchdog-agent`、`wt-tool`。
+- `config-light.yml` 把 `task.eager` 设为 `default`（`config.yml` 为 `preferred`），轻量模式主动委派更弱；不关闭 subagent。
+- `ctx` 与 task log 留在轻量模式中：它们随 [todo-more](#todo-more) 插件提供，`disabledExtensions` 管不到插件。
+- 未禁用的本地扩展照常加载：`append-system-model`、[model-compaction](#model-compaction)、`input-polish`、`repo-rules`、[child-memory-warning](#child-memory-warning)、[omp-config-autoupdate](#omp-config-autoupdate)，以及兼容性修复 `commandcode-model-spec`。独立 [todo-more](#todo-more) 与其他插件从普通 discovery 加载，无须改 launcher 或额外 `-e`。`APPEND_SYSTEM_MODEL.md` 因此照样注入，`model-compaction.json` 照样设定 compact 触发点；自动更新开着时 `omp-light` 也会更新。原生 todo 同样关着。
 - `config-light.yml` 把 `extensions` 覆盖成空列表，去掉 `config.yml` 末项的 [system-prompt-replace](#system-prompt-replace)。`disabledExtensions` 按模块名过滤，但管不到在 `extensions` 或 `-e` 里直接写成文件路径的扩展（写成目录的，目录里发现的模块仍按名字过滤），所以只能这样排除。覆盖会连带去掉本机条目（如 `~/.claude`），所以 `omp-light` 读本机 `config.yml`，把 `extensions` 里路径不含 `/extensions-last/` 的条目逐个用 `-e` 传给 `omp`；`-e` 是另一条加载通道，不受这个覆盖影响。`extensions-last/` 下的扩展因此只属于完整模式（按路径字符串判断，相对路径或目录写法不会被认出来）。
 - 插件、rules、skills、上下文文件，以及 model、thinking、profile、auth、session 设置都不变。被禁用扩展注册的工具（`ctx`、`polish_doc`、`fork_task`、`wt`、`wt_remove`）在轻量模式下不存在。
 - `omp-light` 从 agent 目录读 `config-light.yml` 和 `APPEND_SYSTEM_LIGHT.md`：设置了 `PI_CODING_AGENT_DIR` 时用它，否则用 `~/.omp/agent`。缺任何一个就直接退出，不回退到别的目录。
@@ -332,6 +342,7 @@ subagent 分三类：`task:*` 执行，`discuss:*` 只读讨论，`mentor:defaul
 |---|---|
 |OMP 的基础 system prompt 结构和通用运行策略|`agent/SYSTEM_TEMPLATE.md`|
 |本地用户优先级、回复表达、文档阅读规则和强制顾问|`agent/APPEND_SYSTEM.md`|
+|说话风格块：OMP 默认人格预设与 `# Writing` 行文风格|`agent/PERSONALITY.md`|
 |某个 agent 的职责（`description`）和它自己的角色提示（正文）|`agent/agents/<name>.md`|
 |内置/插件工具说明策略；自定义工具策略|`system-prompt-replace.json`；自定义工具自己的注册描述|
 |注入给某些 agent 的用户原话模板|`agent/extensions/user-prompt-inject/PROMPT-INJECT-*.md`，见 [user-prompt-inject](#user-prompt-inject)|
@@ -397,7 +408,7 @@ subagent 分三类：`task:*` 执行，`discuss:*` 只读讨论，`mentor:defaul
 |[watchdog-agent](#watchdog-agent)|按目标投放的第三方审查者|否|
 |[user-prompt-inject](#user-prompt-inject)|按模板把用户原话注入指定的 subagent|否|
 |[turn-judge](#turn-judge)|主会话每轮结束后用原生 JUDGE 判断这一轮，达到阈值就输入预设 prompt，否则显示判定|否|
-|[response-reading-coverage](#response-reading-coverage)|以主会话历史基准返回来源阅读跟进的低／中／高；子报告同时进入根主会话的上下文|是|
+|[response-reading-coverage](#response-reading-coverage)|以主会话历史基准返回来源阅读跟进的低／中／高；子报告同时进入根主会话的上下文|否|
 |[child-memory-warning](#child-memory-warning)|macOS 后代进程物理 footprint 超过 4 GiB 时通知主 UI 和 agent，包括此前已观察到的存活孤儿|是|
 |[lang-nag](#lang-nag)|回复语言不对时，在下一条输入前加提醒|否|
 |[repo-rules](#repo-rules)|补读 `.claude/rules` 等 repo 级 rule 目录|是|
@@ -408,10 +419,7 @@ subagent 分三类：`task:*` 执行，`discuss:*` 只读讨论，`mentor:defaul
 |[isolation-nudge](#isolation-nudge)|多个写入者共用目录时拦一次|否|
 |[task-split-check](#task-split-check)|拦下多主题派发和限制汇报长度的派发|否|
 |[task-completion-judge](#task-completion-judge)|worker 交付前审一次完成度|否|
-|[ctx-tool](#ctx-tool)|注册只读 `ctx` 工具，汇总上下文树并重放 todo 行事记录；compact 后强制注入 `ctx` 概览和当前任务记录|否|
-|[ctx-tasklog](#ctx-tasklog)|捕获成功的 todo / goal 修改，形成 `ctx` 的派生记录|否|
 |[doc-polish](#doc-polish)|`polish_doc` / `/polish-doc`：不改原意地润色文档|否|
-|[bro](#bro)|`/bro`：把回复、文档或网页改写成易懂的解释|是|
 |[input-polish](#input-polish)|`Ctrl+Enter` 润色输入框草稿，overlay 预览后回车发送、Esc 取消|是|
 |[wt-tool](#wt-tool)|注册 `wt` / `wt_remove`：主 agent 调用人用的 `/wt` 进入新 worktree，或检查、确认后删掉所在 worktree 回到主 checkout|否|
 |[commandcode-model-spec](#commandcode-model-spec)|修复 `--model` 指定 commandcode 模型时的认证失败|是|
@@ -441,7 +449,6 @@ omp 从 `~/.omp/agent/extensions/` 往下只找一层：直接放的 `*.ts`、`<
 |`helper-session.ts`|`runHelperPrompt`：在内存辅助会话里做一次模型调用，不抛异常，固定传 `taskDepth: 1`|
 |`judge.ts`|`openNativeJudge`：使用当前会话的配置和 OMP 角色解析器选择 JUDGE 的具体模型，仅原生 judgment API 可用，凭据与请求头由宿主提供|
 |`spec-files.ts`|`discoverSpecFiles`、`parseFrontmatter`、`unquote`：查找和解析 `*-<标签>.md`（扩展目录，再从 cwd 往上到 git root 及各层 `.omp/`）|
-|`task-log.ts`|task log 的路径、格式与独立 `TaskLogGoal` 模型/解析/三行 formatter，`ctx-tool` 与 `ctx-tasklog` 共用；不依赖插件领域 reader|
 
 `_shared` 只提供机制。重试、超时、节流、用户看到的措辞、失败时返回什么，都留在调用方。
 
@@ -656,7 +663,7 @@ option.blocker.delivery: steer
 **用户 prompt 的来源。** 从本 subagent 沿 `ctx.agent.parentId` 在进程的 agent registry 里往上找到主会话（`task:high` 派出的孙代也一样），读它当前分支（`getBranch()`，compact 之前的消息也在）上 `role: "user"`、`attribution: "user"`、非 `synthetic` 的消息，按顺序排列。每条只取文本块（多个文本块用换行拼接），去掉首尾空白；取完是空的消息（比如只有图片）不占位置，所以下标只数有文字的 prompt。
 
 - 输入经过 `input` 钩子和命令展开后才存进会话，所以取到的是提交给模型的文字；例如 [lang-nag](#lang-nag) 加在前面的 `instruction` 也在里面。
-- `attribution` 由发送方决定，扩展用 `sendUserMessage` 不写它时默认是 `user`。本仓库扩展注入的消息因此都标为 `agent`：`watchdog-agent`、`turn-judge`、`tool-policy-nag`、`ctx-tool` 的 compact 后注入、`doc-polish` 的结果回传。新增会注入用户消息的扩展时也要这样写，否则它的消息会被当成用户原话。插件注入的消息不受本仓库控制。
+- `attribution` 由发送方决定，扩展用 `sendUserMessage` 不写它时默认是 `user`。本仓库扩展注入的消息因此都标为 `agent`：`watchdog-agent`、`turn-judge`、`tool-policy-nag`、`doc-polish` 的结果回传。新增会注入用户消息的扩展时也要这样写，否则它的消息会被当成用户原话。插件注入的消息（包括 [todo-more](#todo-more) 的 compact 后注入）不受本仓库控制。
 - 技能调用（`/skill:…`）存成 custom 消息，不算进 `user_prompt`。
 
 **运行方式：**
@@ -722,11 +729,11 @@ option.<标签>.threshold: 0.7
 
 #### lang-nag
 
-`lang-nag/` 只作用于主会话。主 agent 一轮结束后，取最后一条有正文的回复的最后一段（前 200 个字符），用辅助会话问模型这段是不是目标语言；判定为否，就在用户下一条输入前面加上 `instruction`。它不改已经发出的回复。
+`lang-nag/` 只作用于主会话。主 agent 一轮结束后，取最后一条有正文的回复的最后一段（前 200 个字符），判断这段是不是目标语言：宿主的 JUDGE 角色可用时由它做一次选择判定（与 turn-judge、tool-policy-nag 同一机制）；不可用时由辅助会话问 `model` 是或否。判定为否，就在用户下一条输入前面加上 `instruction`。它不改已经发出的回复。
 
-- **配置** `lang-nag.json`：`model`、`language`、`instruction` 三项必填。依次尝试 cwd 下和扩展目录下的文件，第一个能读、能解析、字段齐全的生效；cwd 下的文件坏了会回退到扩展目录下的。只在会话开始或切换时读取。仓库里的值是 `openai-codex/gpt-6-luna`、`中文`、`说中文`。
-- **不提醒的情况**：自动续写的轮次、判定还没完成、判定失败或答案无法识别、模型不可用（记 warning）。斜杠命令会清掉待用的判定；分支切换、树跳转和 compact 会取消进行中的判定。
-- **辅助会话**：无工具、内存会话、不加载扩展，只在需要判定时创建。
+- **配置** `lang-nag.json`：`model`、`language`、`instruction` 三项必填。`model` 只在 JUDGE 不可用时作为分类模型使用。依次尝试 cwd 下和扩展目录下的文件，第一个能读、能解析、字段齐全的生效；cwd 下的文件坏了会回退到扩展目录下的。只在会话开始或切换时读取。仓库里的值是 `openai-codex/gpt-6-luna`、`中文`、`说中文`。
+- **不提醒的情况**：自动续写的轮次、判定还没完成、判定失败或答案无法识别、无法打开 JUDGE（记 warning）、JUDGE 与 `model` 都不可用（记 warning）。斜杠命令会清掉待用的判定；分支切换、树跳转和 compact 会取消进行中的判定。
+- **辅助会话**：只在 JUDGE 不可用、走模型分类时使用：无工具、内存会话、不加载扩展，只在需要判定时创建。JUDGE 模式不建辅助会话。
 
 #### repo-rules
 
@@ -837,7 +844,7 @@ model: "(gpt-5|o3)"
 
 #### response-reading-coverage
 
-`response-reading-coverage/` 在完整和轻量模式下观察原生 `grep`、`glob`、`find`、`read` 调用。它返回相对历史主回复、相近已返回搜索规模的来源阅读跟进等级：**低／中／高**。它不衡量理解深度、引用准确性、答案质量或任务绝对充分性。同名 SDK、MCP、extension 工具不计；shell、`eval`、浏览器和 AST 操作全部忽略。只有被 `tool_call` 观察到的调用才能进入统计。
+`response-reading-coverage/` 在完整模式下观察原生 `grep`、`glob`、`find`、`read` 调用；`config-light.yml` 在轻量模式下禁用它。它返回相对历史主回复、相近已返回搜索规模的来源阅读跟进等级：**低／中／高**。它不衡量理解深度、引用准确性、答案质量或任务绝对充分性。同名 SDK、MCP、extension 工具不计；shell、`eval`、浏览器和 AST 操作全部忽略。只有被 `tool_call` 观察到的调用才能进入统计。
 
 - **回复级证据**：`S` 是本次回复窗口内搜索返回文件身份的并集；`R` 只计调用顺序上位于返回该身份的搜索之后、成功 read 的来源，整个窗口去重。顺序按调用时刻，不按完成时刻。补充搜索不会清掉此前候选，同一调查被拆成更多搜索／阅读阶段不会改变权重。先 read 后搜索、直接读取其他已知路径，以及目录列表均不给 credit；失败 read 也不给 credit。
 - **空与未知**：成功的空搜索（包括只返回目录的 glob）不增加证据、不创建评分组，不能影响拟合或当前等级，也没有 `0/0` 表达。非空搜索后零跟进阅读是有效观测。没有返回文件时为**不适用**，不算低档。失败搜索、metadata 缺失或无效、未结束调用、相关阅读身份有歧义时为**统计不完整**，即使还没有已知返回文件也不能冒充空结果。
@@ -935,19 +942,19 @@ bun ci/reading-coverage-backtest.ts --cutoff 2026-10-15T20:09:21Z
 
 - **依据**：派工单，即当前分支最后一条 `session_init` 里的 `task` prompt（`task` 和 `fork_task` 都一样）；system prompt 里的共享背景；worker 自己 todo 的 goal（见 [todo-more](#todo-more)，没有时注明为空）；最后一条 `session_init` 之后该 worker 自己最近 50 次工具调用及结果；这次提交的内容（`yield` 的 `data`；没有 `data` 时取同一条 assistant 消息里的文字）。OMP 在运行中 system prompt 变化时会追加新的 `session_init`，所以看到的工具调用可能只是这次运行的后一段。`fork_task` 子代理开头继承的父对话只是背景，其中的用户消息和工具调用都不算。每次调用的参数和结果各保留原文最多 800 个字符，提交内容最多 6000 个字符，超长时按六成头、四成尾保留，中间另插一行省略标记。
 - **goal 的用法**：派工单仍是标准，goal 只是 worker 自己的复述，用来多做几项检查：goal 缩小了派工单的范围、goal 写的衡量方法在工具调用里没做过、没达到 goal 写的完成程度，都判 `NOT_DONE`。
-- **判定**：`openai-codex/gpt-6-sol`（推理强度 low），25 秒超时，回答 `DONE` 或 `NOT_DONE`。如实报告了 blocker 也算 `NOT_DONE`。
+- **判定**：模型由 `task-completion-judge/task-completion-judge.json` 的 `model` 指定（`provider/id`、裸 id 或角色别名，每次判定时重读；仓库里是 `openai-codex/gpt-6-sol`），推理强度 low，25 秒超时，回答 `DONE` 或 `NOT_DONE`。如实报告了 blocker 也算 `NOT_DONE`。
 - **退回**：判为 `NOT_DONE` 时拦下这次 `yield`，要求继续做完并验证；判为 `DONE` 后重新向插件请求当前 worker 的只读投影，仍有 pending / in_progress 项时也拦下，逐项列出解释，要求先把 todo 更新到真实进度（blocked 项不触发）。构造模型 prompt 前也请求一次，但模型前的副本不用于模型后的维护判断。两种退回各最多一次；一旦放行，同一会话不再判定。
 - **结果附注**：`yield` 的数据结构是开放对象（没有自定义 `outputSchema`）时，放行的交付里附上 `completion_judge`（判定、理由、`bounced`），派发方能看到。`bounced` 只表示是否因 `NOT_DONE` 退回过，todo 退回不计入。
-- **不判定的情况**：带错误的 `yield`、增量提交；会话分支上没有 `session_init`；模型不可用、请求失败、超时或回答无法识别时直接放行，不附注。插件未加载、未回复或 wire 解析失败时记录 `task-completion-judge skipped a yield` warning 并 fail-open；不可用不是空 Todo。
+- **不判定的情况**：带错误的 `yield`、增量提交；会话分支上没有 `session_init`；`task-completion-judge.json` 缺失或无效、模型不可用、请求失败、超时或回答无法识别时直接放行，不附注。插件未加载、未回复或 wire 解析失败时记录 `task-completion-judge skipped a yield` warning 并 fail-open；不可用不是空 Todo。
 - 状态只在内存里，会话结束时清除；每次判定写一条 info 日志。
 
 ### Context 恢复
 
-完整模式下，`todo-more`、`ctx-tasklog` 和 `ctx-tool` 组成一条联合链路，不是互不相关的功能：todo 维护权威任务状态，task log 记录成功的修改调用，`ctx` 将记录重放成简短时间线，compact 后再把主会话的 `ctx list` 和 `ctx show` 结果注入。task log 的路径和格式由两边共用的 `_shared/task-log.ts` 定义。task log 是从 todo 派生的行事记录，不取代会话分支上的 todo 记录，重放结果是近似值，见 [ctx-tool](#ctx-tool) 的限制。
+`todo-more` 插件的 `todo`、task log 与 `ctx` 组成一条联合链路，不是互不相关的功能：todo 维护权威任务状态，task log 记录成功的修改调用，`ctx` 将记录重放成简短时间线，compact 后再把主会话的 `ctx list` 和 `ctx show` 结果注入。task log 的路径和格式在插件的 `src/ctx/task-log.ts` 中定义。task log 是从 todo 派生的行事记录，不取代会话分支上的 todo 记录，重放结果是近似值，见 [ctx](#ctx) 的限制。
 
-#### ctx-tool
+#### ctx
 
-`ctx-tool/` 注册只读的 `ctx` 工具，把当前会话、subagent registry、transcript、compaction 摘要、sidecar summary 和 task log 拼成一棵上下文树。不修改会话或文件。它还负责主会话 compact 后的注入，见下面的“compact 后注入”。
+`ctx` 由 [todo-more](#todo-more) 插件注册（`src/ctx/inventory.ts`），是只读工具，把当前会话、subagent registry、transcript、compaction 摘要、sidecar summary 和 task log 拼成一棵上下文树。不修改会话或文件。同一组模块还负责主会话 compact 后的注入，见下面的“compact 后注入”。
 
 - **`ctx list [<id>] [all=true]`**：深度优先，每行一个 context，含状态、摘要和任务计数（`done/total`，有带原因的 block 时附 blocked）。同级按创建时间排序；默认视图里从隐藏节点提升上来的后代留在原位，不重新排序。
   - 默认只显示主会话和 `task` / `task:*` 子代理，mentor、discuss、trace 等其他 context 隐藏，其可见后代提升到上一级，并给出隐藏数量；`all=true` 全部列出（advisor 除外）。作为根节点的 context（当前会话或 `<id>` 指定的）总会显示。
@@ -960,13 +967,13 @@ bun ci/reading-coverage-backtest.ts --cutoff 2026-10-15T20:09:21Z
 - **限制**：计数和时间线是从操作日志重建的近似值，不一定等于 `TodoTracker` 的当前状态。按 phase 或不指名的批量操作只记一个目标（phase 名，或第一个完成的任务）；删掉从没被单独操作过的任务、删掉 phase、`drop` 已完成的任务都不会正确改动计数；已 completed 或已移除的任务名，之后的 `start` / `block` / `unblock` 不再生效；没写原因或原因里带 `)` 的 block 不显示为 blocked；任务名按空白归一后比较，名为 `all tasks` 的任务会被当成“全部任务”。
 - **性能**：transcript 的修改时间和大小没变时，复用缓存的会话头；新增或变化的 transcript 读到会话头和 `session_init` 就停，缺其中一条时读到文件末尾。
 
-#### ctx-tasklog
+#### Task log
 
-`ctx-tasklog/` 在每次成功的 `todo` / `goal` 修改操作后，把本地时间、工具名、操作和详情追加到 local root 下的 `task-log/<agent-id>.md`。这里的 `goal` 是 OMP 原生的 goal 模式工具，和 todo 的 goal 无关。`ctx` 只重放其中的 `todo` 事件和 todo goal 行，`goal` 事件记下来但不进计数和时间线。`todo view` 和 `goal get` 不改变状态，因此不记；失败的工具调用也不记，成功但没改变状态的调用（如重复 `done`）照样记。详情随操作而定：`init` 记阶段和任务数，`append` 记阶段和新增项数，`start` / `done` / `block` / `explain` 等记一个目标（指名的任务或 phase；不指名时记第一个完成的任务或 `all tasks`，`block` 附原因），`goal` 记目标。带 goal 的成功 `todo` 调用紧跟着再记一行 `todo-more set: <goal 的 JSON>`，时间相同。这使行事记录绑定到实际成功的工具调用，而不是模型声称做过什么。写失败只记 warning。
+插件的 `src/ctx/tasklog.ts` 在每次成功的 `todo` / `goal` 修改操作后，把本地时间、工具名、操作和详情追加到 local root 下的 `task-log/<agent-id>.md`。这里的 `goal` 是 OMP 原生的 goal 模式工具，和 todo 的 goal 无关。`ctx` 只重放其中的 `todo` 事件和 todo goal 行，`goal` 事件记下来但不进计数和时间线。`todo view` 和 `goal get` 不改变状态，因此不记；失败的工具调用也不记，成功但没改变状态的调用（如重复 `done`）照样记。详情随操作而定：`init` 记阶段和任务数，`append` 记阶段和新增项数，`start` / `done` / `block` / `explain` 等记一个目标（指名的任务或 phase；不指名时记第一个完成的任务或 `all tasks`，`block` 附原因），`goal` 记目标。带 goal 的成功 `todo` 调用紧跟着再记一行 `todo-more set: <goal 的 JSON>`，时间相同。这使行事记录绑定到实际成功的工具调用，而不是模型声称做过什么。写失败只记 warning。
 
 #### compact 后注入
 
-由 `ctx-tool/` 负责（原来的 `ctx-post-compact-hint` 扩展已并入）。主会话 compact 后，以 steer 消息注入一个 `<post-compact-ctx>` 块：`## List` 等同 `ctx list`，`## Current session` 等同对主会话的 `ctx show`，两者基于同一份会话清单；后者包含由 todo task log 重放的简短任务时间线。subagent 的详情仍需自己 `ctx show <id>`。
+由插件的 `src/ctx/post-compact-hint.ts` 负责。主会话 compact 后，以 steer 消息注入一个 `<post-compact-ctx>` 块：`## List` 等同 `ctx list`，`## Current session` 等同对主会话的 `ctx show`，两者基于同一份会话清单；后者包含由 todo task log 重放的简短任务时间线。subagent 的详情仍需自己 `ctx show <id>`。
 
 - 监听 `session_compact`，以及没有中止、没有跳过、有结果的 `auto_compaction_end`。
 - 5 秒内只尝试注入一次，按尝试时间算，所以 5 秒内连续两次 compact 只注入一次，失败的尝试也占用这个窗口。
@@ -999,27 +1006,6 @@ bun ci/reading-coverage-backtest.ts --cutoff 2026-10-15T20:09:21Z
 **流程**：拆分之后都是程序逻辑。润色批次按并发上限（仓库配置 8，默认 6）并行，汇齐后按 `sourceIndices` 用并查集识别段落合并、重新编组，再按同一并发上限校验，最后按原顺序写出评审。子代理禁止加载扩展，不会递归。
 
 **结果**：模型调用时，评审路径和“仅供参考”的说明作为工具结果返回；人调用 `/polish-doc` 时，同样的内容作为新输入交给主 agent。结果里还附带对接收方的硬性要求：必须亲自处理、不得转交子代理，并且要把每份评审完整读完，不许分页、截断或只看摘要。副作用是写 `/tmp/doc-polish/`，按批消耗所选模型的额度。
-
-#### bro
-
-`bro/` 是原 `pi-bro` 插件的内置重写。它注册 `/bro` 命令，把一段内容改写成易懂的解释，在 TUI overlay 里流式显示；解释不写进主会话。
-
-|子命令|作用|
-|---|---|
-|`/bro` 或 `/bro simplify`|等当前会话空闲后，解释最近一条正常结束的 assistant 回复|
-|`/bro simplify <text>`|解释给定的文字|
-|`/bro file <path>`|解释 cwd 内的文件：`.md` / `.markdown` / `.txt` 直接读，`.pdf` / `.docx` / `.pptx` / `.xlsx` / `.epub` 先转成 Markdown。文件上限 10 MiB，取出的文字上限 100,000 字符，扫描版 PDF 不做 OCR|
-|`/bro url <url>`|抓取公网 HTML 页面后解释：只接受 HTTP(S)，拒绝私有地址，最多 5 次重定向，HTTP 抓取 25 秒超时，5 MiB 上限，开标签超过 100,000 个或转成的文字超过 100,000 字符时拒绝，不运行页面 JS|
-|`/bro open`|重新打开上一次的解释|
-|`/bro model` / `effort` / `mode`|设置模型、推理强度、模式（`brief`、`balanced`、`faithful`）；不带参数时在 TUI 里选|
-|`/bro doctor`|检查设置、自定义 prompt、模型可用性和推理强度|
-|`/bro help`|显示说明|
-
-overlay 里上下键或滚轮滚动，解释完整生成后 `C` 复制到系统剪贴板、`R` 重新生成，`Esc` 关闭并取消进行中的请求。
-
-- **设置**：扩展目录（`~/.omp/agent/extensions/bro/`）下的 `bro-settings.json`（`model`、`effort`、`mode`），扩展加载时不存在就创建。默认模型链 `commandcode/deepseek/deepseek-v4.1-flash,google-antigravity/gemini-2.5-flash-lite,commandcode/google/gemini-3.5-flash-lite`，推理强度 `minimal`，模式 `balanced`。环境变量 `PI_BRO_MODEL` 覆盖文件里的模型。这两个文件属于本机，不进仓库。
-- **自定义 prompt**：同目录的 `bro-prompt.md`，必须恰好包含一次 `{{response}}`。存在且有效时完全替代内置模式的 prompt；无效时阻止解释，用 `/bro doctor` 查原因。
-- **辅助会话**：无工具、内存会话、不加载扩展。
 
 #### input-polish
 
@@ -1067,7 +1053,7 @@ overlay 里上下键或滚轮滚动，解释完整生成后 `C` 复制到系统�
 
 1. **不带 `confirm`：只检查，不改任何东西。** 报告 worktree、分支、主 checkout 路径，判定（`SAFE` / `UNSAFE` / `BLOCKED`），删除会永久丢掉的内容（已暂存、未暂存、未跟踪的文件，以及被 ignore 的文件和目录；整个被 ignore 的目录只列一行；每类最多列 50 条并给出总数；重命名按新路径计），分支上从主 checkout 的 HEAD 到不了的提交（保留在分支上，只作参考），阻塞项，以及一个 `confirm` 值。
    - `confirm` 值是 worktree 路径、分支、上游 `planWorktreeExit` 的 worktree 指纹（HEAD、分支 tip、porcelain 状态、每个改动路径的大小和 mtime）和 ignore 条目清单的确定性哈希：状态相同就得到同一个值，不绑定某一次检查。被 ignore 的文件内容变化、主 checkout 的 HEAD 移动都不改变它。检查前后各算一次，不一致就让模型重查。
-   - 阻塞项：本会话正在运行的后台任务；正在运行的 task subagent；cwd 在这个 worktree 里的活着的 task subagent。扩展自己建的内存辅助会话（lang-nag、watchdog reviewer、bro 等）不算。
+   - 阻塞项：本会话正在运行的后台任务；正在运行的 task subagent；cwd 在这个 worktree 里的活着的 task subagent。扩展自己建的内存辅助会话（lang-nag、watchdog reviewer 等）不算。
    - 主 checkout、detached HEAD、没有提交的 worktree 直接报错。
 2. **模型看过报告、自己决定后，带上 `confirm` 再调用一次。** 这次会重新检查，值不一致（worktree 在检查后有文件增删改、HEAD 或分支动过、ignore 条目清单变了）或有阻塞项就拒绝，不登记。`UNSAFE` 也可以确认，由模型判断那些文件能不能丢。
 
@@ -1119,9 +1105,10 @@ overlay 里上下键或滚轮滚动，解释完整生成后 `C` 复制到系统�
 - **增删托管项时同时改三处**：更新器 `omp-config-update.ts` 的 `managedPlain` / `STRUCTURED`（扩展目录里新加的非 `.ts` 文件默认属于本机，要归仓库就得加进去），`.omp/commands/sync-omp-config.md` 的同步范围，以及本文件和 `README.md`。更新器的 `applySnapshot(options)` 接口要保持兼容：已安装的旧更新器会导入新提交里的它。更新器的位置（`UPDATER_REL`）也写死在每台机器已安装的旧更新器里，挪动它会让这些机器的自动更新失败，直到各自手动执行一次 `/update-omp`。
 - **写扩展代码**：先 `bun install`，交付前 `bun run check`，规范见[目录结构与开发规范](#目录结构与开发规范)。新引入的 `@oh-my-pi/*` 子路径要在没有 `node_modules` 的目录里真实加载一次。
 - **不要在 `omp-config-update.ts` 里写出 Otty 标记的字面量**：标记检查是“文件任意位置含有”，这个文件自己也是托管文件，写出来就会被当成应用托管文件，从此跳过更新。
-- **扩展建的辅助会话必须传 `taskDepth: 1`。** 一次性的模型调用统一走 `_shared/helper-session.ts` 的 `runHelperPrompt`，它已经传了（`bro`、`doc-polish`、`input-polish`、`lang-nag`、`watchdog-agent` 的聊天 reviewer 都用它）；自己建会话的只有 `fork-task` 的 shake，也传了。不传的话 SDK 把它当主会话，`dispose()` 时会销毁全局 `AgentLifecycleManager`，所有空闲 subagent 变成 `Unknown agent`，无法再续聊。`lang-nag` 几乎每轮都建辅助会话，漏传会让 subagent 很快失联。只调用 `completeSimple` 的扩展（`task-split-check`、`task-completion-judge`）不建会话，不涉及这条。
-- **升级 OMP 后**，在真实 TUI 里重新验证 [fork-task](#fork-task)、独立 [todo-more](#todo-more) 插件、[user-prompt-inject](#user-prompt-inject)、[turn-judge](#turn-judge)、[task-completion-judge](#task-completion-judge)、[ctx-tool](#ctx-tool)（含 compact 后注入）、[ctx-tasklog](#ctx-tasklog)、[model-compaction](#model-compaction)、[bro](#bro) 和 [wt-tool](#wt-tool)，它们依赖 OMP 内部实现（registry、会话条目、运行时设置层与 `compaction.modelThresholds` 的解析、tool/session hooks、宿主投影、TUI 与 worktree dispatcher 等）。todo-more 的 `@upstream` 对照和实现更新在其插件仓库完成；配置仓库验证只读协议与消费者结果，不收回插件源码。
+- **扩展建的辅助会话必须传 `taskDepth: 1`。** 一次性的模型调用统一走 `_shared/helper-session.ts` 的 `runHelperPrompt`，它已经传了（`doc-polish`、`input-polish`、`lang-nag`、`watchdog-agent` 的聊天 reviewer 都用它）；自己建会话的只有 `fork-task` 的 shake，也传了。不传的话 SDK 把它当主会话，`dispose()` 时会销毁全局 `AgentLifecycleManager`，所有空闲 subagent 变成 `Unknown agent`，无法再续聊。`lang-nag` 几乎每轮都建辅助会话，漏传会让 subagent 很快失联。只调用 `completeSimple` 的扩展（`task-split-check`、`task-completion-judge`）不建会话，不涉及这条。
+- **升级 OMP 后**，在真实 TUI 里重新验证 [fork-task](#fork-task)、独立 [todo-more](#todo-more) 插件（含其 `ctx` 工具、compact 后注入和 task log）、[user-prompt-inject](#user-prompt-inject)、[turn-judge](#turn-judge)、[task-completion-judge](#task-completion-judge)、[model-compaction](#model-compaction) 和 [wt-tool](#wt-tool)，它们依赖 OMP 内部实现（registry、会话条目、运行时设置层与 `compaction.modelThresholds` 的解析、tool/session hooks、宿主投影、TUI 与 worktree dispatcher 等）。todo-more 的 `@upstream` 对照和实现更新在其插件仓库完成；配置仓库验证只读协议与消费者结果，不收回插件源码。
 - **升级 OMP 后**，比较 `agent/SYSTEM_TEMPLATE.md` 与 OMP 内置的 `packages/coding-agent/src/prompts/system/system-prompt.md`，有选择地合并相关上游改动。仓库覆盖模板始终是权威来源，不会随 OMP 的内置模板自动更新。
+- **升级 OMP 后**，`agent/PERSONALITY.md` 的预设部分是照抄而不是引用：agent 目录里没有 `PERSONALITY.md` 时，该位置渲染的就是所选 `personality` 预设的原文，据此比对并合并有意义的改动。仓库副本始终是权威来源，不跟随 OMP；它下面的 `# Writing` 行文风格是本仓库自己的内容，没有上游对应物。
 - **升级 OMP 后**，主会话开始模型回合时（`before_agent_start`）如果弹出 `system-prompt-replace: … found no target` 警告，就按新的模板文字改 `system-prompt-replace.json`；上游删掉了规则要改写的那句话时，删掉这条规则。同时确认 [system-prompt-replace](#system-prompt-replace) 依赖的扩展加载顺序没变。
 - **扩展注入用户消息时写 `attribution: "agent"`。** 不写就默认 `user`，[user-prompt-inject](#user-prompt-inject) 会把它当成用户原话注入 mentor 和 discussant。
 - **改 agent 定义前**读 `agent/agents/README.txt`；目录里的笔记用 `.txt`，不要用 `.md`。

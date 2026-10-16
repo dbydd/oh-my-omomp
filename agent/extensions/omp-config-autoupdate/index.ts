@@ -81,6 +81,7 @@ const applyReportSchema = z.object({
 	errors: z.array(z.string()),
 	notes: z.array(z.string()),
 	pluginsInstalled: z.array(z.string()),
+	pluginsUpgraded: z.array(z.string()).default([]),
 	pluginsMissing: z.array(z.string()),
 	restartNeeded: z.boolean(),
 });
@@ -194,7 +195,12 @@ function detailedReport(outcome: RunOutcome, agentDir: string): string {
 			return [...head, `- **Result:** up to date at \`${short(result.commit)}\` (\`${result.commit}\`); nothing applied.`].join("\n");
 		case "applied": {
 			const { report } = result;
-			const changed = report.written.length + report.moved.length + report.deleted.length + report.pluginsInstalled.length;
+			const changed =
+				report.written.length +
+				report.moved.length +
+				report.deleted.length +
+				report.pluginsInstalled.length +
+				report.pluginsUpgraded.length;
 			const outcomeLine =
 				report.errors.length > 0
 					? `applied with ${report.errors.length} error(s); the applied commit is not recorded, so the next run retries`
@@ -218,6 +224,7 @@ function detailedReport(outcome: RunOutcome, agentDir: string): string {
 					report.skipped.map((entry) => `${entry.path}\` — \`${entry.reason}`),
 				),
 				...section("Plugins installed", report.pluginsInstalled),
+				...section("Plugins upgraded", report.pluginsUpgraded),
 				...section("Plugins still missing", report.pluginsMissing),
 				...section("Notes", report.notes),
 			];
@@ -349,7 +356,12 @@ export default function ompConfigAutoupdate(pi: ExtensionAPI): void {
 							return;
 						case "applied": {
 							const { report } = result;
-							const changed = report.written.length + report.moved.length + report.deleted.length + report.pluginsInstalled.length;
+							const changed =
+								report.written.length +
+								report.moved.length +
+								report.deleted.length +
+								report.pluginsInstalled.length +
+								report.pluginsUpgraded.length;
 							if (report.errors.length > 0) {
 								notify(
 									ctx,
@@ -364,7 +376,7 @@ export default function ompConfigAutoupdate(pi: ExtensionAPI): void {
 							}
 							notify(
 								ctx,
-								`omp-config: updated to ${short(result.commit)} (${report.written.length} written, ${report.moved.length} moved, ${report.deleted.length} deleted, ${report.pluginsInstalled.length} plugin(s) installed)${report.restartNeeded ? "; restart OMP to load extensions/APPEND_SYSTEM/plugins" : ""}`,
+								`omp-config: updated to ${short(result.commit)} (${report.written.length} written, ${report.moved.length} moved, ${report.deleted.length} deleted, ${report.pluginsInstalled.length} installed and ${report.pluginsUpgraded.length} upgraded plugin(s))${report.restartNeeded ? "; restart OMP to load extensions/APPEND_SYSTEM/plugins" : ""}`,
 								"info",
 							);
 							return;

@@ -16,10 +16,12 @@
 // has already settled; if detection is still running when the message is sent,
 // the detector session is aborted and the message goes out unchanged.
 //
-// Detection uses a dedicated, in-memory helper session: the configured model,
-// thinking OFF, NO tools, no MCP/LSP/extensions. Config (model + target language
-// + the literal instruction string) is read from <cwd>/lang-nag.json first,
-// then agent/extensions/lang-nag/lang-nag.json beside this entry point.
+// Detection uses the host's native JUDGE role when it is available (the same role
+// turn-judge and tool-policy-nag use): one choice question on the sample's language.
+// When JUDGE is unavailable, a dedicated in-memory helper session asks the configured
+// model yes/no instead (thinking OFF, NO tools, no MCP/LSP/extensions). Config (model +
+// target language + the literal instruction string) is read from <cwd>/lang-nag.json
+// first, then agent/extensions/lang-nag/lang-nag.json beside this entry point.
 //
 // Scope is the main session only, mirroring tool-policy-nag: subagents run
 // short decomposed slices where a language nag is noise. A detection failure,
@@ -29,10 +31,12 @@
 // hooks. Reads only the config above; writes no files and sends no extra turns.
 // ============================================================================
 
+import type { Judge } from "@oh-my-pi/pi-ai";
 import { type ExtensionAPI, type ExtensionContext, z } from "@oh-my-pi/pi-coding-agent";
 import { loadJsonConfig } from "../_shared/config.ts";
 import { errorText } from "../_shared/errors.ts";
 import { runHelperPrompt } from "../_shared/helper-session.ts";
+import { type JudgeOpen, openNativeJudge } from "../_shared/judge.ts";
 import { lastAssistantText } from "../_shared/messages.ts";
 import { findModel, splitLevel } from "../_shared/models.ts";
 
@@ -41,9 +45,9 @@ const DETECT_CHAR_LIMIT = 200; // code points of the last paragraph handed to th
 // --- config (standalone lang-nag.json) --------------------------------------
 
 const configSchema = z.object({
-	/** Model spec (`provider/id`, bare id, or role alias). Any `:effort` suffix is dropped — thinking is forced off. */
+	/** Fallback classifier model (`provider/id`, bare id, or role alias), used only when native JUDGE is unavailable. Any `:effort` suffix is dropped — thinking is forced off. */
 	model: z.string().min(1),
-	/** Target language name the reply is expected to be in, passed verbatim to the classifier (e.g. "中文", "English"). */
+	/** Target language name the reply is expected to be in, passed verbatim to the judge or classifier (e.g. "中文", "English"). */
 	language: z.string().min(1),
 	/** Literal instruction prepended to the next user message on a mismatch (e.g. "说中文", "say English"). */
 	instruction: z.string().min(1),
@@ -94,7 +98,74 @@ function interpretVerdict(answer: string): boolean | null {
 
 // Resolves to the instruction to prepend, or null (in-target / undetermined /
 // misconfigured / aborted). Never rejects, so it is safe to hold as a floating promise.
+// Native JUDGE decides when the host role is available; otherwise the configured model classifies.
 async function detectInstruction(
+	pi: ExtensionAPI,
+	ctx: ExtensionContext,
+	cfg: LangNagConfig,
+	sample: string,
+	signal: AbortSignal,
+): Promise<string | null> {
+	let opened: JudgeOpen;
+	try {
+		opened = await openNativeJudge(ctx);
+	} catch (error) {
+		if (!signal.aborted) pi.logger.warn("lang-nag: judge unavailable", { error: errorText(error) });
+		return null;
+	}
+	switch (opened.kind) {
+		case "ready":
+			return judgeInstruction(pi, opened.judge, cfg, sample, signal);
+		case "inactive":
+			return classifyInstruction(pi, ctx, cfg, sample, signal);
+		default: {
+			const exhaustive: never = opened;
+			return exhaustive;
+		}
+	}
+}
+
+// JUDGE mode: one choice question on the sample's language; answer "no" means nag.
+// Never rejects; a failed or unanswered judgment is no nag.
+async function judgeInstruction(
+	pi: ExtensionAPI,
+	judge: Judge,
+	cfg: LangNagConfig,
+	sample: string,
+	signal: AbortSignal,
+): Promise<string | null> {
+	try {
+		const result = await judge.judge(
+			{
+				state: { reply: sample },
+				questions: {
+					language: {
+						type: "choice",
+						instructions: `Decide whether the REPLY is written mainly in ${cfg.language}. Ignore code, file paths, URLs, and isolated technical terms; judge the prose.`,
+						criteria: {
+							yes: `The prose is mainly in ${cfg.language}.`,
+							no: `The prose is mainly in a language other than ${cfg.language}.`,
+						},
+					},
+				},
+			},
+			{ signal },
+		);
+		const answer = result.answers.language;
+		if (answer === undefined || answer.type !== "choice") {
+			pi.logger.warn("lang-nag: judge returned no choice answer");
+			return null;
+		}
+		return answer.choice === "no" ? cfg.instruction : null;
+	} catch (error) {
+		if (!signal.aborted) pi.logger.warn("lang-nag: judge failed", { error: errorText(error) });
+		return null;
+	}
+}
+
+// Model mode: the configured model answers "yes" or "no" in a helper session.
+// Resolves to the instruction to prepend, or null (in-target / undetermined / misconfigured / aborted).
+async function classifyInstruction(
 	pi: ExtensionAPI,
 	ctx: ExtensionContext,
 	cfg: LangNagConfig,

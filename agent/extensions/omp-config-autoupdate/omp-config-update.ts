@@ -44,6 +44,8 @@
 // The finite TODO_RETIREMENTS are different: when the source declares the
 // independent Todo plugin, both modes retire those exact leaves after the
 // OMP owner confirms plugin readiness, even on first apply or without history.
+// CTX_RETIREMENTS (the ctx leaves the Todo plugin now ships) follow the same rule,
+// but only when the ready plugin carries src/ctx; until then the old leaves stay.
 //
 // RELOCATIONS. Both modes, planned like every other op. Earlier layouts kept
 // extensions flat (extensions/<name>.ts) and their files at the agent root.
@@ -65,7 +67,7 @@
 //
 // SAFETY. Parse and plan all source/host inputs and retirement ownership before
 // plugin installation or file writes. Preflight errors stop the whole apply.
-// Install missing plugins, then freshly query OMP for the required Todo entry;
+// Install and upgrade plugins, then freshly query OMP for the required Todo entry;
 // failed readiness leaves all managed file operations unapplied. `--check`
 // only reports candidates and prerequisites. Writes use a temp file and rename.
 // Order after readiness: moves, plain files, JSON, config.yml, deletions.
@@ -77,8 +79,14 @@
 // the loser skips. The lock records its holder's pid: a dead holder's lock is
 // taken over, and a process only releases a lock it holds.
 //
-// PLUGINS. Missing entries of install-plugins.sh are installed with `omp install`
-// before managed file operations. Existing packages are not upgraded or enabled.
+// PLUGINS. Every entry of install-plugins.sh runs through `omp install` before
+// managed file operations: missing ones are installed, installed ones are
+// re-resolved (npm to the latest version, GitHub URLs to the default branch's
+// head). A plugin counts as changed when ~/.omp/plugins/bun.lock or
+// omp-plugins.lock.json changes; a change sets restartNeeded. A failed install
+// or upgrade is an error and stops the apply before file operations. Packages
+// are never enabled or disabled here. `auto` reaches this only when the commit
+// changed (see runAuto).
 // Todo handover requires a fresh enabled npm catalog entry, its declared root
 // entry and the actual file. No plugin internals or Tern catalog are imported here.
 // Nothing is uninstalled; /update-omp handles uninstall candidates.
@@ -164,14 +172,20 @@ const TODO_RETIREMENTS: readonly string[] = [
 	"extensions/subagent-todo/index.ts",
 ];
 
+/** ctx leaves the Todo plugin now ships under src/ctx; retired only once the ready plugin carries them. */
+const CTX_RETIREMENTS: readonly string[] = [
+	"extensions/ctx-tool/index.ts",
+	"extensions/ctx-tool/inventory.ts",
+	"extensions/ctx-tool/post-compact-hint.ts",
+	"extensions/ctx-tasklog/index.ts",
+	"extensions/_shared/task-log.ts",
+];
+
 /** Files of earlier layouts (agent-dir relative) and the file that replaced each. */
 const SUPERSEDED: readonly { readonly from: string; readonly by: string }[] = [
 	...[
 		"append-system-model",
-		"bro",
 		"commandcode-model-spec",
-		"ctx-tasklog",
-		"ctx-tool",
 		"doc-polish",
 		"fork-task",
 		"input-polish",
@@ -187,7 +201,6 @@ const SUPERSEDED: readonly { readonly from: string; readonly by: string }[] = [
 		"watchdog-agent",
 		"wt-tool",
 	].map((name) => ({ from: `extensions/${name}.ts`, by: `extensions/${name}/index.ts` })),
-	{ from: "extensions/ctx-post-compact-hint.ts", by: "extensions/ctx-tool/index.ts" },
 	{ from: "extensions-last/system-prompt-replace.ts", by: "extensions-last/system-prompt-replace/index.ts" },
 	{ from: "omp-config-update.ts", by: UPDATER_REL },
 ];
@@ -205,8 +218,6 @@ type DataMove =
 const DATA_MOVES: readonly DataMove[] = [
 	{ kind: "file", owner: "host", from: "extensions/doc-polish.json", to: "extensions/doc-polish/doc-polish.json" },
 	{ kind: "file", owner: "host", from: "APPEND_SYSTEM_MODEL.md", to: "extensions/append-system-model/APPEND_SYSTEM_MODEL.md" },
-	{ kind: "file", owner: "host", from: "bro-prompt.md", to: "extensions/bro/bro-prompt.md" },
-	{ kind: "file", owner: "host", from: "bro-settings.json", to: "extensions/bro/bro-settings.json" },
 	{ kind: "file", owner: "host", from: "omp-config-autoupdate.json", to: "extensions/omp-config-autoupdate/omp-config-autoupdate.json" },
 	{ kind: "pattern", owner: "template", pattern: /^PROMPT-INJECT-.+\.md$/i, toDir: "extensions/user-prompt-inject" },
 	{ kind: "pattern", owner: "template", pattern: /^TURN-JUDGE-.+\.md$/i, toDir: "extensions/turn-judge" },
@@ -234,7 +245,7 @@ const STRUCTURED: readonly StructuredItem[] = [
 		localFields: [],
 		machineLists: [],
 	},
-	...["lang-nag", "input-polish", "tool-policy-nag"].map(
+	...["lang-nag", "input-polish", "tool-policy-nag", "task-completion-judge"].map(
 		(name): StructuredItem => ({
 			rel: `agent/extensions/${name}/${name}.json`,
 			legacyRel: `agent/extensions/${name}.json`,
@@ -255,7 +266,7 @@ const STRUCTURED: readonly StructuredItem[] = [
 function managedPlain(rel: string): boolean {
 	if (rel.split("/").some((part) => part.startsWith("."))) return false;
 	return (
-		/^agent\/(SYSTEM_TEMPLATE|APPEND_SYSTEM|APPEND_SYSTEM_LIGHT)\.md$/.test(rel) ||
+		/^agent\/(SYSTEM_TEMPLATE|APPEND_SYSTEM|APPEND_SYSTEM_LIGHT|PERSONALITY)\.md$/.test(rel) ||
 		/^agent\/(config-light\.yml|omp-light\.ts)$/.test(rel) ||
 		/^agent\/agents\/.+$/.test(rel) ||
 		/^agent\/(extensions|extensions-last)\/[^/]+\/[^/]+\.ts$/.test(rel) ||
@@ -266,7 +277,7 @@ function managedPlain(rel: string): boolean {
 }
 
 /** Extension code takes effect on the next start; the updater script itself runs fresh each time. */
-const RESTART_SCOPED = /^agent\/(SYSTEM_TEMPLATE\.md|APPEND_SYSTEM\.md|extensions\/.+\.ts|extensions-last\/.+\.ts)$/;
+const RESTART_SCOPED = /^agent\/(SYSTEM_TEMPLATE\.md|APPEND_SYSTEM\.md|PERSONALITY\.md|extensions\/.+\.ts|extensions-last\/.+\.ts)$/;
 
 // --- report -----------------------------------------------------------------
 
@@ -288,6 +299,7 @@ export interface ApplyReport {
 	readonly errors: string[];
 	readonly notes: string[];
 	readonly pluginsInstalled: string[];
+	readonly pluginsUpgraded: string[];
 	readonly pluginsMissing: string[];
 	restartNeeded: boolean;
 }
@@ -617,7 +629,7 @@ function inspectTodoRetirement(agentDir: string, rel: string): RetirementInspect
 				return { kind: "blocked", message: `${target}: retirement traverses symlink parent ${parent}; backing object left untouched` };
 		}
 		if (isAppManaged(target, true))
-			return { kind: "blocked", message: `${target}: app-managed Todo retirement conflicts with plugin handover; left untouched` };
+			return { kind: "blocked", message: `${target}: app-managed retirement conflicts with plugin handover; left untouched` };
 		return { kind: "candidate" };
 	} catch (error) {
 		if (typeof error === "object" && error !== null && "code" in error && (error.code === "ENOENT" || error.code === "ENOTDIR"))
@@ -626,9 +638,9 @@ function inspectTodoRetirement(agentDir: string, rel: string): RetirementInspect
 	}
 }
 
-function planTodoRetirements(opts: ApplyOptions, report: ApplyReport): Op[] {
+function planRetirements(opts: ApplyOptions, report: ApplyReport, leaves: readonly string[]): Op[] {
 	const ops: Op[] = [];
-	for (const rel of TODO_RETIREMENTS) {
+	for (const rel of leaves) {
 		const inspected = inspectTodoRetirement(opts.agentDir, rel);
 		switch (inspected.kind) {
 			case "missing":
@@ -735,6 +747,7 @@ function planDeletions(opts: ApplyOptions, report: ApplyReport, todoRequired: bo
 	for (const rel of diff.out.split("\0").filter(Boolean)) {
 		// The finite planner owns these leaves, including its app-managed errors and plugin prerequisite.
 		if (todoRequired && TODO_RETIREMENTS.includes(rel.slice("agent/".length))) continue;
+		if (CTX_RETIREMENTS.includes(rel.slice("agent/".length))) continue;
 		if (!managedPlain(rel)) continue;
 		const target = targetOf(rel, opts.agentDir);
 		try {
@@ -814,7 +827,13 @@ function declaredPlugins(source: string): string[] {
 	return specs;
 }
 
-function installedPluginSpecs(): { names: Set<string>; values: Set<string> } {
+/** Plugin names and dependency values recorded in ~/.omp/plugins/package.json. */
+interface InstalledPluginSpecs {
+	readonly names: Set<string>;
+	readonly values: Set<string>;
+}
+
+function installedPluginSpecs(): InstalledPluginSpecs {
 	const path = join(homedir(), ".omp", "plugins", "package.json");
 	const names = new Set<string>();
 	const values = new Set<string>();
@@ -842,7 +861,7 @@ function npmName(spec: string): string {
 }
 
 type TodoPluginReadiness =
-	| { readonly kind: "ready" }
+	| { readonly kind: "ready"; readonly ctx: boolean }
 	| { readonly kind: "missing" }
 	| { readonly kind: "invalid"; readonly message: string };
 
@@ -878,21 +897,44 @@ function todoPluginReadiness(): TodoPluginReadiness {
 		if (typeof plugin.path !== "string" || !isAbsolute(plugin.path) || !statSync(join(plugin.path, "index.ts")).isFile()) {
 			return { kind: "invalid", message: "Todo plugin entry is missing or invalid; nothing switched" };
 		}
-		return { kind: "ready" };
+		return { kind: "ready", ctx: existsSync(join(plugin.path, "src", "ctx", "index.ts")) };
 	} catch (error) {
 		return { kind: "invalid", message: `Todo plugin readiness cannot be confirmed (${errorText(error)}); nothing switched` };
 	}
 }
 
-function syncPlugins(opts: ApplyOptions, report: ApplyReport, declared: readonly string[], todo: TodoPluginReadiness | undefined): void {
+/** Resolution state `omp install` writes; unchanged bytes mean no plugin was installed or re-resolved. */
+function pluginResolutionState(): string {
+	const dir = join(homedir(), ".omp", "plugins");
+	return ["bun.lock", "omp-plugins.lock.json"]
+		.map((name) => {
+			try {
+				return readFileSync(join(dir, name), "utf8");
+			} catch {
+				// Expected before the first install: no lock file yet.
+				return "";
+			}
+		})
+		.join("\0");
+}
+
+/**
+ * `omp install` for every declared plugin: missing ones are installed and
+ * installed ones are re-resolved to npm's latest or a GitHub URL's default-branch
+ * head. `omp plugin upgrade` is not used: for GitHub-sourced plugins it reports
+ * "up to date" while the locked commit is stale.
+ */
+function syncPlugins(opts: ApplyOptions, report: ApplyReport, declared: readonly string[]): void {
 	const installed = installedPluginSpecs();
-	const missing = declared.filter((spec) => {
-		if (spec === TODO_PLUGIN_URL) return todo?.kind === "missing" && !installed.names.has(TODO_PLUGIN_NAME);
-		return spec.includes("://") ? !installed.values.has(spec.split("#", 1)[0]!) : !installed.names.has(npmName(spec));
-	});
-	if (missing.length === 0) return;
+	const missing = declared.filter((spec) =>
+		spec.includes("://") ? !installed.values.has(spec.split("#", 1)[0]!) : !installed.names.has(npmName(spec)),
+	);
 	if (opts.check || !opts.plugins) {
 		report.pluginsMissing.push(...missing);
+		if (opts.check && opts.plugins && declared.length > 0)
+			report.notes.push(
+				"plugins: apply runs omp install for every declared plugin (installs missing, upgrades installed); check runs none",
+			);
 		return;
 	}
 	const omp = Bun.which("omp");
@@ -901,14 +943,21 @@ function syncPlugins(opts: ApplyOptions, report: ApplyReport, declared: readonly
 		report.errors.push("plugins not installed: omp is not on PATH");
 		return;
 	}
-	for (const spec of missing) {
+	for (const spec of declared) {
+		const wasInstalled = !missing.includes(spec);
+		const before = pluginResolutionState();
 		const result = spawnSync(omp, ["install", spec], { encoding: "utf8" });
-		if (result.status === 0) {
+		if (result.status !== 0) {
+			if (!wasInstalled) report.pluginsMissing.push(spec);
+			report.errors.push(`omp install ${spec}: ${(result.stderr || result.stdout || result.error?.message || "").trim()}`);
+			continue;
+		}
+		if (!wasInstalled) {
 			report.pluginsInstalled.push(spec);
 			report.restartNeeded = true;
-		} else {
-			report.pluginsMissing.push(spec);
-			report.errors.push(`omp install ${spec}: ${(result.stderr || result.stdout || result.error?.message || "").trim()}`);
+		} else if (pluginResolutionState() !== before) {
+			report.pluginsUpgraded.push(spec);
+			report.restartNeeded = true;
 		}
 	}
 }
@@ -924,12 +973,14 @@ export async function applySnapshot(opts: ApplyOptions): Promise<ApplyReport> {
 		errors: [],
 		notes: [],
 		pluginsInstalled: [],
+		pluginsUpgraded: [],
 		pluginsMissing: [],
 		restartNeeded: false,
 	};
 	let ops: Op[];
 	let declared: string[];
 	let todoRequired: boolean;
+	let ctxReady = false;
 	try {
 		const sources = parseSources(opts, report);
 		declared = declaredPlugins(opts.source);
@@ -939,7 +990,7 @@ export async function applySnapshot(opts: ApplyOptions): Promise<ApplyReport> {
 			...planPlain(opts, report, todoRequired),
 			...planStructured(opts, report, sources),
 			...planDeletions(opts, report, todoRequired),
-			...(todoRequired ? planTodoRetirements(opts, report) : []),
+			...(todoRequired ? planRetirements(opts, report, TODO_RETIREMENTS) : []),
 		];
 		// Moves first, managed writes next, deletions last; Todo retirement requires all preceding operations to succeed.
 		const rank: Record<Op["kind"], number> = { move: 0, write: 1, delete: 2 };
@@ -954,7 +1005,7 @@ export async function applySnapshot(opts: ApplyOptions): Promise<ApplyReport> {
 		report.errors.push(before.message);
 		if (!opts.check) return report;
 	}
-	syncPlugins(opts, report, declared, before);
+	syncPlugins(opts, report, declared);
 	if (!opts.check && report.errors.length > 0) {
 		if (report.restartNeeded) report.notes.push("Cutover incomplete; do not restart OMP. Resolve errors and rerun apply.");
 		return report;
@@ -964,6 +1015,7 @@ export async function applySnapshot(opts: ApplyOptions): Promise<ApplyReport> {
 		switch (ready?.kind) {
 			case "ready":
 				report.notes.push("Todo plugin prerequisite confirmed by OMP owner catalog.");
+				ctxReady = ready.ctx;
 				break;
 			case "missing":
 				report.errors.push(
@@ -985,9 +1037,12 @@ export async function applySnapshot(opts: ApplyOptions): Promise<ApplyReport> {
 			return report;
 		}
 	}
+	if (ctxReady) ops = [...ops, ...planRetirements(opts, report, CTX_RETIREMENTS)];
 	for (const op of ops) {
 		if (!opts.check && todoRequired && op.kind === "delete" && report.errors.length > 0) break;
-		const retirement = todoRequired && op.kind === "delete" && TODO_RETIREMENTS.includes(op.rel.slice("agent/".length));
+		const leaf = op.rel.slice("agent/".length);
+		const retirement =
+			op.kind === "delete" && ((todoRequired && TODO_RETIREMENTS.includes(leaf)) || (ctxReady && CTX_RETIREMENTS.includes(leaf)));
 		try {
 			if (!opts.check && retirement) {
 				const current = inspectTodoRetirement(opts.agentDir, op.rel.slice("agent/".length));
@@ -1154,6 +1209,7 @@ function formatReport(report: ApplyReport, check: boolean): string {
 	for (const path of report.deleted) lines.push(`${check ? "would delete" : "deleted"}: ${path}`);
 	for (const { path, reason } of report.skipped) lines.push(`skipped (${reason}): ${path}`);
 	for (const spec of report.pluginsInstalled) lines.push(`plugin installed: ${spec}`);
+	for (const spec of report.pluginsUpgraded) lines.push(`plugin upgraded: ${spec}`);
 	for (const spec of report.pluginsMissing) lines.push(`plugin missing: ${spec}`);
 	for (const note of report.notes) lines.push(`note: ${note}`);
 	for (const error of report.errors) lines.push(`error: ${error}`);

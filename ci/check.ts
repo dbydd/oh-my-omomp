@@ -163,7 +163,11 @@ function configuredModels(): ModelRef[] {
 	const overrides =
 		isMapping(config) && isMapping(config.task) && isMapping(config.task.agentModelOverrides) ? config.task.agentModelOverrides : {};
 	for (const chain of Object.values(overrides)) if (typeof chain === "string") selectors.push(...chain.split(","));
-	for (const rel of ["agent/extensions/lang-nag/lang-nag.json", "agent/extensions/input-polish/input-polish.json"]) {
+	for (const rel of [
+		"agent/extensions/lang-nag/lang-nag.json",
+		"agent/extensions/input-polish/input-polish.json",
+		"agent/extensions/task-completion-judge/task-completion-judge.json",
+	]) {
 		const model = readJson(rel).model;
 		if (typeof model === "string") selectors.push(model);
 	}
