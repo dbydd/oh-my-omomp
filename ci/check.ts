@@ -156,6 +156,13 @@ function readJson(rel: string): Mapping {
 	return isMapping(value) ? value : {};
 }
 
+/** The managed omomp.yml section `name` (an empty mapping when absent). */
+function omompSection(name: string): Mapping {
+	const value: unknown = Bun.YAML.parse(readFileSync(join(REPO, "agent/omomp.yml"), "utf8"));
+	const section = isMapping(value) ? value[name] : undefined;
+	return isMapping(section) ? section : {};
+}
+
 /** Every provider-qualified model the managed configuration names. */
 function configuredModels(): ModelRef[] {
 	const selectors: string[] = [];
@@ -163,12 +170,8 @@ function configuredModels(): ModelRef[] {
 	const overrides =
 		isMapping(config) && isMapping(config.task) && isMapping(config.task.agentModelOverrides) ? config.task.agentModelOverrides : {};
 	for (const chain of Object.values(overrides)) if (typeof chain === "string") selectors.push(...chain.split(","));
-	for (const rel of [
-		"agent/extensions/lang-nag/lang-nag.json",
-		"agent/extensions/input-polish/input-polish.json",
-		"agent/extensions/task-completion-judge/task-completion-judge.json",
-	]) {
-		const model = readJson(rel).model;
+	for (const name of ["lang-nag", "input-polish", "task-completion-judge"]) {
+		const model = omompSection(name).model;
 		if (typeof model === "string") selectors.push(model);
 	}
 	const translators = readJson("agent/thinking-translator.json").translatorModels;

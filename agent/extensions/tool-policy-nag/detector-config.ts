@@ -1,7 +1,7 @@
 /**
- * Lane configuration for tool-policy-nag, read from `tool-policy-nag.json`
- * (a cwd copy wins over the one beside this extension; invalid copies warn and
- * fall through) at every watched call.
+ * Lane configuration for tool-policy-nag: the `tool-policy-nag` section of
+ * omomp.* (the project's `.omp/` copy wins over the agent-dir copy; invalid
+ * copies warn and fall through), read at every watched call.
  *
  * Three lanes, independently switchable — two ask whether a built-in tool
  * should have done the work, the third asks whether the call's side effects can
@@ -25,7 +25,7 @@
  * leaves the form lane on, as before.
  */
 import { z } from "@oh-my-pi/pi-coding-agent";
-import { loadJsonConfig } from "../_shared/config.ts";
+import { defineOmompSection, loadOmompSection } from "../_shared/omomp.ts";
 import type { RiskConfig } from "./risk.ts";
 
 /** The deterministic string lane. */
@@ -69,6 +69,8 @@ const lanesSchema = z.object({
 	threshold: thresholdSchema.optional(),
 });
 
+const omompSection = defineOmompSection(import.meta.dir, lanesSchema);
+
 function lanesOf(value: z.infer<typeof lanesSchema>): Lanes {
 	if (value.form !== undefined || value.intent !== undefined || value.risk !== undefined) {
 		const intent = value.intent ?? undefined;
@@ -91,9 +93,9 @@ function lanesOf(value: z.infer<typeof lanesSchema>): Lanes {
 	}
 }
 
-/** Re-read every watched call; cwd overrides the shipped copy, invalid copies warn and fall through. */
+/** Re-read every watched call; the project's omomp section overrides the agent-dir one. */
 export function loadLanes(cwd: string): { readonly lanes: Lanes; readonly warnings: readonly string[] } {
-	const loaded = loadJsonConfig("tool-policy-nag.json", lanesSchema, [cwd, import.meta.dir]);
+	const loaded = loadOmompSection(omompSection, cwd);
 	const warnings = loaded.skipped.map(({ path, reason }) => `tool-policy-nag: 跳过 ${path}：${reason}`);
 	switch (loaded.kind) {
 		case "found":

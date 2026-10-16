@@ -1,5 +1,0 @@
-{
-  "splitModel": "opencode-go/muse-spark-1.3-contributor:xhigh",
-  "polishModel": "commandcode/google/gemini-3.7-flash:high",
-  "concurrency": 8
-}

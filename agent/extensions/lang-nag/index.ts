@@ -20,8 +20,8 @@
 // turn-judge and tool-policy-nag use): one choice question on the sample's language.
 // When JUDGE is unavailable, a dedicated in-memory helper session asks the configured
 // model yes/no instead (thinking OFF, NO tools, no MCP/LSP/extensions). Config (model +
-// target language + the literal instruction string) is read from <cwd>/lang-nag.json
-// first, then agent/extensions/lang-nag/lang-nag.json beside this entry point.
+// target language + the literal instruction string) is the `lang-nag` section of
+// omomp.*: the project's `.omp/` copy first, then the agent-dir copy.
 //
 // Scope is the main session only, mirroring tool-policy-nag: subagents run
 // short decomposed slices where a language nag is noise. A detection failure,
@@ -33,16 +33,14 @@
 
 import type { Judge } from "@oh-my-pi/pi-ai";
 import { type ExtensionAPI, type ExtensionContext, z } from "@oh-my-pi/pi-coding-agent";
-import { loadJsonConfig } from "../_shared/config.ts";
 import { errorText } from "../_shared/errors.ts";
 import { runHelperPrompt } from "../_shared/helper-session.ts";
 import { type JudgeOpen, openNativeJudge } from "../_shared/judge.ts";
 import { lastAssistantText } from "../_shared/messages.ts";
 import { findModel, splitLevel } from "../_shared/models.ts";
+import { defineOmompSection, loadOmompSection } from "../_shared/omomp.ts";
 
 const DETECT_CHAR_LIMIT = 200; // code points of the last paragraph handed to the classifier; never more.
-
-// --- config (standalone lang-nag.json) --------------------------------------
 
 const configSchema = z.object({
 	/** Fallback classifier model (`provider/id`, bare id, or role alias), used only when native JUDGE is unavailable. Any `:effort` suffix is dropped — thinking is forced off. */
@@ -53,12 +51,14 @@ const configSchema = z.object({
 	instruction: z.string().min(1),
 });
 
+const omompSection = defineOmompSection(import.meta.dir, configSchema);
+
 type LangNagConfig = z.infer<typeof configSchema>;
 
-// cwd-local lang-nag.json wins over the one shipped beside this extension;
-// missing / malformed config leaves the extension inert.
+// Project `.omp/omomp.*` wins over the agent-dir copy; a missing or invalid
+// section leaves the extension inert.
 function loadConfig(cwd: string): LangNagConfig | null {
-	const result = loadJsonConfig("lang-nag.json", configSchema, [cwd, import.meta.dir]);
+	const result = loadOmompSection(omompSection, cwd);
 	switch (result.kind) {
 		case "found":
 			return result.value;
@@ -253,7 +253,7 @@ export default function langNag(pi: ExtensionAPI): void {
 			if (config) {
 				pi.logger.info(`lang-nag: active (language=${config.language}, model=${config.model})`);
 			} else {
-				pi.logger.info("lang-nag: no lang-nag.json found — inert");
+				pi.logger.info("lang-nag: no lang-nag section in omomp.* found — inert");
 			}
 		} catch (error) {
 			config = null;

@@ -7,12 +7,14 @@
 // This extension lets ordered regex rules choose a fixed compaction trigger and
 // hands the result to the native map; OMP itself still decides and compacts.
 //
-// FILE. `model-compaction.json` beside this module (resolved via import.meta.dir):
+// FILE. The `model-compaction` section of omomp.* in the agent directory (machine-
+// local; no project copy is read):
 //
-//   { "rules": [
-//       { "provider": "^anthropic$", "model": "opus", "thresholdTokens": 150000 },
-//       { "model": "(gpt-5|o3)", "thresholdTokens": 120000 },
-//       { "model": ".*", "thresholdTokens": 90000 } ] }
+//   model-compaction:
+//     rules:
+//       - { provider: "^anthropic$", model: "opus", thresholdTokens: 150000 }
+//       - { model: "(gpt-5|o3)", thresholdTokens: 120000 }
+//       - { model: ".*", thresholdTokens: 90000 }
 //
 // Rule keys (`model` and/or `provider` required):
 //   provider        JavaScript regex tested against the model's provider id (`anthropic`).
@@ -63,10 +65,8 @@
 import type { Model } from "@oh-my-pi/pi-ai";
 import { AgentRegistry, type ExtensionAPI, type ExtensionContext, type Settings, z } from "@oh-my-pi/pi-coding-agent";
 import { cfgCompactionModelThresholds, cfgExtendedContext } from "@oh-my-pi/pi-coding-agent/session/context-settings";
-import { loadJsonConfig } from "../_shared/config.ts";
 import { errorText } from "../_shared/errors.ts";
-
-const FILE_NAME = "model-compaction.json";
+import { defineOmompSection, loadOmompSection } from "../_shared/omomp.ts";
 
 type MatchField = "provider" | "model";
 
@@ -126,6 +126,7 @@ const ruleSchema = z
 	.strict()
 	.refine((rule) => rule.provider !== undefined || rule.model !== undefined, "a rule that sets `model` and/or `provider`");
 const configSchema = z.object({ rules: z.array(ruleSchema) }).strict();
+const omompSection = defineOmompSection(import.meta.dir, configSchema);
 
 function toRule(rule: z.infer<typeof ruleSchema>): Rule {
 	const [first, ...rest] = (["provider", "model"] as const).flatMap((field): Constraint[] => {
@@ -137,7 +138,7 @@ function toRule(rule: z.infer<typeof ruleSchema>): Rule {
 }
 
 function loadRules(): Rules {
-	const loaded = loadJsonConfig(FILE_NAME, configSchema, [import.meta.dir]);
+	const loaded = loadOmompSection(omompSection, null);
 	switch (loaded.kind) {
 		case "found":
 			return { kind: "rules", rules: loaded.value.rules.map(toRule) };

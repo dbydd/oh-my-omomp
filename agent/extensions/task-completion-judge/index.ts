@@ -30,7 +30,7 @@
  * Registers `tool_call` and `session_shutdown`; it reads the host-managed session
  * branch for the assignment/tools and requests the independent Todo owner's
  * synchronous read projection before and after judging. It reads the judge model
- * from `task-completion-judge.json` beside this module (a cwd copy wins) at every
+ * from the `task-completion-judge` section of omomp.* (a project copy wins) at every
  * judgment, and writes only in-memory round state. Only the named task subagents
  * are judged; main sessions pass.
  * Every failure (agent not identified, Todo owner unavailable, config missing or
@@ -43,16 +43,17 @@ import { completeSimple } from "@oh-my-pi/pi-ai";
 import { THINKING_EFFORTS } from "@oh-my-pi/pi-catalog";
 import { type ExtensionAPI, type ExtensionContext, z } from "@oh-my-pi/pi-coding-agent";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
-import { loadJsonConfig } from "../_shared/config.ts";
 import { errorText } from "../_shared/errors.ts";
 import { textOf } from "../_shared/messages.ts";
 import { findModel } from "../_shared/models.ts";
+import { defineOmompSection, loadOmompSection } from "../_shared/omomp.ts";
 
-const CONFIG_FILE = "task-completion-judge.json";
 const configSchema = z.object({
 	/** Judge model: `provider/id`, bare id, or role alias. No `:effort` suffix; the judge runs at low effort. */
 	model: z.string().min(1),
 });
+
+const omompSection = defineOmompSection(import.meta.dir, configSchema);
 
 const EFFORT = THINKING_EFFORTS.find((effort) => effort === "low");
 if (EFFORT === undefined) throw new Error("Host thinking efforts do not include low");
@@ -326,10 +327,10 @@ const parseAnswer = (text: string): Verdict => {
 };
 
 const judge = async (ctx: ExtensionContext, prompt: string, signal: AbortSignal): Promise<Verdict> => {
-	const config = loadJsonConfig(CONFIG_FILE, configSchema, [ctx.cwd, import.meta.dir]);
+	const config = loadOmompSection(omompSection, ctx.cwd);
 	if (config.kind === "none") {
 		const skipped = config.skipped.map(({ path, reason }) => `${path}: ${reason}`).join("; ");
-		return { kind: "unknown", why: `no valid ${CONFIG_FILE}: ${skipped || "not found"}` };
+		return { kind: "unknown", why: `no valid task-completion-judge section in omomp.*: ${skipped || "not found"}` };
 	}
 	const model = findModel(ctx, config.value.model);
 	if (model === undefined) return { kind: "unknown", why: `model unavailable: ${config.value.model}` };

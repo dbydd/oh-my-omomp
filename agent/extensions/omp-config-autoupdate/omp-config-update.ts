@@ -31,7 +31,7 @@
 //     DELETIONS); they stay ahead of the repo's entries;
 //   - keys a structured file has only on the host;
 //   - files not in the managed set (extra extensions, agents, templates,
-//     HOST_OWNED files such as extensions/doc-polish/doc-polish.json,
+//     host-owned sections of omomp.yml (LOCAL_OMOMP_SECTIONS, e.g. doc-polish),
 //     runtime state);
 //   - app-managed files (`// @orca-managed-pi-extension` first line, or the
 //     Otty marker anywhere; see OTTY_MARKER), checked before every overwrite
@@ -54,9 +54,11 @@
 //     id), and the agent-root updater is replaced by the copy in
 //     extensions/omp-config-autoupdate/. An app-managed one is reported as
 //     an error instead.
-//   - A structured file with a `legacyRel` is merged from the old host copy
-//     when the new one is absent, then the old copy is deleted; the previous
-//     commit's keys are read from either path, so dropped keys still go.
+//   - An omomp section a machine lacks is imported from its old standalone JSON
+//     file (OMOMP_LEGACY_SECTIONS: extensions/<name>/<name>.json, the flat
+//     extensions/<name>.json, the root system-prompt-replace.json and the
+//     autoswitch's root copy), then the old file is deleted. A section the
+//     machine already has leaves the old file in place with a note.
 //   - DATA_MOVES carry agent-root data into its extension directory: a
 //     host-owned file is renamed there when the new path is free (else left,
 //     with a note); a repo template (shipped now, or by the previous commit)
@@ -216,9 +218,7 @@ type DataMove =
 	| { readonly kind: "pattern"; readonly owner: "host" | "template"; readonly pattern: RegExp; readonly toDir: string };
 
 const DATA_MOVES: readonly DataMove[] = [
-	{ kind: "file", owner: "host", from: "extensions/doc-polish.json", to: "extensions/doc-polish/doc-polish.json" },
 	{ kind: "file", owner: "host", from: "APPEND_SYSTEM_MODEL.md", to: "extensions/append-system-model/APPEND_SYSTEM_MODEL.md" },
-	{ kind: "file", owner: "host", from: "omp-config-autoupdate.json", to: "extensions/omp-config-autoupdate/omp-config-autoupdate.json" },
 	{ kind: "pattern", owner: "template", pattern: /^PROMPT-INJECT-.+\.md$/i, toDir: "extensions/user-prompt-inject" },
 	{ kind: "pattern", owner: "template", pattern: /^TURN-JUDGE-.+\.md$/i, toDir: "extensions/turn-judge" },
 	{ kind: "pattern", owner: "host", pattern: /^WATCHDOG-.+\.md$/i, toDir: "extensions/watchdog-agent" },
@@ -226,34 +226,61 @@ const DATA_MOVES: readonly DataMove[] = [
 
 type Format = "json" | "yaml";
 
+/** An omomp section and the old standalone JSON files that held it, newest layout first. */
+interface LegacySection {
+	readonly section: string;
+	readonly rels: readonly string[];
+}
+
 interface StructuredItem {
 	readonly rel: string;
-	/** Where earlier layouts kept this file; see RELOCATIONS. */
-	readonly legacyRel?: string;
+	/** Old standalone files whose contents become sections of `rel`; see RELOCATIONS. */
+	readonly legacySections?: readonly LegacySection[];
 	readonly format: Format;
 	readonly localFields: readonly string[];
 	readonly machineLists: readonly string[];
 }
 
+/**
+ * Sections of `omomp.yml` that belong to the machine: the repo never writes
+ * them and they are never synced back. A section the machine lacks stays absent.
+ */
+export const LOCAL_OMOMP_SECTIONS: readonly string[] = ["doc-polish", "model-compaction", "omp-config-autoupdate"];
+
+/** Every section's data as earlier layouts kept it. */
+const OMOMP_LEGACY_SECTIONS: readonly LegacySection[] = [
+	{ section: "lang-nag", rels: ["agent/extensions/lang-nag/lang-nag.json", "agent/extensions/lang-nag.json"] },
+	{ section: "input-polish", rels: ["agent/extensions/input-polish/input-polish.json"] },
+	{
+		section: "tool-policy-nag",
+		rels: ["agent/extensions/tool-policy-nag/tool-policy-nag.json", "agent/extensions/tool-policy-nag.json"],
+	},
+	{
+		section: "task-completion-judge",
+		rels: ["agent/extensions/task-completion-judge/task-completion-judge.json", "agent/extensions/task-completion-judge.json"],
+	},
+	{
+		section: "system-prompt-replace",
+		rels: ["agent/extensions-last/system-prompt-replace/system-prompt-replace.json", "agent/system-prompt-replace.json"],
+	},
+	{ section: "doc-polish", rels: ["agent/extensions/doc-polish/doc-polish.json", "agent/extensions/doc-polish.json"] },
+	{ section: "model-compaction", rels: ["agent/extensions/model-compaction/model-compaction.json"] },
+	{
+		section: "omp-config-autoupdate",
+		rels: ["agent/extensions/omp-config-autoupdate/omp-config-autoupdate.json", "agent/omp-config-autoupdate.json"],
+	},
+];
+
 /** Structured files, in apply order: config.yml last (it is live-reloaded). */
 const STRUCTURED: readonly StructuredItem[] = [
 	{ rel: "agent/thinking-translator.json", format: "json", localFields: [], machineLists: [] },
 	{
-		rel: "agent/extensions-last/system-prompt-replace/system-prompt-replace.json",
-		legacyRel: "agent/system-prompt-replace.json",
-		format: "json",
-		localFields: [],
+		rel: "agent/omomp.yml",
+		format: "yaml",
+		localFields: LOCAL_OMOMP_SECTIONS,
 		machineLists: [],
+		legacySections: OMOMP_LEGACY_SECTIONS,
 	},
-	...["lang-nag", "input-polish", "tool-policy-nag", "task-completion-judge"].map(
-		(name): StructuredItem => ({
-			rel: `agent/extensions/${name}/${name}.json`,
-			legacyRel: `agent/extensions/${name}.json`,
-			format: "json",
-			localFields: [],
-			machineLists: [],
-		}),
-	),
 	{ rel: "pi/agent/pi-bansos-relay-state.json", format: "json", localFields: [], machineLists: [] },
 	{ rel: "agent/config.yml", format: "yaml", localFields: LOCAL_CONFIG_FIELDS, machineLists: MACHINE_LIST_FIELDS },
 ];
@@ -548,27 +575,41 @@ function planStructured(opts: ApplyOptions, report: ApplyReport, sources: readon
 	const ops: Op[] = [];
 	for (const { item, text, repo } of sources) {
 		const target = targetOf(item.rel, opts.agentDir);
-		const legacy = item.legacyRel === undefined ? undefined : targetOf(item.legacyRel, opts.agentDir);
-		const legacyPresent = legacy !== undefined && lexists(legacy);
-		// The host copy: the current path, else the one an earlier layout left behind.
-		const hostPath = existsSync(target) ? target : legacyPresent ? legacy : undefined;
-		if (legacyPresent && hostPath === target) report.notes.push(`${legacy} left in place: ${target} already exists`);
 		let host: Mapping | undefined;
-		if (hostPath !== undefined) {
-			if (isAppManaged(hostPath)) {
-				report.skipped.push({ path: hostPath, reason: "app-managed" });
+		if (existsSync(target)) {
+			if (isAppManaged(target)) {
+				report.skipped.push({ path: target, reason: "app-managed" });
 				continue;
 			}
 			try {
-				host = parseStructured(readFileSync(hostPath, "utf8"), item.format);
+				host = parseStructured(readFileSync(target, "utf8"), item.format);
 			} catch (error) {
 				// Replacing it would drop the host's local fields; leave it and retry next start.
-				report.errors.push(`${hostPath}: host copy unparsable (${errorText(error)}); left untouched`);
+				report.errors.push(`${target}: host copy unparsable (${errorText(error)}); left untouched`);
 				continue;
 			}
 		}
+		const consumed: string[] = [];
+		for (const legacy of item.legacySections ?? []) {
+			const present = legacy.rels.filter((rel) => lexists(targetOf(rel, opts.agentDir)));
+			if (present.length === 0) continue;
+			if (host !== undefined && Object.hasOwn(host, legacy.section)) {
+				for (const rel of present) report.notes.push(`${rel} left in place: ${item.rel} already has section ${legacy.section}`);
+				continue;
+			}
+			const from = targetOf(present[0] as string, opts.agentDir);
+			let value: Mapping;
+			try {
+				value = parseStructured(readFileSync(from, "utf8"), "json");
+			} catch (error) {
+				report.errors.push(`${from}: old copy unparsable (${errorText(error)}); left untouched`);
+				continue;
+			}
+			host = { ...host, [legacy.section]: value };
+			consumed.push(...present);
+		}
 		const merged = overlay(host, repo, item, []);
-		const oldText = oldRepoText(opts, item.rel) ?? (item.legacyRel === undefined ? undefined : oldRepoText(opts, item.legacyRel));
+		const oldText = oldRepoText(opts, item.rel);
 		if (oldText !== undefined) {
 			try {
 				removeDropped(merged, parseStructured(oldText, item.format), repo, item, []);
@@ -577,12 +618,11 @@ function planStructured(opts: ApplyOptions, report: ApplyReport, sources: readon
 			}
 		}
 		dropRetiredEntries(merged, item.machineLists);
-		const fromLegacy = hostPath !== undefined && hostPath !== target;
-		if (!fromLegacy && host !== undefined && Bun.deepEquals(host, merged)) continue;
+		if (consumed.length === 0 && host !== undefined && Bun.deepEquals(host, merged)) continue;
 		// Keep the repo's own formatting whenever the result is exactly the repo file.
 		const content = Bun.deepEquals(merged, repo) ? text : serialize(merged, item.format);
 		ops.push({ kind: "write", rel: item.rel, target, content });
-		if (fromLegacy && item.legacyRel !== undefined) ops.push({ kind: "delete", rel: item.legacyRel, target: hostPath });
+		for (const rel of consumed) ops.push({ kind: "delete", rel, target: targetOf(rel, opts.agentDir) });
 	}
 	return ops;
 }

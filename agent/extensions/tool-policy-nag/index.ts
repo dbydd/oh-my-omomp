@@ -4,8 +4,8 @@
  * shell or the eval kernel was used instead. Reminders only: no call is ever
  * blocked, and a working call is left alone.
  *
- * TWO LANES, configured side by side in `tool-policy-nag.json` (cwd copy first,
- * then the one beside this file; re-read at every watched call, so edits apply
+ * TWO LANES, configured side by side in the `tool-policy-nag` section of omomp.*
+ * (project copy first, then the agent dir; re-read at every watched call, so edits apply
  * to the next shell or eval call):
  *
  * - `form` — the deterministic string lane (`heuristic.ts`, `shell-parser.ts`):

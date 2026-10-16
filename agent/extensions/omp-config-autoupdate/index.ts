@@ -2,35 +2,14 @@
 // omp-config-autoupdate — apply the omp-config repo at OMP start, when enabled,
 // or on demand.
 //
-// SWITCH. Off by default. `/omp-config-autoupdate on|off` writes
-// `<extension dir>/omp-config-autoupdate.json` (`{"enabled": true|false}`);
-// `/omp-config-autoupdate` or `… status` shows it. A missing or invalid file
-// means off. The file is machine-local: the updater does not manage it and
-// /sync-omp-config does not carry it. Read at each start, so a change applies
-// from the next start.
+// SWITCH. Off by default. `/omp-config-autoupdate on|off` writes section
+// `omp-config-autoupdate` ({"enabled": true|false}) of the agent dir's omomp.*
+// file; `/omp-config-autoupdate` or `… status` shows it. A missing or invalid
+// section means off. The section is machine-local: the updater does not manage
+// it and /sync-omp-config does not carry it. Read at each start, so a change
+// applies from the next OMP start.
 //
-// WHAT. Registers /omp-config-autoupdate in every session and session_start for
-// main sessions only. When on, once per process, the main session's hook runs
-// `bun <this dir>/omp-config-update.ts auto --agent-dir <agent dir> --json`
-// as a child process; the updater script ships beside this file. It fetches
-// origin into its own clone and, when the fetch succeeds and the fetched
-// commit differs from the one last applied to this agent dir, applies it (see
-// the header of omp-config-update.ts for what it touches and what it never
-// touches). A failed fetch applies nothing.
-//
-// MANUAL RUN. `/omp-config-autoupdate run` runs the same child now, whatever
-// the switch says, and once the session is idle posts the full report (commit
-// range, every written/moved/deleted/skipped path, plugins, notes, errors) as a
-// display-only transcript message that starts no turn.
-//
-// WHY A CHILD PROCESS. Extensions run in-process without isolation; an updater
-// fault must never take OMP down. At start the child is spawned from a managed
-// `ctx.setTimeout`, never awaited by startup, and keeps running if this
-// session ends first: its writes are atomic and its lock is released by
-// itself.
-//
-// TIMING. Files land while this session runs. Per-prompt, per-turn and
-// per-spawn files (APPEND_SYSTEM_MODEL.md, system-prompt-replace.json,
+// per-spawn files (APPEND_SYSTEM_MODEL.md, the system-prompt-replace section,
 // TURN-JUDGE-*.md, PROMPT-INJECT-*.md, agents/) and live-reloaded config.yml apply at once;
 // APPEND_SYSTEM.md, extensions (this one included) and plugins apply on the
 // next start, which the notification says.
@@ -41,34 +20,37 @@
 // ============================================================================
 
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { getAgentDir, z } from "@oh-my-pi/pi-coding-agent";
 import { errorText } from "../_shared/errors.ts";
+import { defineOmompSection, loadOmompSection, writeOmompSection } from "../_shared/omomp.ts";
 
 const SCRIPT = "omp-config-update.ts";
-const SWITCH_FILE = "omp-config-autoupdate.json";
 const REPORT_TYPE = "omp-config-update";
 
 type Switch = { readonly kind: "on" } | { readonly kind: "off" } | { readonly kind: "invalid"; readonly reason: string };
 
-function readSwitch(path: string): Switch {
-	let text: string;
-	try {
-		text = readFileSync(path, "utf8");
-	} catch {
-		// A missing or unreadable machine-local switch means auto-update is off.
-		return { kind: "off" };
-	}
-	try {
-		const value: unknown = JSON.parse(text);
-		if (typeof value === "object" && value !== null && "enabled" in value && typeof value.enabled === "boolean") {
-			return value.enabled ? { kind: "on" } : { kind: "off" };
+const switchSection = defineOmompSection(import.meta.dir, z.object({ enabled: z.boolean() }).strict());
+
+/** Where the switch lives, for messages. */
+const switchLocation = (): string => `${getAgentDir()} (omomp section ${switchSection.id})`;
+
+function readSwitch(): Switch {
+	const loaded = loadOmompSection(switchSection, null);
+	switch (loaded.kind) {
+		case "found":
+			return loaded.value.enabled ? { kind: "on" } : { kind: "off" };
+		case "none": {
+			// A missing file or section is off; a file that exists but is unusable is reported.
+			const [problem] = loaded.skipped;
+			return problem === undefined ? { kind: "off" } : { kind: "invalid", reason: `${problem.path}: ${problem.reason}` };
 		}
-		return { kind: "invalid", reason: 'expected {"enabled": true|false}' };
-	} catch (error) {
-		return { kind: "invalid", reason: errorText(error) };
+		default: {
+			const exhaustive: never = loaded;
+			return exhaustive;
+		}
 	}
 }
 
@@ -81,7 +63,7 @@ const applyReportSchema = z.object({
 	errors: z.array(z.string()),
 	notes: z.array(z.string()),
 	pluginsInstalled: z.array(z.string()),
-	pluginsUpgraded: z.array(z.string()).default([]),
+	pluginsUpgraded: z.array(z.string()).default(() => []),
 	pluginsMissing: z.array(z.string()),
 	restartNeeded: z.boolean(),
 });
@@ -250,7 +232,6 @@ function registerAutoupdateCommand(pi: ExtensionAPI): void {
 		handler: async (args, ctx) => {
 			try {
 				const action = args.trim().toLowerCase() || "status";
-				const path = join(import.meta.dir, SWITCH_FILE);
 				if (action === "run") {
 					const agentDir = getAgentDir();
 					ctx.ui.notify("omp-config: updating from GitHub…", "info");
@@ -264,32 +245,32 @@ function registerAutoupdateCommand(pi: ExtensionAPI): void {
 				}
 				if (action === "on" || action === "off") {
 					try {
-						writeFileSync(path, `${JSON.stringify({ enabled: action === "on" })}\n`);
+						writeOmompSection(switchSection.id, { enabled: action === "on" });
 					} catch (error) {
 						pi.logger.warn("omp-config: cannot write auto-update switch", { error: errorText(error) });
-						ctx.ui.notify(`omp-config: cannot write ${path}: ${errorText(error)}`, "error");
+						ctx.ui.notify(`omp-config: cannot write ${switchLocation()}: ${errorText(error)}`, "error");
 						return;
 					}
-					ctx.ui.notify(`omp-config: auto-update ${action}; takes effect from the next OMP start (${path})`, "info");
+					ctx.ui.notify(`omp-config: auto-update ${action}; takes effect from the next OMP start (${switchLocation()})`, "info");
 					return;
 				}
 				if (action !== "status") {
 					ctx.ui.notify("Usage: /omp-config-autoupdate [status|on|off|run]", "warning");
 					return;
 				}
-				const state = readSwitch(path);
+				const state = readSwitch();
 				switch (state.kind) {
 					case "on":
-						ctx.ui.notify(`omp-config: auto-update is on (${path}); /omp-config-autoupdate run updates now`, "info");
+						ctx.ui.notify(`omp-config: auto-update is on (${switchLocation()}); /omp-config-autoupdate run updates now`, "info");
 						return;
 					case "off":
 						ctx.ui.notify(
-							`omp-config: auto-update is off (${path}); enable with /omp-config-autoupdate on, or update once now with /omp-config-autoupdate run`,
+							`omp-config: auto-update is off (${switchLocation()}); enable with /omp-config-autoupdate on, or update once now with /omp-config-autoupdate run`,
 							"info",
 						);
 						return;
 					case "invalid":
-						ctx.ui.notify(`omp-config: ${path} is invalid (${state.reason}); auto-update is off`, "warning");
+						ctx.ui.notify(`omp-config: ${switchLocation()} is invalid (${state.reason}); auto-update is off`, "warning");
 						return;
 					default: {
 						const exhaustive: never = state;
@@ -316,9 +297,9 @@ export default function ompConfigAutoupdate(pi: ExtensionAPI): void {
 		try {
 			if (started || ctx.agent.kind !== "main") return;
 			started = true;
-			const switchPath = join(import.meta.dir, SWITCH_FILE);
-			const state = readSwitch(switchPath);
-			if (state.kind === "invalid") notify(ctx, `omp-config: ${switchPath} is invalid (${state.reason}); auto-update is off`, "warning");
+			const state = readSwitch();
+			if (state.kind === "invalid")
+				notify(ctx, `omp-config: ${switchLocation()} is invalid (${state.reason}); auto-update is off`, "warning");
 			if (state.kind !== "on") return;
 			ctx.setTimeout(async () => {
 				try {
