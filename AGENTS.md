@@ -328,8 +328,9 @@ exercised in a real omp session.
   The default is `user`, and `user-prompt-inject` treats `user`-attributed
   messages as the human's own prompts.
 - **Imports:** omp host package roots (`pi-agent-core`, `pi-ai`, `pi-catalog`,
-  `pi-coding-agent`, `pi-natives`, `pi-tui`, `pi-utils`), node built-ins, and
-  relative paths. Other `@oh-my-pi/*` packages fail to load, and so do host
+  `pi-coding-agent`, `pi-natives`, `pi-tui`, `pi-utils`), Node/Bun built-ins, and
+  relative paths. Platform-specific native bindings load only after a platform guard.
+  Other `@oh-my-pi/*` packages fail to load, and so do host
   subpaths the omp binary does not map (`@oh-my-pi/pi-tui/thinking` fails); a
   subpath is used only when an extension already loads it in a real omp
   session. Dev type-checks resolve these packages from `node_modules/`, which
@@ -402,10 +403,20 @@ exercised in a real omp session.
   verification before handoff. The main agent owns final verification, directly or through
   an independent verifier. Every worker still requires Todo; mentor/discussant gates remain.
   `inlineToolDescriptors: "on"` is required for built-in description rewrites.
+- `agent/extensions/child-memory-warning/` — Darwin-only descendant physical-footprint
+  warnings, enabled in full/light mode. `native.ts` reads the LP64 libproc/sysctl ABI
+  through Bun FFI, `tracker.ts` owns live PID/start-time and anchored PGID observations,
+  and `index.ts` owns the first main runner's managed timer and UI/agent delivery.
+  No config, files, sampling subprocesses or automatic kills; owned orphans remain
+  tracked until exit, while processes entirely born and orphaned between scans
+  without a known surviving group anchor cannot be attributed retroactively.
+  Main session switches retain tracking; only
+  the owning main's shutdown clears its timer and closes libproc.
 - `agent/config-light.yml` — declarative light-mode config overlay: disables thirteen
   optional behavior extensions (including `task-completion-judge`, `turn-judge` and
-  `user-prompt-inject`); unfiltered local extensions (`append-system-model`,
-  `bro`, `input-polish`, `repo-rules`, `omp-config-autoupdate`, and the
+  `user-prompt-inject`); unfiltered local extensions (`append-system-model`, `model-compaction`,
+  `bro`, `input-polish`, `repo-rules`, `response-reading-coverage`,
+  `child-memory-warning`, `omp-config-autoupdate`, and the
   `commandcode-model-spec` compatibility fix) stay loaded. The independent Todo
   plugin stays loaded through ordinary plugin discovery; no launcher or `-e`
   change is needed. `omp-light` also auto-updates when the switch is on.

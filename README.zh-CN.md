@@ -307,7 +307,7 @@ git status --short
 
 - 用 `APPEND_SYSTEM_LIGHT.md` 代替完整的追加提示词。
 - 按 `config-light.yml` 禁用 13 个行为扩展：`ctx-tasklog`、`ctx-tool`、`doc-polish`、`fork-task`、`isolation-nudge`、`lang-nag`、`task-completion-judge`、`task-split-check`、`tool-policy-nag`、`turn-judge`、`user-prompt-inject`、`watchdog-agent`、`wt-tool`。
-- 未禁用的本地扩展照常加载：`append-system-model`、[model-compaction](#model-compaction)、`bro`、`input-polish`、`repo-rules`、[response-reading-coverage](#response-reading-coverage)、[omp-config-autoupdate](#omp-config-autoupdate)，以及兼容性修复 `commandcode-model-spec`。独立 [todo-more](#todo-more) 与其他插件从普通 discovery 加载，无须改 launcher 或额外 `-e`。`APPEND_SYSTEM_MODEL.md` 因此照样注入，`model-compaction.json` 照样设定 compact 触发点；自动更新开着时 `omp-light` 也会更新。原生 todo 同样关着。
+- 未禁用的本地扩展照常加载：`append-system-model`、[model-compaction](#model-compaction)、`bro`、`input-polish`、`repo-rules`、[response-reading-coverage](#response-reading-coverage)、[child-memory-warning](#child-memory-warning)、[omp-config-autoupdate](#omp-config-autoupdate)，以及兼容性修复 `commandcode-model-spec`。独立 [todo-more](#todo-more) 与其他插件从普通 discovery 加载，无须改 launcher 或额外 `-e`。`APPEND_SYSTEM_MODEL.md` 因此照样注入，`model-compaction.json` 照样设定 compact 触发点；自动更新开着时 `omp-light` 也会更新。原生 todo 同样关着。
 - `config-light.yml` 把 `extensions` 覆盖成空列表，去掉 `config.yml` 末项的 [system-prompt-replace](#system-prompt-replace)。`disabledExtensions` 按模块名过滤，但管不到在 `extensions` 或 `-e` 里直接写成文件路径的扩展（写成目录的，目录里发现的模块仍按名字过滤），所以只能这样排除。覆盖会连带去掉本机条目（如 `~/.claude`），所以 `omp-light` 读本机 `config.yml`，把 `extensions` 里路径不含 `/extensions-last/` 的条目逐个用 `-e` 传给 `omp`；`-e` 是另一条加载通道，不受这个覆盖影响。`extensions-last/` 下的扩展因此只属于完整模式（按路径字符串判断，相对路径或目录写法不会被认出来）。
 - 插件、rules、skills、上下文文件，以及 model、thinking、profile、auth、session 设置都不变。被禁用扩展注册的工具（`ctx`、`polish_doc`、`fork_task`、`wt`、`wt_remove`）在轻量模式下不存在。
 - `omp-light` 从 agent 目录读 `config-light.yml` 和 `APPEND_SYSTEM_LIGHT.md`：设置了 `PI_CODING_AGENT_DIR` 时用它，否则用 `~/.omp/agent`。缺任何一个就直接退出，不回退到别的目录。
@@ -398,6 +398,7 @@ subagent 分三类：`task:*` 执行，`discuss:*` 只读讨论，`mentor:defaul
 |[user-prompt-inject](#user-prompt-inject)|按模板把用户原话注入指定的 subagent|否|
 |[turn-judge](#turn-judge)|主会话每轮结束后用原生 JUDGE 判断这一轮，达到阈值就输入预设 prompt，否则显示判定|否|
 |[response-reading-coverage](#response-reading-coverage)|以主会话历史基准返回来源阅读跟进的低／中／高；子报告同时进入根主会话的上下文|是|
+|[child-memory-warning](#child-memory-warning)|macOS 后代进程物理 footprint 超过 4 GiB 时通知主 UI 和 agent，包括此前已观察到的存活孤儿|是|
 |[lang-nag](#lang-nag)|回复语言不对时，在下一条输入前加提醒|否|
 |[repo-rules](#repo-rules)|补读 `.claude/rules` 等 repo 级 rule 目录|是|
 |[append-system-model](#append-system-model)|按模型 / 提供商正则追加系统提示词|是|
@@ -455,7 +456,7 @@ omp 从 `~/.omp/agent/extensions/` 往下只找一层：直接放的 `*.ts`、`<
 - **文件位置**：扩展自己的文件用 `import.meta.dir` 读，不用 `getAgentDir()`。只有路径由别人定死的文件留在原处：`thinking-translator.json`（插件定）、`commandcode-models.json`（插件生成）、omp 自己的文件。
 - **注入消息**：扩展替自己发的用户消息写 `attribution: "agent"`，见 [user-prompt-inject](#user-prompt-inject)。
 - **结构**：`index.ts` 开头写注释，说明扩展做什么、注册了哪些事件 / 工具 / 命令、读写哪些文件、作用于主会话还是 subagent、失败时怎么办。只有默认导出，除非同一扩展的其他文件要用；不留测试接口。超过约 150 行的函数拆成模块级的具名函数。
-- **import**：只用 omp 宿主包的根路径（`pi-agent-core`、`pi-ai`、`pi-catalog`、`pi-coding-agent`、`pi-natives`、`pi-tui`、`pi-utils`）、node 内置模块和相对路径。宿主包的子路径不一定能在 omp 里加载（`@oh-my-pi/pi-tui/thinking` 就加载不到），只用已经在真实 omp 会话里加载过的。
+- **import**：只用 omp 宿主包的根路径（`pi-agent-core`、`pi-ai`、`pi-catalog`、`pi-coding-agent`、`pi-natives`、`pi-tui`、`pi-utils`）、Node/Bun 内置模块和相对路径。平台专属 native binding 放在平台判断之后加载。宿主包的子路径不一定能在 omp 里加载（`@oh-my-pi/pi-tui/thinking` 就加载不到），只用已经在真实 omp 会话里加载过的。
 
 `bun run check` 用 `node_modules` 里的宿主包做类型检查，证明不了扩展在 omp 里能加载。改了扩展还要在没有 `node_modules` 的目录里真实加载一次，并在真实会话里触发改动的工具、命令或钩子，见[维护须知](#维护须知)。
 
@@ -860,6 +861,19 @@ bun ci/reading-coverage-backtest.ts --cutoff 2026-10-15T20:09:21Z
 ```
 
 扩展没有配置、模型调用、阻断行为或额外安装列表条目。`/update-omp` 按现有扩展托管规则携带它的三个 `.ts` 模块，重启 OMP 后加载。离线命令 `ci/reading-coverage-backtest.ts` 从本机会话记录重新校准，不写源 session，也不把会话正文复制进仓库。模型、prompt 或工具输出变化使观测总体失效时，由维护者重新运行校准并更新冻结表。升级宿主后，要在真实会话里重验原生 provenance/metadata、调用顺序、终止 phase、子 IRC/yield/wake 边界与根投递；静态类型检查不能证明这些契约。
+
+### 本地进程资源
+
+#### child-memory-warning
+
+`child-memory-warning/` 在 macOS 上每 250 ms 采样交互式 OMP 进程的后代，完整和轻量模式都启用。内存读 `proc_pid_rusage` 的 **phys_footprint**，包括压缩与换出内存的计账，不读 RSS。footprint **严格大于 4 GiB** 时，主 UI 收到一条 warning，主 agent 收到一条归因为 agent 的消息，正常在一个采样周期内发出。主 agent 空闲时按普通输入投递，忙碌时用 aside。每条告警包含 PID、当前 PPID、是否孤儿、以 GiB 和 bytes 表示的物理 footprint，以及截断为 240 个字符的命令。扩展只告警，不发信号，也不修改 `kill_session`。
+
+- **归属**：PID 加内核启动时间标识进程。进程表经过两遍核对后才参与祖先与进程组归属判断；读取内存和命令后，再次核对身份。已观察到的后代在 PPID 变为 1 后仍保留归属，不依赖 exec 会话是否存活。只有观察到属于本 OMP 的后代组长后才登记进程组；组长退出后仍须有经验证存活的已归属成员作为锚点。继承的终端进程组和已经清空的旧组不能认领无关进程。
+- **生命周期与投递**：首个主会话的 factory 拥有该 OMP 进程唯一的 managed timer 和 native handle。子 agent 启停不能替换或结束监控。主会话切换只刷新投递 context，不清空归属或按身份去重的告警状态；owner 关闭时，先清 timer，再关闭 native handle。不持久化监控状态，也不跨 OMP 重启恢复。
+- **观测边界**：如果进程在两次观测之间完成创建、脱离并成为孤儿，而且没有已知存活的组锚点，轮询无法追溯归属。无法读取或前后不一致的内核记录不给新进程归属。组连续性假设普通 exec 行为，不覆盖进程刻意离组、再在两次观测之间加入数值已复用组的行为。owner 主会话结束时监控也结束；它不是外部孤儿回收器，也不提供多主会话 SDK 的 owner 转交服务。
+- **平台与失败策略**：非 Darwin 启动只记一条 `未启用` info，不导入 Darwin binding、不启动采样。Darwin 通过 Bun FFI 调用系统 `libproc`，不需要编译器、helper binary 或采样子进程。初始化和采样失败记 warning，不改用 RSS。命令只解码 argv，不解码环境变量，随后清空 native buffer；argv 不可用时退回可执行文件路径。UI 和消息投递分别隔离失败，不对已告警身份重试。
+
+没有配置、插件安装列表条目、launcher 或轻量模式 override 改动。`/update-omp` 按现有托管范围携带扩展的三个同级 `.ts` 文件，之后须重启 OMP。宿主或 OS 升级后，要用真实 `top` 对照 `phys_footprint`，并验证直接命令、子 agent 命令、存活孤儿、排除无关进程、去重、主会话切换和非 Darwin 启动。
 
 ### 派发与交付
 
