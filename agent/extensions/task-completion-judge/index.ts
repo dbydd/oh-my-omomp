@@ -4,8 +4,9 @@
  * that run has a structured yield tool. Unstructured task runs have no yield
  * to intercept. A fast model compares the assignment (the `task` prompt the
  * executor recorded in the run's `session_init`, plus the batch's shared
- * context) with the subagent's todo goal, the last 50 tool calls the subagent
- * made after that point and the submitted result, and decides whether the
+ * context) with the subagent's todo goal, the newest of the tool calls the
+ * subagent made after that point (as many as fit a fixed budget) and the
+ * submitted result, and decides whether the
  * work was actually finished.
  * A `fork_task` child's transcript opens with a copy of the parent's
  * conversation; everything before its own `session_init` is background, never
@@ -59,7 +60,10 @@ const EFFORT = THINKING_EFFORTS.find((effort) => effort === "low");
 if (EFFORT === undefined) throw new Error("Host thinking efforts do not include low");
 const DEADLINE_MS = 25_000;
 const JUDGED_AGENTS: Record<string, true> = { "task:low": true, "task:free": true, "task:mid": true };
-const TOOL_CALL_WINDOW = 50;
+/** The judge model's input window in tokens; the whole request, system prompt included, must fit it. */
+const JUDGE_CONTEXT_TOKENS = 64_000;
+/** Headroom for token estimation error and the judge's reply. */
+const JUDGE_RESERVED_TOKENS = 4_000;
 const ARGS_CHAR_LIMIT = 800;
 const RESULT_CHAR_LIMIT = 800;
 const SUBMISSION_CHAR_LIMIT = 6_000;
@@ -208,6 +212,19 @@ const truncate = (text: string, limit: number): string => {
 	return `${text.slice(0, head)}\n…[${text.length - limit} chars omitted]…\n${text.slice(text.length - tail)}`;
 };
 
+/**
+ * Conservative token estimate without a tokenizer: one token per ASCII character
+ * and two per other character. Calibrated against the judge helper's
+ * `max_tokens_exceeded` boundary: CJK text failed at about 32k characters (two
+ * tokens each), and code-like ASCII at about 91k characters, so one token per
+ * ASCII character leaves margin; prose ASCII passed at about 196k.
+ */
+const estimateTokens = (text: string): number => {
+	let tokens = 0;
+	for (const char of text) tokens += char.charCodeAt(0) < 128 ? 1 : 2;
+	return tokens;
+};
+
 const stringify = (value: unknown): string => {
 	try {
 		return JSON.stringify(value) ?? String(value);
@@ -282,36 +299,63 @@ const sharedContextOf = (ctx: ExtensionContext): string => {
 	return (end === -1 ? body : body.slice(0, end)).trim();
 };
 
+/** One tool call with its arguments and result, each already truncated; `n` is its position among all the worker's prior calls. */
+const renderCall = (call: ToolCallRecord, n: number, results: ReadonlyMap<string, ToolResultRecord>): string => {
+	const result = results.get(call.id);
+	const status = result === undefined ? "no result" : result.isError ? "error" : "ok";
+	return [
+		`<call n="${n}" tool="${call.name}" status="${status}">`,
+		`<args>${truncate(stringify(call.args), ARGS_CHAR_LIMIT)}</args>`,
+		`<result>${result === undefined ? "" : truncate(result.text, RESULT_CHAR_LIMIT)}</result>`,
+		"</call>",
+	].join("\n");
+};
+
+/**
+ * The history is filled from the newest call backwards until the next call would
+ * push the request past `budget` estimated tokens. The first call that does not
+ * fit ends the walk: what is kept is the newest unbroken run, in chronological
+ * order. Numbers count every prior call, so a gap in `n` marks dropped calls.
+ */
+const fitToolCalls = (prior: readonly ToolCallRecord[], results: ReadonlyMap<string, ToolResultRecord>, budget: number): string[] => {
+	const newestFirst = prior.map((call, index) => ({ call, n: index + 1 })).reverse();
+	const kept: string[] = [];
+	let used = 0;
+	for (const { call, n } of newestFirst) {
+		const rendered = renderCall(call, n, results);
+		const tokens = estimateTokens(rendered);
+		if (used + tokens > budget) break;
+		used += tokens;
+		kept.push(rendered);
+	}
+	return kept.reverse();
+};
+
 const renderPrompt = (ctx: ExtensionContext, transcript: Transcript, yieldCallId: string, submission: string, todo: ReviewTodo): string => {
 	const prior = transcript.calls.filter((call) => call.id !== yieldCallId);
-	const window = prior.slice(-TOOL_CALL_WINDOW);
-	const renderedCalls = window.map((call, index) => {
-		const result = transcript.results.get(call.id);
-		const status = result === undefined ? "no result" : result.isError ? "error" : "ok";
-		return [
-			`<call n="${index + 1}" tool="${call.name}" status="${status}">`,
-			`<args>${truncate(stringify(call.args), ARGS_CHAR_LIMIT)}</args>`,
-			`<result>${result === undefined ? "" : truncate(result.text, RESULT_CHAR_LIMIT)}</result>`,
-			"</call>",
+	const frame = (calls: readonly string[], shown: number): string =>
+		[
+			"<assignment>",
+			transcript.assignment.trim() || "(missing)",
+			"</assignment>",
+			"<shared-context>",
+			sharedContextOf(ctx) || "(none)",
+			"</shared-context>",
+			"<worker-goal>",
+			todo.goal === null ? "(none)" : `Objective: ${todo.goal.objective}\nMeasure: ${todo.goal.measure}\nDone when: ${todo.goal.doneWhen}`,
+			"</worker-goal>",
+			`<tool-calls shown="${shown}" total="${prior.length}">`,
+			...calls,
+			"</tool-calls>",
+			"<submitted-result>",
+			truncate(submission, SUBMISSION_CHAR_LIMIT),
+			"</submitted-result>",
 		].join("\n");
-	});
-	return [
-		"<assignment>",
-		transcript.assignment.trim() || "(missing)",
-		"</assignment>",
-		"<shared-context>",
-		sharedContextOf(ctx) || "(none)",
-		"</shared-context>",
-		"<worker-goal>",
-		todo.goal === null ? "(none)" : `Objective: ${todo.goal.objective}\nMeasure: ${todo.goal.measure}\nDone when: ${todo.goal.doneWhen}`,
-		"</worker-goal>",
-		`<tool-calls shown="${window.length}" total="${prior.length}">`,
-		...renderedCalls,
-		"</tool-calls>",
-		"<submitted-result>",
-		truncate(submission, SUBMISSION_CHAR_LIMIT),
-		"</submitted-result>",
-	].join("\n");
+	// Everything but the tool calls is counted first; the calls get what is left of the window.
+	const fixedTokens = estimateTokens(SYSTEM_PROMPT) + estimateTokens(frame([], 0));
+	const budget = JUDGE_CONTEXT_TOKENS - JUDGE_RESERVED_TOKENS - fixedTokens;
+	const kept = fitToolCalls(prior, transcript.results, budget);
+	return frame(kept, kept.length);
 };
 
 const parseAnswer = (text: string): Verdict => {
