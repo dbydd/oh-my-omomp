@@ -57,10 +57,14 @@ omp 侧的 `discovery: openai-models-list` 对这个网关是多余的：magpie 
 `resolveThinkingLevelForModel` 对它返回 `undefined`，于是**不向网关发送任何 effort**，
 由 magpie 路由组自己的 `effort=auto` + Jev classifier 逐轮判定。**不要写 `auto`**——
 那会让 omp 本地再跑一次 `classifyDifficulty` 并把结果钉在请求上，覆盖 Jev。
-注意：`task.enableEffort: true`（本机保持开启）时，主 agent 派子任务传的 `effort=lo|med|hi`
-按 `executor.ts:4189` 的优先级（caller effort > `:level` 后缀 > 定义文件 thinkingLevel）会**覆盖** lane 的
+所以**默认不传 `effort`**，让 lane 的 `inherit` 生效、由 magpie 逐轮判定。但这不是禁令：
+`task.enableEffort: true`（本机保持开启）时，主 agent 派子任务传的 `effort=lo|med|hi`
+按 `executor.ts:4295` 的优先级（caller effort > `:level` 后缀 > 定义文件 thinkingLevel）会**覆盖** lane 的
 `inherit`，把子任务钉在一个具体档位（实测 `group/labor` 被钉成 `minimal`）。即：lane 的 `inherit`
-只在调用方不传 effort 时生效。要让 Jev 全权决定，需把 `task.enableEffort` 关掉——本机保留开启。
+只在调用方不传 effort 时生效。需要固定强度时才传——必须最便宜的成批活，或必须最强的从零设计。
+想让 magpie 判得更准，用 `solutionSpace`（`executor.ts:445`）：它把这件事有多开放带进子会话的
+auto classifier，是判定过程的输入而不是覆盖。要让 Jev 全权接管，则把 `task.enableEffort` 关掉——
+本机保留开启。
 `defaultThinkingLevel` 的合法值只有具体档位与 `auto`，**没有 `inherit`**（`session/settings.ts:200`），
 所以主会话无法「不钉 effort」，写 `inherit` 会被静默回退成默认 `high`。
 内置 `task` 与 `sonic` 由 `config.yml` 的 `task.agentModelOverrides` 映射：
