@@ -9,12 +9,12 @@ command -v omp >/dev/null 2>&1 || {
 # Every plugin here points at OUR OWN fork. Nothing is installed from
 # oh-my-omp/*: an install from upstream would overwrite our customizations.
 #
-# pi-hindsight MUST be installed as a copy inside the plugin tree, never
-# symlinked to a dev checkout. Its code reaches omp's own packages through
-# @oh-my-pi/*, and node resolution only finds them by ascending into
-# ~/.omp/plugins/node_modules — which a copied package does and a symlink to a
-# checkout outside the tree does not, so a symlinked plugin silently loses its
-# judgment/role ladder. Re-run this script after a hindsight merge.
+# pi-hindsight is installed here rather than symlinked to a checkout, so the
+# machine runs a pushed state instead of whatever the checkout holds. Its code
+# reaches omp's own packages through `@oh-my-pi/*`; a checkout that is being
+# edited can make that ladder silently unavailable (the failure appears as an
+# unrunnable judgment/role rung, with no error). Re-run this script after a
+# hindsight merge.
 plugins=(
   # dbydd/omp-todo-more: decider-gated stop reminders, subagent todo install,
   # executable init wording. Owned by us.
