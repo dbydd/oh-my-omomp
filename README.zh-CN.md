@@ -43,7 +43,7 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 
 **新机器：**
 
-1. 执行 [`/update-omp`](#update-omp仓库--本机)：把配置写进本机（包括 [omp-config-autoupdate](#omp-config-autoupdate) 扩展和它目录里的更新器 `omp-config-update.ts`），安装 `omp-light`，补装缺少的插件。
+1. 执行 [`/update-omp`](#update-omp仓库--本机)：把配置写进本机（包括 [omp-config-autoupdate](#omp-config-autoupdate) 扩展和它目录里的更新器 `omp-config-update.ts`），安装 `omp-light`，对每个声明的插件执行 `omp install`（缺的补装，已装的升级）。
 2. 要在 OMP 里用 Claude Code 的 skills、rules、commands 等时，在本机 `~/.omp/agent/config.yml` 的 `extensions` 开头加一项 `~/.claude`。OMP 把它当扩展包根目录，加载其中的 `skills/`、`rules/`、`commands/`、`hooks/` 等。这一项属于本机：更新器保留，`/sync-omp-config` 不写回仓库，`omp-light` 也加载它，见[两个方向共同的规则](#两个方向共同的规则)。没有 `~/.claude` 的机器不要加，否则每次启动都报加载失败。
 3. 重启 OMP。追加提示词、扩展和插件都在启动时加载。
 4. 需要每次启动都从 GitHub 默认分支[自动更新](#启动时自动更新)时，执行 `/omp-config-autoupdate on`（默认关闭），从下次启动起生效；之后就不用再手动执行 `/update-omp`。
@@ -120,7 +120,7 @@ flowchart LR
   local -->|"/sync-omp-config"| repo
   repo -->|"推送、合并"| gh
   gh -->|"自动更新 / /update-omp 安装入口"| light["omp 所在目录的 omp-light"]
-  gh -->|"补装缺失插件"| plugins["~/.omp/plugins"]
+  gh -->|"安装或升级插件"| plugins["~/.omp/plugins"]
   local -->|"/migrate-omp-keys"| remote["远端 agent.db 的凭据表"]
 ```
 
@@ -128,7 +128,7 @@ flowchart LR
 
 |命令|方向|写入|加 `check`|
 |---|---|---|---|
-|`/update-omp`|仓库工作区 → 本机|本机配置、`omp-light` 入口、缺失的插件|只报告差异，不写入|
+|`/update-omp`|仓库工作区 → 本机|本机配置、`omp-light` 入口、插件（缺的补装，已装的升级）|只报告差异，不写入|
 |`/sync-omp-config`|本机 → 仓库|只写仓库，完整模式会提交并推送|只报告差异，不写入|
 |`/migrate-omp-keys <target>`|本机 → 远端主机|覆盖远端凭据|—|
 
@@ -148,12 +148,12 @@ flowchart LR
 
 1. **取仓库**：更新器在 `~/.omp/omp-config-src` 维护一份自己的浅克隆，从 `https://github.com/oh-my-omp/omp-config.git` 拉 `master` 分支（仓库的默认分支，写死在更新器的 `DEFAULT_BRANCH` 里）。克隆的 origin 还是仓库迁移前的地址 `https://github.com/mouriya-s-lab/omp-config.git` 时，先把它改到新地址再拉；这个目录存在但不是这个仓库的克隆时不碰它，直接报错。拉取失败（如断网，包括还没有克隆时的首次克隆失败）时这次不更新：克隆只是上次拉取时的副本，不能代替 GitHub 上的默认分支，下次启动再拉。
 2. **只在提交变化时应用**：新提交和 `<agent 目录>/.omp-config-applied` 记录的上次应用提交相同就什么都不做，所以没有新提交时，`/settings`、`/bansos` 改过的托管值不会被每次启动改回去。应用规则取自新提交里的 `omp-config-update.ts`，改了更新规则的提交按自己的规则应用。
-3. **规划与插件就绪**：先校验仓库里的所有结构化配置（含 `config-light.yml`）能解析成映射，再规划文件写入、迁移和删除；preflight 有错就不切换。然后补装缺失插件，再从 OMP owner catalog 核对独立 Todo 的 enabled、manifest entry 和实际入口文件。缺插件且不允许安装、安装失败、disabled、坏 entry 或退休对象冲突时，不写消费者、不删旧实现、不记完成。
+3. **规划与插件就绪**：先校验仓库里的所有结构化配置（含 `config-light.yml`）能解析成映射，再规划文件写入、迁移和删除；preflight 有错就不切换。然后对每个声明插件执行 `omp install`（缺的补装，已装的升级），再从 OMP owner catalog 核对独立 Todo 的 enabled、manifest entry 和实际入口文件。插件无法安装或升级、disabled、坏 entry 或退休对象冲突时，不写消费者、不删旧实现、不记完成。
 4. **写入与删除**：插件就绪后先移动，再依次写普通文件、JSON、`config.yml`，最后删除。Todo 切换的 move/write 阶段只要有错误，整个 delete 阶段都不执行，保留旧 reader/实现，已成功的部分写入如实报告、不回滚。每个文件先写同目录临时文件再 rename；普通目标是 symlink 时写到它指向的文件，symlink 保留。一般删除只按 git 记录的“上次应用的提交 → 新提交”计算：托管文件、结构化配置里仓库删掉的键，以及 `extensions` 条目；本机自己的键和字段保留，删完为空才删映射，整个结构化配置文件被删时本机文件不动。首次运行或旧提交不可读时，不做 git-derived 删除，但平铺迁移、插件就绪后的八路径 Todo 退休，以及插件含 `src/ctx` 时的 ctx 退休照常规划；退休仅 unlink 已知叶，不删除目录或链接 backing。
 5. **从平铺布局迁移**（自动更新和 `/update-omp` 都做，规则在更新器文件头的 RELOCATIONS）：本机还有平铺的 `extensions/<名字>.ts`、而仓库带了 `extensions/<名字>/index.ts` 时，删掉平铺文件，否则同一个扩展会加载两次；平铺文件是应用托管的就报错，不删。根目录旧的更新器 `omp-config-update.ts` 也删掉，由 `extensions/omp-config-autoupdate/` 里的取代。结构化配置从旧位置（如 `extensions/lang-nag.json`、根目录的 `system-prompt-replace.json`）读出本机的值，合并写到新位置后删掉旧文件，本机自己加的键保留。根目录的本机数据（`APPEND_SYSTEM_MODEL.md`、`omp-config-autoupdate.json`、`WATCHDOG-*.md`、本机自己写的 `PROMPT-INJECT-*.md` / `TURN-JUDGE-*.md`）和 `extensions/doc-polish.json` 在新位置空着时改名移进各自的扩展目录；新位置已有文件时留在原处并在报告里说明；symlink 不移动。仓库带的模板（现在或上次应用的提交里有的）旧副本直接删掉。`config.yml` 的 `extensions` 里旧的 `~/.omp/agent/extensions-last/system-prompt-replace.ts` 条目删掉。
 
    装着旧更新器（还在根目录）的机器，自动更新会去拉取结果的 `agent/omp-config-update.ts` 找新更新器，找不到就报 `has no agent/omp-config-update.ts`，什么都不应用。这样的机器要在仓库里手动执行一次 `/update-omp`，装上新位置的更新器，之后自动更新恢复正常。
-6. **插件**：`install-plugins.sh` 声明缺失项，由 `omp install` 在文件 ops 之前补装，从不卸载或顺手升级。一般按依赖列表比较；Todo 另外以 OMP catalog 的包身份和入口确认接管就绪，不能用 dependency 字符串代替。
+6. **插件**：`install-plugins.sh` 里声明的每一项都在文件 ops 之前执行 `omp install`：缺的补装，已装的升级（npm 到最新版本，GitHub URL 到默认分支的最新提交）。`~/.omp/plugins/bun.lock` 或 `omp-plugins.lock.json` 有变化就算变化，并设 `restartNeeded`。安装或升级失败是错误，在文件 ops 之前停止切换，升级失败的插件保留原版本。从不卸载。一般按依赖列表比较；Todo 另外以 OMP catalog 的包身份和入口确认接管就绪，不能用 dependency 字符串代替。
 7. **轻量入口**：和 `/update-omp` 一样，把 `omp-light` 装到 PATH 上 `omp` 所在的目录。
 8. **记录与错误**：没有任何错误才把新提交写进 `.omp-config-applied`；有错误保持旧记录，下次启动重试。进入 Todo 切换后 IO 失败，报告实际部分结果与 `Cutover incomplete; do not restart OMP`；未修复的失败重跑即使本轮没有新变化也保留这项警告。先修复并重跑完整更新，不把混合状态当成可安全重启的成功迁移。
 
@@ -169,7 +169,7 @@ flowchart LR
 
 **生效时机**：更新在当前会话运行期间落地。`config.yml` 实时重载，其中 `extensions` / `disabledExtensions` 的改动会立即停用或恢复本进程已经加载过的扩展；`APPEND_SYSTEM_MODEL.md`、`system-prompt-replace.json`、`TURN-JUDGE-*.md`、`tool-policy-nag.json`、`PROMPT-INJECT-*.md`、`agents/` 从下一条 prompt、下一轮、下一次 shell / eval 调用或下一次派发开始生效。`SYSTEM_TEMPLATE.md`、`APPEND_SYSTEM.md`、`PERSONALITY.md`、扩展代码的改动（包括迁移时删掉或移动的扩展文件）、新增的扩展和插件要到下次启动；有这类改动且更新没有出错时，通知会提醒重启。也就是说，同一个会话里可能暂时是新数据配旧提示词或扩展代码，重启后一致。
 
-**通知**：有改动且没有出错时弹一条 info，说明更新到哪个提交、写了几个、移动了几个、删了几个、补装了几个插件，需要时提醒重启；有错误时只弹一条 warning，给出第一条错误，不带重启提醒（部分写入可能已经落地，用 `/omp-config-autoupdate run` 看详细报告）。已是最新、拉取失败、锁被占用这三种情况只写日志。headless 模式不弹通知，只写日志。通知只给汇总；`/omp-config-autoupdate run` 的详细报告只列它自己那次运行的结果：启动时已成功应用的更新，再 `run` 只会报告已是最新；启动时应用出错（不写 `.omp-config-applied`）时，`run` 会重新应用并逐条列出，见 [omp-config-autoupdate](#omp-config-autoupdate)。一直拉取失败时启动不会提醒，用 `run` 看 git 报错。
+**通知**：有改动且没有出错时弹一条 info，说明更新到哪个提交、写了几个、移动了几个、删了几个、补装或升级了几个插件，需要时提醒重启；有错误时只弹一条 warning，给出第一条错误，不带重启提醒（部分写入可能已经落地，用 `/omp-config-autoupdate run` 看详细报告）。已是最新、拉取失败、锁被占用这三种情况只写日志。headless 模式不弹通知，只写日志。通知只给汇总；`/omp-config-autoupdate run` 的详细报告只列它自己那次运行的结果：启动时已成功应用的更新，再 `run` 只会报告已是最新；启动时应用出错（不写 `.omp-config-applied`）时，`run` 会重新应用并逐条列出，见 [omp-config-autoupdate](#omp-config-autoupdate)。一直拉取失败时启动不会提醒，用 `run` 看 git 报错。
 
 ### `/update-omp`：仓库 → 本机
 
@@ -177,10 +177,10 @@ flowchart LR
 
 - 除了“从平铺布局迁移”和插件就绪后的有限八路径 Todo 退休，不删文件，也不删结构化配置里的键：工作区没有“上次应用的提交”可以对比。
 - 不改写 `.omp-config-applied`。自动更新开着时，下次启动只要默认分支的提交与记录不同，就会覆盖手动应用的内容；改动推送并合并后再启动，两边就一致了。
-- 用 `./plugin-audit.sh` 找出 `[卸载候选]`，询问后卸载；缺失的插件由更新器补装。
+- 用 `./plugin-audit.sh` 找出 `[卸载候选]`，询问后卸载；缺失的插件由更新器补装，已装的由更新器升级。
 - 本机初始化项已存在就不动，缺失时先问用户是否创建、内容填什么，没确认就跳过并在报告里说明：`extensions/doc-polish/doc-polish.json`、[commandcode-model-spec](#commandcode-model-spec) 依赖的 `commandcode-models.json`。自动更新从不创建它们。
 
-报告实际写入、移动、删除、装卸插件与等待确认的跳过项。只有无错误且 `restartNeeded` 时提醒重启；切换有错误时先修复并重跑，不重启混合状态。手动更新不改 applied marker。`pi-bansos-relay-state.json` 在已运行的会话里要到下次会话启动，或下一次用 `/bansos` 修改时才生效。
+报告实际写入、移动、删除、装、升、卸插件与等待确认的跳过项。只有无错误且 `restartNeeded` 时提醒重启；切换有错误时先修复并重跑，不重启混合状态。手动更新不改 applied marker。`pi-bansos-relay-state.json` 在已运行的会话里要到下次会话启动，或下一次用 `/bansos` 修改时才生效。
 
 ### `/sync-omp-config`：本机 → 仓库
 
@@ -202,7 +202,7 @@ flowchart LR
 - GitHub：`mouriya-s-lab/pi-bansos`、`oh-my-omp/omp-unified-exec`、`oh-my-omp/omp-todo-more`、`oh-my-omp/omp-thinking-translator`、`oh-my-omp/omp-playbooks`、`oh-my-omp/omp-codex-image-gen`。
 - 可选，注释掉、默认不装：`oh-my-omp/omp-remote-build`，给每个 git worktree 在远端 Docker 主机上建 Mutagen 副本和 Komodo 管理的构建容器。不是谁都需要，而且依赖太多：`omp-unified-exec`、Mutagen、km CLI、Komodo Core/Periphery 和可 SSH 的构建主机，配置见它仓库的 README。需要时给该行加上单引号取消注释。
 
-所有插件都不钉版本：npm 包由 OMP 解析当前版本，GitHub URL 跟随默认分支，重复执行可能升级插件。结果写进 `~/.omp/plugins/`（`package.json`、`bun.lock`、`node_modules/`、`omp-plugins.lock.json`）。脚本需要联网，会下载并加载第三方代码。
+所有插件都不钉版本：npm 包由 OMP 解析当前版本，GitHub URL 跟随默认分支。`/update-omp` 每次执行，自动更新在提交变化时执行，都会对列表里的每一项重跑 `omp install`，所以已装插件也会升级。结果写进 `~/.omp/plugins/`（`package.json`、`bun.lock`、`node_modules/`、`omp-plugins.lock.json`）。脚本需要联网，会下载并加载第三方代码。
 
 `pi-bansos` 用的是 `mouriya-s-lab` 的 fork，其中的修复也提交给了上游。本机已经装了 npm 版 `pi-bansos` 时，要先 `omp plugin uninstall pi-bansos`，再装 fork。
 
@@ -212,7 +212,7 @@ flowchart LR
 
 |分类|含义|处理|
 |---|---|---|
-|`[安装]`|脚本要求、本机缺失|更新器补装（自动更新和 `/update-omp` 都会）。一般按 `~/.omp/plugins/package.json` 判断：GitHub 比去掉 `#ref` 的 URL，npm 比包名；Todo 用 owner catalog 的 `omp-todo-more` 身份与实际 entry 确认就绪，已安装的 ref/URL 写法不同不会因此升级|
+|`[安装]`|脚本要求、本机缺失|更新器补装（自动更新和 `/update-omp` 都会）。一般按 `~/.omp/plugins/package.json` 判断：GitHub 比去掉 `#ref` 的 URL，npm 比包名；Todo 用 owner catalog 的 `omp-todo-more` 身份与实际 entry 确认就绪。已装的项由同一次运行升级，不论 ref/URL 写法如何|
 |`[卸载候选]`|从脚本删掉了，本机还装着|只有 `/update-omp` 处理：询问后 `omp plugin uninstall <name>`；自动更新从不卸载|
 |`[保留]`|用户自己装的，脚本从没登记过|不动|
 |`[已同步]`|脚本与本机一致|—|

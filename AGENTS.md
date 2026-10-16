@@ -75,7 +75,7 @@ flowchart LR
   repo -->|"/update-omp: install entry"| O
   O --> M
   machine -->|"/sync-omp-config (read-only src)"| repo
-  I -->|"updater: omp install missing"| PL
+  I -->|"updater: omp install (missing and upgrades)"| PL
   machine -->|restart| H["omp harness picks up changes"]
 ```
 
@@ -162,7 +162,8 @@ flowchart LR
 - **Todo is an installed plugin, not local configuration source.** `install-plugins.sh`
   declares `oh-my-omp/omp-todo-more`; normal plugin discovery supplies full/light
   `todo` with native Todo still explicitly disabled. The updater preflights all
-  source/file operations, installs missing plugins before writes, then requests
+  source/file operations, runs `omp install` for every declared plugin before writes
+  (missing ones installed, installed ones upgraded), then requests
   OMP's npm catalog to confirm `omp-todo-more` is enabled, its manifest declares
   `./index.ts`, and that entry exists. Missing/disallowed installation, failed
   initialization, disabled/bad entry or retirement ownership conflicts stop
@@ -521,7 +522,7 @@ exercised in a real omp session.
   `oh-my-omp/omp-codex-image-gen`, `oh-my-omp/omp-playbooks`, and `oh-my-omp/omp-todo-more`
   (independent rich Todo, reminders/planning, read projection and native editing,
   with awaited Tern owner asset initialization). All unpinned: `omp install` resolves npm versions,
-  and GitHub URLs track the default branch (re-run the same `omp install <url>` to update). An existing
+  and GitHub URLs track the default branch. The updater reruns `omp install` for every entry on each apply, which upgrades installed plugins too (`omp plugin upgrade` is not used: it leaves GitHub-sourced plugins on their locked commit). An existing
   npm `pi-bansos` install must be removed with `omp plugin uninstall pi-bansos` before installing the fork URL,
   and an existing `pi-unified-exec` with `omp plugin uninstall pi-unified-exec` (both register the same tools).
   `oh-my-omp/omp-remote-build` is listed commented out and unquoted as an optional
