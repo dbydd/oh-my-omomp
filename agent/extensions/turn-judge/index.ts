@@ -11,7 +11,7 @@
 //                  walking from cwd up to the git root.
 // Frontmatter (between `---` fences), one `key: value` per line; whole-line `#`
 // comments are skipped. Keys are lowercased.
-//   name:    甩锅                        # optional; defaults to the file label
+//   name:    example                     # optional; defaults to the file label
 //   enabled: true                        # optional; only true/yes/on/1 keep it on
 //   maxChars: 30000                      # optional; history budget, see STATE
 //   option.<label>: <criteria>           # >= 2 options; empty criteria = the label says it all
@@ -42,7 +42,8 @@
 // If the user sends a prompt or moves the session before the verdict returns,
 // the verdict is shown as info and nothing is typed.
 //
-// AVAILABILITY. No native JUDGE role: silently inactive. Role changes apply
+// AVAILABILITY. No matching file in range: nothing runs — no request and no
+// notification. No native JUDGE role: silently inactive. Role changes apply
 // on the next turn. A failed request shows a warning for that turn; an invalid
 // file warns once per process (per reason). Headless sessions only log.
 // Nothing blocks or changes the turn.

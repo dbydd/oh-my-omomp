@@ -26,7 +26,7 @@ The reviewable, portable part of an Oh My Pi (OMP) configuration, tuned for heav
 |`agent/extensions/omp-config-autoupdate/omp-config-update.ts`|The repo → machine updater, shared by [automatic update at startup](#automatic-update-at-startup) and `/update-omp`; it sits in the directory of the extension that starts it and is a standalone script, not an extension module|`~/.omp/agent/extensions/omp-config-autoupdate/`|
 |`agent/thinking-translator.json`|Ordered candidate chain and lowest reasoning effort for the [thinking translation](#thinking-translation) plugin|`~/.omp/agent/`|
 |`agent/extensions/user-prompt-inject/PROMPT-INJECT-*.md`|Templates for [user-prompt-inject](#user-prompt-inject): inject the user's own words into the mentor and discussants|`~/.omp/agent/extensions/user-prompt-inject/`|
-|`agent/extensions/turn-judge/TURN-JUDGE-*.md`|Judge configs for [turn-judge](#turn-judge): after each turn, ask one question through OMP's JUDGE role|`~/.omp/agent/extensions/turn-judge/`|
+|`agent/extensions/turn-judge/TURN-JUDGE-*.md`|Judge configs for [turn-judge](#turn-judge): after each turn, ask one question through OMP's JUDGE role; the repository ships none, so a machine judges only the files it writes itself|`~/.omp/agent/extensions/turn-judge/`|
 |`agent/agents/`|Subagent definitions; `README.txt` records authoring pitfalls|`~/.omp/agent/agents/`|
 |`agent/extensions/`|Local extensions, one directory each: `<name>/index.ts` is the entry, the other `.ts` files in the directory are its own modules, and its own config and templates live there too; `_shared/` holds code shared by several extensions. The extension configs `lang-nag/lang-nag.json`, `input-polish/input-polish.json` and `tool-policy-nag/tool-policy-nag.json` are synced by the updater; `doc-polish/doc-polish.json` belongs to the machine and is only an example, see [`/update-omp`](#update-omp-repo--machine)|`~/.omp/agent/extensions/`|
 |`agent/extensions-last/`|Extensions that must run after every other path-loaded extension, loaded explicitly as the last `extensions` entry of `config.yml`; currently only [system-prompt-replace](#system-prompt-replace), whose rules `system-prompt-replace.json` sit in its directory. `README.md` and `README.zh-CN.md` there are repo-only and not synced|`~/.omp/agent/extensions-last/`|
@@ -72,7 +72,7 @@ Every successful todo change is captured by `ctx-tasklog`; `ctx` replays those e
 
 **Use a watchdog for independent runtime review.** A watchdog reads the context automatically as a third-party observer and injects reminders by rule; it works like Claude's `/advisor`, with broader targets, triggers and delivery. When a judgment has few options, the options can be declared to use OMP's native JUDGE backend instead ([watchdog-agent](#watchdog-agent)).
 
-**Judge every turn and correct directly.** After each main-session turn, [turn-judge](#turn-judge) judges that turn through OMP's native JUDGE against configured questions, for example whether the model is passing the buck; when the matching option's confidence reaches its threshold it types the preset prompt, otherwise it only shows the verdict.
+**Judge every turn and correct directly.** After each main-session turn, [turn-judge](#turn-judge) judges that turn through OMP's native JUDGE against the questions you configure; when the matching option's confidence reaches its threshold it types the preset prompt, otherwise it only shows the verdict.
 
 **Let advisors see the user's own words.** The mentor and discussants know only what the agent that spawned them tells them, so they can only advise along that agent's retelling and become echo amplifiers. [user-prompt-inject](#user-prompt-inject) injects the prompts the user wrote in the root session into every model call they make, through a template, so they check the other agent's plan against the user's goals and constraints rather than against the retelling.
 
@@ -670,7 +670,7 @@ The repository's `agent/extensions/user-prompt-inject/PROMPT-INJECT-user-goal.md
 
 After every main-session turn, `turn-judge/` judges that turn through OMP's native JUDGE according to `TURN-JUDGE-<label>.md`, one question per file. When an option with a prompt reaches its confidence threshold, that prompt is typed as a user message; otherwise an info notification shows the verdict. Compared with the option backend of [watchdog-agent](#watchdog-agent): it judges once per turn rather than by operation count; JUDGE receives only the user's input and what the model said; it triggers on an option's confidence threshold rather than on which option was picked; and it shows the verdict even when nothing triggers.
 
-**File locations** match [watchdog-agent](#watchdog-agent): `TURN-JUDGE-*.md` in the extension directory (`~/.omp/agent/extensions/turn-judge/`), or `<dir>/TURN-JUDGE-*.md` and `<dir>/.omp/TURN-JUDGE-*.md` at every level from cwd up to the git root, with case-insensitive file names. Each file judges on its own with its own request. Configs the repository ships are synced by the updater; the machine's own belong to the machine.
+**File locations** match [watchdog-agent](#watchdog-agent): `TURN-JUDGE-*.md` in the extension directory (`~/.omp/agent/extensions/turn-judge/`), or `<dir>/TURN-JUDGE-*.md` and `<dir>/.omp/TURN-JUDGE-*.md` at every level from cwd up to the git root, with case-insensitive file names. Each file judges on its own with its own request. The repository ships no judge config, so a machine judges nothing until it writes a file of its own, and with no matching file in range the extension makes no request and shows nothing; a file added in the extension directory belongs to the machine.
 
 **Frontmatter fields** (keys are case-insensitive, each value on one line):
 
@@ -685,16 +685,18 @@ After every main-session turn, `turn-judge/` judges that turn through OMP's nati
 
 The body is the question, handed to JUDGE as is. Fewer than two options, a prompt / threshold for an undeclared option, a missing or out-of-range threshold, or an empty body skips the whole file.
 
-The repository's `agent/extensions/turn-judge/TURN-JUDGE-甩锅.md` asks "模型是不是在甩锅？" (is the model passing the buck?), with options `是` (yes) / `否` (no); when `是` reaches probability 0.5 it types "你这一轮在甩锅：把本该你自己负责、自己做的事推给了用户。不要等我，接着把它做完。" (this turn you passed the buck: you pushed onto the user what you should own and do yourself. Do not wait for me; go on and finish it.):
+The repository ships none, so the file below is a format sketch rather than something it carries (angle brackets are placeholders; the table above is the field reference):
 
 ```md
 ---
-option.是:
-option.否:
-option.是.prompt: 你这一轮在甩锅：把本该你自己负责、自己做的事推给了用户。不要等我，接着把它做完。
-option.是.threshold: 0.5
+name: <display name>
+enabled: true
+maxChars: 30000
+option.<label>: <criterion handed to JUDGE>
+option.<label>.prompt: <prompt typed when it triggers>
+option.<label>.threshold: 0.7
 ---
-模型是不是在甩锅？
+<the question, handed to JUDGE as is>
 ```
 
 **A turn**: an assistant message with text that the model ended itself (`stopReason: "stop"`) in the main session. Interrupted messages, errors and messages ending in a tool call do not count; subagents are not judged.

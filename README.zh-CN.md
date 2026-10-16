@@ -26,7 +26,7 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 |`agent/extensions/omp-config-autoupdate/omp-config-update.ts`|仓库 → 本机的更新器，[启动时自动更新](#启动时自动更新)和 `/update-omp` 共用；放在启动它的扩展目录里，是独立脚本，不是扩展模块|`~/.omp/agent/extensions/omp-config-autoupdate/`|
 |`agent/thinking-translator.json`|[思考翻译](#思考翻译)插件的有序候选链与最低推理强度配置|`~/.omp/agent/`|
 |`agent/extensions/user-prompt-inject/PROMPT-INJECT-*.md`|[user-prompt-inject](#user-prompt-inject) 的模板：把用户原话注入 mentor 和 discussant|`~/.omp/agent/extensions/user-prompt-inject/`|
-|`agent/extensions/turn-judge/TURN-JUDGE-*.md`|[turn-judge](#turn-judge) 的判定配置：每轮结束后通过 OMP 的 JUDGE 角色判断一个问题|`~/.omp/agent/extensions/turn-judge/`|
+|`agent/extensions/turn-judge/TURN-JUDGE-*.md`|[turn-judge](#turn-judge) 的判定配置：每轮结束后通过 OMP 的 JUDGE 角色判断一个问题；仓库不带文件，只判本机自己写的|`~/.omp/agent/extensions/turn-judge/`|
 |`agent/agents/`|subagent 定义；`README.txt` 记录编写陷阱|`~/.omp/agent/agents/`|
 |`agent/extensions/`|本地扩展，每个扩展一个目录：`<名字>/index.ts` 是入口，同目录的其他 `.ts` 是它自己的模块，它自己的配置和模板也放在这里；`_shared/` 是多个扩展共用的代码。扩展配置 `lang-nag/lang-nag.json`、`input-polish/input-polish.json`、`tool-policy-nag/tool-policy-nag.json` 随更新器同步；`doc-polish/doc-polish.json` 属于本机，只作示例，见 [`/update-omp`](#update-omp仓库--本机)|`~/.omp/agent/extensions/`|
 |`agent/extensions-last/`|要在其他按路径加载的扩展之后执行的扩展，由 `config.yml` 的 `extensions` 末项显式加载；目前只有 [system-prompt-replace](#system-prompt-replace)，替换规则 `system-prompt-replace.json` 在它的目录里。那里的 `README.md` 和 `README.zh-CN.md` 只给仓库看，不同步|`~/.omp/agent/extensions-last/`|
@@ -72,7 +72,7 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 
 **用 watchdog 做独立的运行时审阅。** watchdog 作为第三方观察者自动读取 context，并按规则注入提醒；作用类似 Claude 的 `/advisor`，但目标、触发和投放方式更广。判定选项较少时，可以声明选项改用 OMP 的原生 JUDGE 后端（[watchdog-agent](#watchdog-agent)）。
 
-**逐轮判定并直接纠正。** [turn-judge](#turn-judge) 在主会话每一轮结束后，通过 OMP 的原生 JUDGE 按配置的问题判断这一轮，例如模型是不是在甩锅；对应选项的置信度达到阈值就直接输入预设的 prompt，否则只显示判定结果。
+**逐轮判定并直接纠正。** [turn-judge](#turn-judge) 在主会话每一轮结束后，通过 OMP 的原生 JUDGE 按你配置的问题判断这一轮；对应选项的置信度达到阈值就直接输入预设的 prompt，否则只显示判定结果。
 
 **让顾问看到用户原话。** mentor 和 discussant 只知道派它的 agent 告诉它的东西，只能顺着对方的转述给意见，成了回声放大器。[user-prompt-inject](#user-prompt-inject) 把根会话里用户自己写的 prompt 按模板注入它们的每次模型调用，让它们拿用户的目标和约束去核对对方的计划，而不是核对对方的转述。
 
@@ -671,7 +671,7 @@ option.blocker.delivery: steer
 
 `turn-judge/` 在主会话每一轮结束后，按 `TURN-JUDGE-<标签>.md` 通过 OMP 的原生 JUDGE 判断这一轮，每个文件问一个问题。带 prompt 的选项置信度达到阈值时，把这段 prompt 直接作为一条用户消息输入；否则弹 info 显示判定结果。和 [watchdog-agent](#watchdog-agent) 的选项后端相比：它每轮判一次，不按操作数；发给 JUDGE 的只有用户输入和模型说的话；按选项的置信度阈值触发，不按选中了哪个选项；没触发时也显示判定结果。
 
-**文件位置**与 [watchdog-agent](#watchdog-agent) 相同：扩展目录（`~/.omp/agent/extensions/turn-judge/`）下的 `TURN-JUDGE-*.md`，或从 cwd 往上到 git root 每一层的 `<dir>/TURN-JUDGE-*.md`、`<dir>/.omp/TURN-JUDGE-*.md`，文件名不区分大小写。每个文件独立判定，各自一次请求。仓库带的配置随更新器同步；本机自己加的属于本机。
+**文件位置**与 [watchdog-agent](#watchdog-agent) 相同：扩展目录（`~/.omp/agent/extensions/turn-judge/`）下的 `TURN-JUDGE-*.md`，或从 cwd 往上到 git root 每一层的 `<dir>/TURN-JUDGE-*.md`、`<dir>/.omp/TURN-JUDGE-*.md`，文件名不区分大小写。每个文件独立判定，各自一次请求。仓库不带判定配置，本机自己不写文件就什么都不判，没有匹配文件时扩展不发请求、也不提示；在扩展目录里自己加的文件属于本机。
 
 **frontmatter 字段**（键不区分大小写，每个值占一行）：
 
@@ -686,16 +686,18 @@ option.blocker.delivery: steer
 
 正文是问题，原样交给 JUDGE。少于两个选项、只写了 prompt / threshold 却没声明选项、threshold 缺失或越界、正文为空，都会让整个文件被跳过。
 
-仓库的 `agent/extensions/turn-judge/TURN-JUDGE-甩锅.md` 问“模型是不是在甩锅？”，选项 `是` / `否`；`是` 的概率达到 0.5 时输入“你这一轮在甩锅：把本该你自己负责、自己做的事推给了用户。不要等我，接着把它做完。”：
+仓库不带文件，下面只是格式示意，不是仓库会同步的内容（尖括号是占位符，字段见上表）：
 
 ```md
 ---
-option.是:
-option.否:
-option.是.prompt: 你这一轮在甩锅：把本该你自己负责、自己做的事推给了用户。不要等我，接着把它做完。
-option.是.threshold: 0.5
+name: <显示名>
+enabled: true
+maxChars: 30000
+option.<标签>: <交给 JUDGE 的判据>
+option.<标签>.prompt: <触发时输入的 prompt>
+option.<标签>.threshold: 0.7
 ---
-模型是不是在甩锅？
+<问题，原样交给 JUDGE>
 ```
 
 **一轮**：主会话里模型自己结束（`stopReason: "stop"`）、有文字的 assistant 消息。被中断、出错、以工具调用结束的消息都不算；subagent 不判。

@@ -199,7 +199,7 @@ flowchart LR
 | `agent/agents/` | Custom subagent definitions (`*.md`) + `README.txt` authoring pitfalls (Chinese translation `README.zh-CN.txt`; both synced with the rest of `agents/`). |
 | `agent/thinking-translator.json` | Agent-root translator config for `omp-thinking-translator` (the plugin fixes its path). Portable regular item: `/sync-omp-config` carries machine → repo, the updater carries repo → machine. |
 | `agent/extensions/user-prompt-inject/PROMPT-INJECT-*.md` | User-level templates for `user-prompt-inject` (frontmatter `target`/`name`/`enabled`, body with `{{user_prompt[i]}}` / `{{user_prompt[a:e]}}`). Shipped ones are repo-managed and copied whole; the machine's own templates in that directory are host-owned and never deleted. |
-| `agent/extensions/turn-judge/TURN-JUDGE-*.md` | User-level judge configs for `turn-judge` (frontmatter `name`/`enabled`/`maxChars`/`option.<label>[.prompt\|.threshold]`, body = the question). Models follow OMP's JUDGE role, not per-file model settings. Shipped ones are repo-managed and copied whole; the machine's own are host-owned. Re-read at every turn end, so edits apply to the next turn without restart. |
+| `agent/extensions/turn-judge/TURN-JUDGE-*.md` | User-level judge configs for `turn-judge` (frontmatter `name`/`enabled`/`maxChars`/`option.<label>[.prompt\|.threshold]`, body = the question). Models follow OMP's JUDGE role, not per-file model settings. The repo ships none, so a machine judges nothing until it writes a file of its own — with no matching file in range the extension stays silent (no JUDGE request, no notification); a file the machine writes itself is host-owned. Re-read at every turn end, so edits apply to the next turn without restart. |
 | `agent/extensions/append-system-model/APPEND_SYSTEM_MODEL.md` | Per-model system-prompt appendix for `append-system-model` (`---`-fenced YAML headers with `model`/`provider` regexes, each followed by its body). Host-owned: the repo ships none, and the updater and `/sync-omp-config` leave it alone. Read per prompt, so edits apply without restart. |
 | `pi/agent/pi-bansos-relay-state.json` | `pi-bansos` plugin state (relay on/off, relay URL, saved relays, `statusBar`), read by the plugin from `~/.pi/agent/`, not `~/.omp/agent`. Written by the plugin's `/bansos` command; no credentials. Portable regular item in both directions. |
 | `.omp/commands/` | Project-level slash-command definitions run from repo root. |
@@ -466,10 +466,6 @@ exercised in a real omp session.
   root user prompt (`{{user_prompt[0:e]}}`), and tells them to judge their
   advisee against those requests rather than its restatement. Templates are read
   at subagent session start, so edits apply on the next spawn without restart.
-- `agent/extensions/turn-judge/TURN-JUDGE-甩锅.md` — the shipped `turn-judge` config:
-  asks OMP's native JUDGE “模型是不是在甩锅？” with options `是`/`否`, and types
-  a prompt telling the model to finish the work it pushed onto the user when `是`
-  reaches 0.5; otherwise the verdict shows as info. No per-template model setting.
 - `agent/extensions/tool-policy-nag/tool-policy-nag.json` — lane switch for `tool-policy-nag`
   (`{"form": {"detector": "heuristic"}, "intent": {"threshold": <(0, 1]>},
   "risk": {"minCommands": <n>, "minChars": <n>, "minPrograms": <n>}}`, the shipped values:
