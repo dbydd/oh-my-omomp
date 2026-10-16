@@ -33,7 +33,7 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 |`pi/agent/pi-bansos-relay-state.json`|`pi-bansos` 插件状态|`~/.pi/agent/`|
 |`install-plugins.sh`、`plugin-audit.sh`|插件安装、插件漂移检查|—|
 |`.omp/commands/`|三个维护命令的完整规则|—|
-|`ci/`、`.github/workflows/config-check.yml`|配置检查（CI）：脚本、设计与判据见 `ci/README.md`|—|
+|`ci/`、`.github/workflows/config-check.yml`|配置检查（CI，设计与判据见 `ci/README.md`），以及离线来源阅读校准命令 `ci/reading-coverage-backtest.ts`|—|
 |`package.json`、`biome.json`、`tsconfig.json`|开发工具：`bun run check` 做格式、lint 和类型检查，规范见[目录结构与开发规范](#目录结构与开发规范)|—|
 
 ## 快速上手
@@ -397,7 +397,7 @@ subagent 分三类：`task:*` 执行，`discuss:*` 只读讨论，`mentor:defaul
 |[watchdog-agent](#watchdog-agent)|按目标投放的第三方审查者|否|
 |[user-prompt-inject](#user-prompt-inject)|按模板把用户原话注入指定的 subagent|否|
 |[turn-judge](#turn-judge)|主会话每轮结束后用原生 JUDGE 判断这一轮，达到阈值就输入预设 prompt，否则显示判定|否|
-|[response-reading-coverage](#response-reading-coverage)|按搜索/阅读组计算返回的搜索文件随后被 read 的比例；子报告同时进入根主会话的上下文|是|
+|[response-reading-coverage](#response-reading-coverage)|以主会话历史基准返回来源阅读跟进的低／中／高；子报告同时进入根主会话的上下文|是|
 |[lang-nag](#lang-nag)|回复语言不对时，在下一条输入前加提醒|否|
 |[repo-rules](#repo-rules)|补读 `.claude/rules` 等 repo 级 rule 目录|是|
 |[append-system-model](#append-system-model)|按模型 / 提供商正则追加系统提示词|是|
@@ -834,17 +834,32 @@ model: "(gpt-5|o3)"
 
 #### response-reading-coverage
 
-`response-reading-coverage/` 在完整和轻量模式下观察原生 `grep`、`glob`、`find`、`read` 调用。它估算返回的搜索来源是否经过阅读，不衡量读了多少行、理解深度、引用准确性或答案是否真的使用了来源。同名 SDK、MCP、extension 工具不计；shell、`eval`、浏览器和 AST 操作全部忽略，也不影响分组。只有被 `tool_call` 观察到的调用才能进入统计。
+`response-reading-coverage/` 在完整和轻量模式下观察原生 `grep`、`glob`、`find`、`read` 调用。它返回相对历史主回复、相近已返回搜索规模的来源阅读跟进等级：**低／中／高**。它不衡量理解深度、引用准确性、答案质量或任务绝对充分性。同名 SDK、MCP、extension 工具不计；shell、`eval`、浏览器和 AST 操作全部忽略。只有被 `tool_call` 观察到的调用才能进入统计。
 
-- **分组**：连续搜索合并返回的文件身份；后续 read 属于该组，直到下一次搜索开始。文件和阅读只在本组内去重。搜索之前、上组或上轮读过的文件，以及目录列表，都不给本组 credit。失败 attempt 保留搜索/阅读的状态转换；失败 read 不给 credit。
-- **分数**：每个非空组是“已读的匹配文件 / 搜索文件”；回复取各组比率的算术平均，不合并分子分母。因此 `1/2`、`1/10` 两组得到 **30.0%**。仅展示时保留一位小数。已知空组是 N/A、不参与均值；没有可计算搜索文件时显示 N/A，不是 100%。metadata 缺失或无效、未结束调用、失败搜索、相关阅读身份有歧义时，回复显示**统计不完整**，不冒充完整百分比。
-- **身份**：搜索使用 `files` 或 `hits[].rel`，相对路径以结果 `cwd` 为基准（缺失时用调用时 cwd）。成功 read 回执提供 `meta.source`、`resolvedPath`；range、tail、raw 或摘要阅读均计一次。路径只做 lexical normalization，不探测文件系统或推断 symlink。内部 URI 只保留回执明确给出的 backing 别名，URL 不扩展别名。archive 回执只能给精确 input member credit，不能污染 sibling；有歧义的 member selector、非空组中的 composite read 均显示不完整。部分搜索结果有明确标记，只统计返回的文件。
+- **回复级证据**：`S` 是本次回复窗口内搜索返回文件身份的并集；`R` 只计调用顺序上位于返回该身份的搜索之后、成功 read 的来源，整个窗口去重。顺序按调用时刻，不按完成时刻。补充搜索不会清掉此前候选，同一调查被拆成更多搜索／阅读阶段不会改变权重。先 read 后搜索、直接读取其他已知路径，以及目录列表均不给 credit；失败 read 也不给 credit。
+- **空与未知**：成功的空搜索（包括只返回目录的 glob）不增加证据、不创建评分组，不能影响拟合或当前等级，也没有 `0/0` 表达。非空搜索后零跟进阅读是有效观测。没有返回文件时为**不适用**，不算低档。失败搜索、metadata 缺失或无效、未结束调用、相关阅读身份有歧义时为**统计不完整**，即使还没有已知返回文件也不能冒充空结果。
+- **经验分级**：离线校准让每个有效主 session 的总权重为一，其中 `n` 个有效回复各占 `1/n`。先以 `S` 的加权经验三分位划分三个检索宽度层，再在各层对 `R` 求同样的三分位阈值：`R <= lower` 为低，`R > upper` 为高，其余为中。分位数取累计权重首次达到目标的最小观测整数，不插值、不拆并列值，不计算组比率均值或百分比，也不假定应该读完全部结果。运行时只使用冻结整数表，不实时扫描历史或自动重训。
+- **身份**：搜索使用 `files` 或 `hits[].rel`，相对路径以结果 `cwd` 为基准（缺失时用调用时 cwd）。成功 read 回执提供 `meta.source`、`resolvedPath`；range、tail、raw 或摘要阅读按来源在整次回复只计一次。路径只做 lexical normalization，不探测文件系统或推断 symlink。内部 URI 只保留回执明确给出的 backing 别名，URL 不扩展别名。archive 回执只能给精确 input member credit，不能污染 sibling；有歧义的 member selector、非空搜索之后的 composite read 均显示不完整。部分搜索只贡献实际返回文件，基准和等级都不评价未返回候选；结构化证据保留 `partialResults`。
 - **顺序**：调用时预留槽，按 `toolCallId` 填结果，只消费已完成的有序前缀。完成顺序不能把 read 移到另一个回复窗口。终止 settle 将未结束调用记为 unknown；迟到结果不能进入下一窗口。
 - **回复**：主会话只在终止且成功的 assistant 正文后报告，commentary、工具调用消息、错误和取消回复都不算。子 agent 的原生 `write agent://…` 有已接受的 recipient receipt 时，以及每次成功的原生 `yield`（含 incremental），分别结算窗口。失败发送/yield、没有收件人的 broadcast 不结算。终止的子回复尚有未消费的新来源时报告 `irc-auto`；它只确认 sender settle，不声称自动 relay 已送达。
-- **输出**：每份报告写正常的 `response-reading-coverage` session custom entry。主会话收到一条包含总结果和全部组的 info 通知；headless `--no-ui` 会隐藏通知。子 agent 另发可显示的 custom message，正文和结构化详情都进入 live root main，不只 immediate parent。根投递使用宿主正常消息 API，`triggerTurn: false` 在 idle main 不开启 turn；busy main 可能收到 steer 并继续。投递失败只记本地 warning，不重试、不 revive main，也不把已结束回复并入下一轮。
+- **输出**：每份报告写正常的 `response-reading-coverage` session custom entry，包含等级或不可评状态、回复级来源计数及基准截止时间，不再包含组或比率。主会话收到一条只显示等级或不可评状态的 info 通知；headless `--no-ui` 会隐藏通知。子 agent 使用同一个主会话基准，不贡献训练样本；它另发可显示的 custom message，正文和结构化详情都进入 live root main，不只 immediate parent。根投递使用宿主正常消息 API，`triggerTurn: false` 在 idle main 不开启 turn；busy main 可能收到 steer 并继续。投递失败只记本地 warning，不重试、不 revive main，也不把已结束回复并入下一轮。
 - **生命周期**：内存按 live session 与 agent 隔离。真人/RPC 输入丢弃未完成窗口；extension 输入、IRC wake、compaction 不清空。session start/switch/branch/tree/shutdown 清理 live 状态。扩展不读或重放 session 历史、不写每次调用快照，也不恢复旧进程的未完成工作；custom entry 只作输出记录。
 
-扩展没有配置、模型调用、阻断阈值或额外安装列表条目。`/update-omp` 按现有扩展托管规则携带它的三个 `.ts` 模块，重启 OMP 后加载。升级宿主后，要在真实会话里重验原生 provenance/metadata、调用顺序、终止 phase、子 IRC/yield/wake 边界与根投递；静态类型检查不能证明这些契约。
+**冻结基准。** 校准区间为 `[2026-10-08T20:09:21Z, 2026-10-15T20:09:21Z)`。审计后的本机记录包含 384 个活跃主 session，其中 339 个贡献 1,283 个重建成功回复窗口；这些窗口中，111 个 session 的 353 次有效回复进入拟合，862 次不适用与 68 次不完整窗口不参与。筛选结合明确的 `session_init.agent`／subagent model role 和宿主主／子会话存储契约，不单独用 `parentSession` 判断 subagent，合法主会话 fork 仍纳入；fork 复制的旧前缀不重复计入。历史记录不能恢复未持久化的 `agent_end.willContinue`、builtin provenance 或没有落消息的输入，因此重建使用成功 final 正文和已持久化的输入／分支边界，不冒称精确复现全部 live hook。
+
+|已返回来源 `S`|低：跟进来源 `R`|中：`R`|高：`R`|有效回复数|贡献 session 数|
+|---|---|---|---|---|---|
+|1–3|0|1|至少 2|137|71|
+|4–12|0–1|2|至少 3|102|55|
+|至少 13|0–1|2–6|至少 7|114|63|
+
+每次留出一个 session 并重拟宽度和阅读阈值，有 1／353 条标签变化；每次留出一个有样本日，有 11／353 条变化。移除最大 session 后没有变化。以前四个有样本日训练、后两日留出，与全周拟合相比只有 1／96 条留出标签变化。这些是稳定性检查，不是对人类充分性标签的准确率。拟合按同一个“实际返回来源”口径保留全部 170 次 partial-result 回复，空搜索的 partial 标记不增加证据；只拟合 183 次非 partial 回复会使宽度切点变为 2、4，不能把不同总体互换。离线复算命令：
+
+```bash
+bun ci/reading-coverage-backtest.ts --cutoff 2026-10-15T20:09:21Z
+```
+
+扩展没有配置、模型调用、阻断行为或额外安装列表条目。`/update-omp` 按现有扩展托管规则携带它的三个 `.ts` 模块，重启 OMP 后加载。离线命令 `ci/reading-coverage-backtest.ts` 从本机会话记录重新校准，不写源 session，也不把会话正文复制进仓库。模型、prompt 或工具输出变化使观测总体失效时，由维护者重新运行校准并更新冻结表。升级宿主后，要在真实会话里重验原生 provenance/metadata、调用顺序、终止 phase、子 IRC/yield/wake 边界与根投递；静态类型检查不能证明这些契约。
 
 ### 派发与交付
 

@@ -1,7 +1,10 @@
-/** Per-reply source identities and arithmetic group coverage; no IO or historical replay. */
+/** Per-reply source follow-up, classified against a frozen main-session empirical baseline. No IO or historical replay. */
 export type FileIdentity = string;
 
-export type CoverageValue = { kind: "scored"; ratio: number } | { kind: "not-applicable" } | { kind: "incomplete"; reason: string };
+export type CoverageValue =
+	| { kind: "rated"; level: "low" | "medium" | "high" }
+	| { kind: "not-applicable" }
+	| { kind: "incomplete"; reason: string };
 
 export type SourceResult =
 	| { kind: "failed" }
@@ -14,10 +17,9 @@ export interface SourceObservation {
 	result: SourceResult;
 }
 
-export interface GroupReport {
+interface ReadingEvidence {
 	searchedCount: number;
 	readCount: number;
-	coverage: CoverageValue;
 	partialResults: boolean;
 }
 
@@ -26,45 +28,41 @@ export interface ReplyReport {
 	agentName: string;
 	replyKind: "main" | "irc" | "yield" | "irc-auto";
 	replySequence: number;
-	groups: readonly GroupReport[];
+	evidence: ReadingEvidence;
 	coverage: CoverageValue;
+	baselineCutoff: string;
+}
+
+/**
+ * Calibrated on [2026-10-08T20:09:21Z, 2026-10-15T20:09:21Z), main replies only.
+ * Each session contributes total weight 1. Width cutoffs are its weighted empirical
+ * thirds; read cutoffs are the same inverse-ECDF thirds within each width stratum.
+ * Counts describe returned sources, not an imaginary set that must all be read.
+ * Refit offline with ci/reading-coverage-backtest.ts when the observation contract
+ * or representative model/prompt/tool population changes; never train during a reply.
+ */
+function classifyReading(searchedCount: number, readCount: number): CoverageValue {
+	let lower = 1;
+	let upper = 6;
+	if (searchedCount <= 3) {
+		lower = 0;
+		upper = 1;
+	} else if (searchedCount <= 12) {
+		upper = 2;
+	}
+	return { kind: "rated", level: readCount <= lower ? "low" : readCount > upper ? "high" : "medium" };
 }
 
 export function calculateCoverage(observations: readonly SourceObservation[]): {
-	groups: readonly GroupReport[];
+	evidence: ReadingEvidence;
 	coverage: CoverageValue;
+	baselineCutoff: string;
 } {
-	const groups: GroupReport[] = [];
-	let phase: "idle" | "searching" | "reading" = "idle";
-	let searched = new Set<FileIdentity>();
-	let read = new Set<FileIdentity>();
-	let reasons = new Set<string>();
+	const searched = new Set<FileIdentity>();
+	const read = new Set<FileIdentity>();
+	const reasons = new Set<string>();
 	let partialResults = false;
-	const finish = (): void => {
-		groups.push({
-			searchedCount: searched.size,
-			readCount: read.size,
-			partialResults,
-			coverage:
-				reasons.size > 0
-					? { kind: "incomplete", reason: [...reasons].join("; ") }
-					: searched.size === 0
-						? { kind: "not-applicable" }
-						: { kind: "scored", ratio: read.size / searched.size },
-		});
-		searched = new Set();
-		read = new Set();
-		reasons = new Set();
-		partialResults = false;
-	};
 	for (const observation of observations) {
-		if (observation.kind === "search") {
-			if (phase === "reading") finish();
-			phase = "searching";
-		} else {
-			if (phase === "idle") continue;
-			phase = "reading";
-		}
 		const result = observation.result;
 		switch (result.kind) {
 			case "failed":
@@ -75,15 +73,20 @@ export function calculateCoverage(observations: readonly SourceObservation[]): {
 				break;
 			case "search":
 				for (const file of result.files) searched.add(file);
-				partialResults ||= result.partialResults;
+				if (result.files.length > 0) partialResults ||= result.partialResults;
 				break;
 			case "read": {
-				if (result.directory) break;
-				// An archive receipt can identify only its container. Credit an exact
-				// input member, never every member (or the container) from that receipt.
-				const members = [...searched].filter((file) => result.files.some((container) => file.startsWith(`${container}:`)));
-				if (members.length > 0) {
-					if (members.includes(result.inputIdentity)) read.add(result.inputIdentity);
+				if (result.directory || searched.size === 0) break;
+				// A container receipt can prove an exact input member, never its siblings.
+				let hasMembers = false;
+				let exactMember = false;
+				for (const file of searched) {
+					if (!result.files.some((container) => file.startsWith(`${container}:`))) continue;
+					hasMembers = true;
+					if (file === result.inputIdentity) exactMember = true;
+				}
+				if (hasMembers) {
+					if (exactMember) read.add(result.inputIdentity);
 					else reasons.add("archive member identity ambiguous");
 					break;
 				}
@@ -96,44 +99,35 @@ export function calculateCoverage(observations: readonly SourceObservation[]): {
 			}
 		}
 	}
-	if (phase !== "idle") finish();
-	let sum = 0;
-	let count = 0;
-	const incomplete = new Set<string>();
-	for (const group of groups) {
-		switch (group.coverage.kind) {
-			case "scored":
-				sum += group.coverage.ratio;
-				count++;
-				break;
-			case "incomplete":
-				incomplete.add(group.coverage.reason);
-				break;
-			case "not-applicable":
-				break;
-			default: {
-				const unreachable: never = group.coverage;
-				return unreachable;
-			}
-		}
-	}
 	return {
-		groups,
+		evidence: { searchedCount: searched.size, readCount: read.size, partialResults },
 		coverage:
-			incomplete.size > 0
-				? { kind: "incomplete", reason: [...incomplete].join("; ") }
-				: count > 0
-					? { kind: "scored", ratio: sum / count }
-					: { kind: "not-applicable" },
+			reasons.size > 0
+				? { kind: "incomplete", reason: [...reasons].join("; ") }
+				: searched.size === 0
+					? { kind: "not-applicable" }
+					: classifyReading(searched.size, read.size),
+		baselineCutoff: "2026-10-15T20:09:21Z",
 	};
 }
 
 function describeCoverage(value: CoverageValue): string {
 	switch (value.kind) {
-		case "scored":
-			return `${(value.ratio * 100).toFixed(1)}%`;
+		case "rated":
+			switch (value.level) {
+				case "low":
+					return "低";
+				case "medium":
+					return "中";
+				case "high":
+					return "高";
+				default: {
+					const unreachable: never = value.level;
+					return unreachable;
+				}
+			}
 		case "not-applicable":
-			return "N/A（无可计算搜索文件）";
+			return "不适用（无可评价搜索来源）";
 		case "incomplete":
 			return `统计不完整（${value.reason}）`;
 		default: {
@@ -144,9 +138,5 @@ function describeCoverage(value: CoverageValue): string {
 }
 
 export function formatReport(report: ReplyReport): string {
-	const groups = report.groups.map(
-		(group, index) =>
-			`组${index + 1} ${group.readCount}/${group.searchedCount}=${describeCoverage(group.coverage)}${group.partialResults ? "（仅返回的部分结果）" : ""}`,
-	);
-	return `来源阅读充实度 [${report.agentName}/${report.replyKind}#${report.replySequence}]：${describeCoverage(report.coverage)}${groups.length > 0 ? `；${groups.join("；")}` : ""}（按组算术平均，仅本组 read）`;
+	return `来源阅读充实度 [${report.agentName}/${report.replyKind}#${report.replySequence}]：${describeCoverage(report.coverage)}`;
 }
