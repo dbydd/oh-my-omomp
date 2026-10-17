@@ -6,7 +6,7 @@ name: config-check
 
 on:
   push:
-    branches: [master]
+    branches: [main]
   pull_request:
   schedule:
     - cron: "17 3 * * *"

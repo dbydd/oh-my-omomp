@@ -25,7 +25,7 @@
 
 ### 需求
 
-- **R1**：push 到 `master`、每个 PR、每天定时、手动触发时，各运行一次检查。
+- **R1**：push 到 `main`、每个 PR、每天定时、手动触发时，各运行一次检查。
 - **R2**：配置有任一故障或警告时检查为红，每个不同的故障给出一次原文和出现位置；没有时为绿。
 - **R3**：免费模型不可用时检查也为红，但报告标明“配置未验证”，与配置故障分开。
 - **R4**：不使用任何 secret；`GITHUB_TOKEN` 只读。
@@ -125,7 +125,7 @@ flowchart TB
 
 `.github/workflows/config-check.yml`：
 
-- 事件：`push` 到 `master`、`pull_request`、每天 03:17 UTC 的 `schedule`、`workflow_dispatch`。不使用 `pull_request_target`。
+- 事件：`push` 到 `main`、`pull_request`、每天 03:17 UTC 的 `schedule`、`workflow_dispatch`。不使用 `pull_request_target`。
 - 权限：`contents: read`；checkout 不保留凭据（`persist-credentials: false`）；不引用任何 secret。
 - 并发：同一事件、同一 ref 的新运行取消旧运行。
 - Actions 按提交 SHA 固定版本；Bun 取最新版。

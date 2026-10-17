@@ -237,7 +237,7 @@ git status --short            # confirm no runtime/db/cache files leaked into th
 There is no build or unit-test command. `bun run check` must pass before a
 change lands; CI runs it as the `code` job. The configuration check runs locally with
 `bun ci/check.ts` (writes a throwaway temp root plus the report on stdout, and `$GITHUB_STEP_SUMMARY` when set; exit 0 clean, 1 diagnostics, 2 free model
-unavailable) and in GitHub Actions on push to `master`, pull requests, daily, and on
+unavailable) and in GitHub Actions on push to `main`, pull requests, daily, and on
 dispatch (see Testing & QA).
 
 ## Code Conventions & Common Patterns

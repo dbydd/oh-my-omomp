@@ -146,7 +146,7 @@ flowchart LR
 
 [omp-config-autoupdate](#omp-config-autoupdate) 扩展在 OMP 启动时运行更新器 `omp-config-update.ts auto`。默认关闭，用 `/omp-config-autoupdate on` 打开、`off` 关闭，开关只属于本机，见该扩展一节。仓库对托管项说了算：本机绕过仓库直接改了托管文件或托管字段，下次更新时会被覆盖。除此之外，本机自己的东西一律不动。
 
-1. **取仓库**：更新器在 `~/.omp/omp-config-src` 维护一份自己的浅克隆，从 `https://github.com/oh-my-omp/omp-config.git` 拉 `master` 分支（仓库的默认分支，写死在更新器的 `DEFAULT_BRANCH` 里）。克隆的 origin 还是仓库迁移前的地址 `https://github.com/mouriya-s-lab/omp-config.git` 时，先把它改到新地址再拉；这个目录存在但不是这个仓库的克隆时不碰它，直接报错。拉取失败（如断网，包括还没有克隆时的首次克隆失败）时这次不更新：克隆只是上次拉取时的副本，不能代替 GitHub 上的默认分支，下次启动再拉。
+1. **取仓库**：更新器在 `~/.omp/omp-config-src` 维护一份自己的浅克隆，从 `https://github.com/oh-my-omp/omp-config.git` 拉 `main` 分支（仓库的默认分支，写死在更新器的 `DEFAULT_BRANCH` 里）。克隆的 origin 还是仓库迁移前的地址 `https://github.com/mouriya-s-lab/omp-config.git` 时，先把它改到新地址再拉；这个目录存在但不是这个仓库的克隆时不碰它，直接报错。拉取失败（如断网，包括还没有克隆时的首次克隆失败）时这次不更新：克隆只是上次拉取时的副本，不能代替 GitHub 上的默认分支，下次启动再拉。
 2. **只在提交变化时应用**：新提交和 `<agent 目录>/.omp-config-applied` 记录的上次应用提交相同就什么都不做，所以没有新提交时，`/settings`、`/bansos` 改过的托管值不会被每次启动改回去。应用规则取自新提交里的 `omp-config-update.ts`，改了更新规则的提交按自己的规则应用。
 3. **规划与插件就绪**：先校验仓库里的所有结构化配置（含 `config-light.yml`）能解析成映射，再规划文件写入、迁移和删除；preflight 有错就不切换。然后对每个声明插件执行 `omp install`（缺的补装，已装的升级），再从 OMP owner catalog 核对独立 Todo 的 enabled、manifest entry 和实际入口文件。插件无法安装或升级、disabled、坏 entry 或退休对象冲突时，不写消费者、不删旧实现、不记完成。
 4. **写入与删除**：插件就绪后先移动，再依次写普通文件、JSON、`config.yml`，最后删除。Todo 切换的 move/write 阶段只要有错误，整个 delete 阶段都不执行，保留旧 reader/实现，已成功的部分写入如实报告、不回滚。每个文件先写同目录临时文件再 rename；普通目标是 symlink 时写到它指向的文件，symlink 保留。一般删除只按 git 记录的“上次应用的提交 → 新提交”计算：托管文件、结构化配置里仓库删掉的键，以及 `extensions` 条目；本机自己的键和字段保留，删完为空才删映射，整个结构化配置文件被删时本机文件不动。首次运行或旧提交不可读时，不做 git-derived 删除，但平铺迁移、插件就绪后的八路径 Todo 退休，以及插件含 `src/ctx` 时的 ctx 退休照常规划；退休仅 unlink 已知叶，不删除目录或链接 backing。
@@ -1080,7 +1080,7 @@ model: "(gpt-5|o3)"
 
 ## 维护须知
 
-- **配置检查（CI）**：push 到 `master`、每个 PR、每天定时和手动触发时，在一次性环境里装最新 omp、用更新器应用仓库配置，再用免费模型分别跑一次完整模式和轻量模式的真实 session，收集更新器和会话的诊断以及 omp 的 warn/error 日志（安装成功时的输出不收集），去重后逐个报告；宿主自身的已知噪音单独列出、不计入。每个故障带一个 hash 标识（类别加归一化文字的 SHA-256 前 12 位），类别和归一化文字不变时跨运行稳定。检查本身不拦截合并，是否阻塞取决于 GitHub 的分支保护设置。本地用 `bun ci/check.ts` 复现。设计、判据和覆盖边界见 `ci/README.md`。检查的 prompt 不要求调用工具或派 subagent，但也不禁用、不断言它们，所以扩展行为的改动仍要用 `/update-omp` 应用工作区、重启 OMP，实际触发对应的工具、命令或钩子，看输出和副作用。改动合并前，开了自动更新的机器在根会话启动或执行 `run` 时，如果拉取成功、默认分支提交与已应用的不同，会把本机改动覆盖回去。
+- **配置检查（CI）**：push 到 `main`、每个 PR、每天定时和手动触发时，在一次性环境里装最新 omp、用更新器应用仓库配置，再用免费模型分别跑一次完整模式和轻量模式的真实 session，收集更新器和会话的诊断以及 omp 的 warn/error 日志（安装成功时的输出不收集），去重后逐个报告；宿主自身的已知噪音单独列出、不计入。每个故障带一个 hash 标识（类别加归一化文字的 SHA-256 前 12 位），类别和归一化文字不变时跨运行稳定。检查本身不拦截合并，是否阻塞取决于 GitHub 的分支保护设置。本地用 `bun ci/check.ts` 复现。设计、判据和覆盖边界见 `ci/README.md`。检查的 prompt 不要求调用工具或派 subagent，但也不禁用、不断言它们，所以扩展行为的改动仍要用 `/update-omp` 应用工作区、重启 OMP，实际触发对应的工具、命令或钩子，看输出和副作用。改动合并前，开了自动更新的机器在根会话启动或执行 `run` 时，如果拉取成功、默认分支提交与已应用的不同，会把本机改动覆盖回去。
 - **增删托管项时同时改三处**：更新器 `omp-config-update.ts` 的 `managedPlain` / `STRUCTURED`（扩展目录里新加的非 `.ts` 文件默认属于本机，要归仓库就得加进去），`.omp/commands/sync-omp-config.md` 的同步范围，以及本文件和 `README.md`。更新器的 `applySnapshot(options)` 接口要保持兼容：已安装的旧更新器会导入新提交里的它。更新器的位置（`UPDATER_REL`）也写死在每台机器已安装的旧更新器里，挪动它会让这些机器的自动更新失败，直到各自手动执行一次 `/update-omp`。
 - **写扩展代码**：先 `bun install`，交付前 `bun run check`，规范见[目录结构与开发规范](#目录结构与开发规范)。新引入的 `@oh-my-pi/*` 子路径要在没有 `node_modules` 的目录里真实加载一次。
 - **不要在 `omp-config-update.ts` 里写出 Otty 标记的字面量**：标记检查是“文件任意位置含有”，这个文件自己也是托管文件，写出来就会被当成应用托管文件，从此跳过更新。

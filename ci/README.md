@@ -25,7 +25,7 @@ The following properties come from measurements in an isolated HOME (omp 18.8.7,
 
 ### Requirements
 
-- **R1**: run one check on every push to `master`, every PR, a daily schedule and manual dispatch.
+- **R1**: run one check on every push to `main`, every PR, a daily schedule and manual dispatch.
 - **R2**: when the config has any fault or warning the check is red, giving the original text and location of each distinct fault once; otherwise it is green.
 - **R3**: when the free model is unavailable the check is also red, but the report says "config not verified", kept apart from config faults.
 - **R4**: no secrets are used; `GITHUB_TOKEN` is read-only.
@@ -125,7 +125,7 @@ flowchart TB
 
 `.github/workflows/config-check.yml`:
 
-- Events: `push` to `master`, `pull_request`, a daily `schedule` at 03:17 UTC, `workflow_dispatch`. `pull_request_target` is not used.
+- Events: `push` to `main`, `pull_request`, a daily `schedule` at 03:17 UTC, `workflow_dispatch`. `pull_request_target` is not used.
 - Permissions: `contents: read`; checkout keeps no credentials (`persist-credentials: false`); no secrets are referenced.
 - Concurrency: a new run for the same event and ref cancels the old one.
 - Actions are pinned by commit SHA; Bun takes the latest version.

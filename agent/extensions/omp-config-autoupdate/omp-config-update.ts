@@ -117,7 +117,7 @@ import { pathToFileURL } from "node:url";
 export const REPO_URL = "https://github.com/oh-my-omp/omp-config.git";
 /** Origins of updater clones made before the repo moved to oh-my-omp; repointed to REPO_URL on the next fetch. */
 const PREVIOUS_REPO_URLS: readonly string[] = ["https://github.com/mouriya-s-lab/omp-config.git"];
-export const DEFAULT_BRANCH = "master";
+export const DEFAULT_BRANCH = "main";
 export const APPLIED_MARKER = ".omp-config-applied";
 
 /**
