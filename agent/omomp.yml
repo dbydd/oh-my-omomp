@@ -20,7 +20,7 @@ tool-policy-nag:
     minChars: 600
     minPrograms: 3
 task-completion-judge:
-  model: openai-codex/gpt-6-sol
+  model: openai-codex/gpt-6-1-sol
 task-split-check:
   model: openai-codex/gpt-6-1-sol
 system-prompt-replace:
