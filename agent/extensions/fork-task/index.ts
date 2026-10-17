@@ -116,7 +116,7 @@ Recommended per item: keep \`isolated\` at its default \`true\` and pass \`shake
 - The child runs its own agent's system prompt and model; it sees the conversation as background and its own assignment as the task. It does not inherit this session's todo list.
 - Verification is mandatory for forked workers: the fork notice explicitly requires scoped build/lint/test and real runtime checks before handoff, overriding ordinary task's no-verification default. The parent still owns final acceptance and may verify itself or assign an independent verifier.
 - Each item's \`name\` gets a short unique suffix; address the child by the id reported in the result.
-- \`from\`: an agent id as in \`agent://<id>\` (running, idle or parked) whose conversation the child copies instead of this one; omit it to fork this conversation. The child is still this session's child: its result, follow-up, and patch come back here, and its workspace derives from this session's checkout, not the source's, so edits the source made in an isolated workspace of its own are not in it unless already merged here. A running source is copied as persisted so far.
+- \`from\`: an agent id as in \`agent://<id>\` (running, idle or parked) whose conversation the child copies instead of this one; omit it to fork this conversation. An item with \`from\` MUST set \`agent\`; the child does not inherit the source's agent type or model, and a call with an item missing it is rejected whole. The child is still this session's child: its result, follow-up, and patch come back here, and its workspace derives from this session's checkout, not the source's, so edits the source made in an isolated workspace of its own are not in it unless already merged here. A running source is copied as persisted so far.
 
 \`context\` and each item's \`task\` follow the same rules as \`task\`. The conversation copy is background, so the assignment is a directive — what to do, what is in and out, what siblings handle — not a restatement of it, and still states the target, change, and acceptance.`;
 
@@ -480,6 +480,14 @@ export default function forkTask(pi: ExtensionAPI): void {
 		async execute(toolCallId, rawParams, signal, onUpdate, ctx) {
 			const fail = (text: string) => ({ content: [{ type: "text" as const, text }], isError: true });
 			const params = paramsSchema.parse(rawParams);
+			const missingAgent = params.tasks.flatMap((item, index) =>
+				item.from?.trim() && !item.agent?.trim() ? [`#${index} (${item.name ?? "unnamed"})`] : [],
+			);
+			if (missingAgent.length > 0) {
+				return fail(
+					`fork_task: items with \`from\` must name \`agent\` explicitly; missing on ${missingAgent.join(", ")}. Nothing was dispatched.`,
+				);
+			}
 
 			const parent = findCallerSession(ctx);
 			if (!parent) return fail("fork_task: could not resolve the calling session in the agent registry.");

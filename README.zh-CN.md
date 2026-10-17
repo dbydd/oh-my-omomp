@@ -897,7 +897,7 @@ bun ci/reading-coverage-backtest.ts --cutoff 2026-10-15T20:09:21Z
 - `isolated` 默认 `true`，写 `isolated: false` 才共享目录。父会话处于 plan mode 时一律共享。隔离的子代理结束后不能续聊。
 - 每项可选 `shake: true`，对副本执行和手动 `/shake` 相同的 `session.shake("elide")`。
 - `name` 会加 `_xxxx` 后缀，子代理 id 以结果为准。
-- 每项可设 `from` 为一个 agent id（同 `agent://<id>`，先精确匹配再忽略大小写；运行中、空闲或 parked 均可，包括恢复会话里 parked 的 agent），改为复制该 agent 的对话而不是调用方的。子代理仍是调用方的子代理：结果、续聊和 patch 回到调用方，工作目录来自调用方的 checkout（共享或其隔离副本），不是来源 agent 的，所以来源在自己隔离 workspace 里的改动，除非已合并，否则看不到。来源正在运行时，复制调用那一刻已落盘的部分。id 不存在、是 advisor transcript 或没有 transcript 时，整次调用在派发前失败。
+- 每项可设 `from` 为一个 agent id（同 `agent://<id>`，先精确匹配再忽略大小写；运行中、空闲或 parked 均可，包括恢复会话里 parked 的 agent），改为复制该 agent 的对话而不是调用方的。设了 `from` 的项必须写明 `agent`：子代理不继承来源的 agent 类型和模型，缺了就在暂存前拒绝整次调用。子代理仍是调用方的子代理：结果、续聊和 patch 回到调用方，工作目录来自调用方的 checkout（共享或其隔离副本），不是来源 agent 的，所以来源在自己隔离 workspace 里的改动，除非已合并，否则看不到。来源正在运行时，复制调用那一刻已落盘的部分。id 不存在、是 advisor transcript 或没有 transcript 时，整次调用在派发前失败。
 - fork worker 必须在 handoff 前验证改动路径；路由专属 developer notice 把它明确列为派工要求。普通 `task` worker 把检查留给父代或单独派出的验证者。只读角色仍遵守工具限制。
 - 需要 `async.enabled: true`，否则报错。
 
