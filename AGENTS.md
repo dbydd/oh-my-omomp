@@ -409,7 +409,7 @@ exercised in a real omp session.
   without a known surviving group anchor cannot be attributed retroactively.
   Main session switches retain tracking; only
   the owning main's shutdown clears its timer and closes libproc.
-- `agent/config-light.yml` — declarative light-mode config overlay: disables twelve
+- `agent/config-light.yml` — declarative light-mode config overlay: disables eleven
   optional behavior extensions (including `task-completion-judge`, `turn-judge` and
   `user-prompt-inject`) and sets `task.eager` to `default` (`config.yml` has `preferred`); unfiltered local extensions (`append-system-model`, `model-compaction`,
   `input-polish`, `repo-rules`,

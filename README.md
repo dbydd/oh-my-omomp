@@ -34,7 +34,7 @@ The reviewable, portable part of an Oh My Pi (OMP) configuration, tuned for heav
 |`pi/agent/pi-bansos-relay-state.json`|`pi-bansos` plugin state|`~/.pi/agent/`|
 |`install-plugins.sh`, `plugin-audit.sh`|Plugin installation and plugin drift check|—|
 |`.omp/commands/`|Full rules of the three maintenance commands|—|
-|`ci/`, `.github/workflows/config-check.yml`|The configuration check (CI), whose design and criteria are in `ci/README.md`, and the offline source-reading calibration command `ci/reading-coverage-backtest.ts`|—|
+|`ci/`, `.github/workflows/config-check.yml`|The configuration check (CI), whose design and criteria are in `ci/README.md`|—|
 |`package.json`, `biome.json`, `tsconfig.json`|Dev tooling: `bun run check` runs formatting, lint and type checks; conventions in [Layout and development conventions](#layout-and-development-conventions)|—|
 
 ## Quick start
@@ -312,7 +312,7 @@ No need to log in to every provider again on a new machine: the `auth_credential
 `omp-light` starts a trimmed OMP process for small, simple tasks:
 
 - `APPEND_SYSTEM_LIGHT.md` replaces the full appended prompt.
-- `config-light.yml` disables 12 behavior extensions: `doc-polish`, `fork-task`, `isolation-nudge`, `lang-nag`, `response-reading-coverage`, `task-completion-judge`, `task-split-check`, `tool-policy-nag`, `turn-judge`, `user-prompt-inject`, `watchdog-agent`, `wt-tool`.
+- `config-light.yml` disables 11 behavior extensions: `doc-polish`, `fork-task`, `isolation-nudge`, `lang-nag`, `task-completion-judge`, `task-split-check`, `tool-policy-nag`, `turn-judge`, `user-prompt-inject`, `watchdog-agent`, `wt-tool`.
 - `config-light.yml` sets `task.eager` to `default` (`config.yml` has `preferred`), so light mode pushes delegation less hard. It does not turn subagents off.
 - Local extensions that are not disabled load as usual: `append-system-model`, [model-compaction](#model-compaction), `input-polish`, `repo-rules`, [child-memory-warning](#child-memory-warning), [omp-config-autoupdate](#omp-config-autoupdate) and the compatibility fix `commandcode-model-spec`. The independent [todo-more](#todo-more) and other plugins load through ordinary discovery, with no launcher change or extra `-e`. `APPEND_SYSTEM_MODEL.md` is therefore still injected and the `model-compaction` section of `omomp.yml` still sets compaction triggers, and with automatic update on, `omp-light` updates too. Native todo is off here as well.
 - `ctx` and the task log stay loaded in light mode: they ship inside the [todo-more](#todo-more) plugin, which `disabledExtensions` cannot filter.
@@ -407,7 +407,6 @@ The extensions in `agent/extensions/` and `agent/extensions-last/` patch defects
 |[watchdog-agent](#watchdog-agent)|Third-party reviewer delivered to chosen targets|No|
 |[user-prompt-inject](#user-prompt-inject)|Injects the user's own words into chosen subagents through templates|No|
 |[turn-judge](#turn-judge)|Judges each main-session turn with native JUDGE; types a preset prompt past the threshold, otherwise shows the verdict|No|
-|[response-reading-coverage](#response-reading-coverage)|Reports low/medium/high source-reading follow-up against a main-session historical baseline; child reports also enter the root main's context|No|
 |[child-memory-warning](#child-memory-warning)|Warns the main UI and agent when a macOS descendant exceeds 4 GiB physical footprint, including previously observed surviving orphans|Yes|
 |[lang-nag](#lang-nag)|When the reply language is wrong, adds a reminder before the next input|No|
 |[repo-rules](#repo-rules)|Also reads repo-level rule directories such as `.claude/rules`|Yes|
@@ -837,37 +836,6 @@ There is no ordering inside `extensions/`: the order is whatever the native `glo
 - **Timing**: on every `before_agent_start`, for the main session and every subagent, except in light mode (see [Light mode](#light-mode)). The rules file is re-read for every prompt, so rule changes need no restart; changes to the extension itself do.
 - **Failure**: a missing rules file replaces nothing. A JSON or rule format error replaces nothing and logs a warning, the same error repeated in a row logging once. When a rule's target appears nowhere in the main session's system prompt (OMP's template text changed after an upgrade, or the rule is wrong), each rule warns once per process: a UI warning in interactive mode, stderr in headless mode, and a log entry in both. Subagents are not checked, since their prompts may legitimately lack the target text (a worker that cannot dispatch has no `task` tool description, for example). None of this blocks the prompt.
 - **Scope**: it changes only the system prompt, not the tool schemas sent separately with the request. The path in `config.yml` hard-codes `~/.omp/agent`; when `PI_CODING_AGENT_DIR` changes the agent directory, update that entry too.
-
-### Source reading coverage
-
-#### response-reading-coverage
-
-`response-reading-coverage/` observes native `grep`, `glob`, `find` and `read` calls in full mode; `config-light.yml` disables it in light mode. It reports **low / medium / high** source-reading follow-up relative to historical main replies with similar returned-search width. It does not measure comprehension, citation accuracy, answer quality or absolute task sufficiency. Same-named SDK, MCP and extension tools do not count; shell, `eval`, browser and AST operations are ignored. Only calls observed at `tool_call` can count.
-
-- **Reply-level evidence**: `S` is the union of file identities returned by searches in this reply window. `R` counts successful reads whose invocation follows a search returning that identity, deduplicated across the entire window. Ordering is invocation order, not completion order. A supplementary search does not erase earlier candidates; splitting the same investigation into more search/read stages cannot change its weight. Reads invoked before a source was searched, direct reads of other known paths and directory listings give no credit. Failed reads give no credit.
-- **Empty and unknown**: a successful empty search, including a glob returning only directories, adds no evidence and creates no scoring group. It cannot affect the fit or the current classification, and there is no `0/0` representation. A known nonempty search with zero follow-up reads is a valid observation. No returned files means **not applicable**, not low. Failed searches, missing/invalid metadata, unresolved calls or ambiguous relevant reads mean **incomplete**, even when no known file was returned.
-- **Empirical classification**: offline calibration gives each eligible main session total weight one; each of its `n` eligible replies has weight `1/n`. The weighted empirical one-third and two-thirds quantiles of `S` define three width strata. Within each stratum, the same quantiles of `R` define the low and high boundaries: `R <= lower` is low, `R > upper` is high, otherwise medium. A quantile is the smallest observed integer whose cumulative weight reaches its target; there is no interpolation, splitting of ties, group-ratio averaging, percentage or assumed ideal of reading every result. Runtime uses the frozen integer table, not a live scan or automatic retraining.
-- **Identity**: search results use `files` or `hits[].rel`, relative to result `cwd` (invocation cwd if absent). Successful read receipts supply `meta.source` and `resolvedPath`; any range, tail, raw or abbreviated read counts once per source per reply. Paths normalize lexically without filesystem probes or symlink inference. Internal URIs keep only their explicit backing alias; URLs gain no invented aliases. Archive receipts can prove an exact input member but never its siblings; ambiguous member selectors and composite reads after a nonempty search are incomplete. Partial searches contribute only actually returned files; neither the baseline nor the label describes unseen candidates. The structured evidence retains `partialResults`.
-- **Order**: slots are reserved at invocation, filled by `toolCallId`, and consumed only as a completed prefix. Completion order cannot move a read across a reply boundary. Terminal settle marks unresolved calls unknown; late results cannot enter the next window.
-- **Replies**: main reports only on terminal successful assistant text, never commentary/tool-call messages or an error/cancelled reply. A child's successful native `write agent://…` with an accepted recipient receipt and every successful native `yield` (including incremental) settle separate windows. Failed sends/yields and broadcasts without recipients do not. A terminal child reply with new unconsumed sources produces `irc-auto`, which confirms sender settle, not automatic relay delivery.
-- **Output**: each report is a normal `response-reading-coverage` session custom entry containing the level or unavailable state, reply-level source counts and the baseline cutoff, not groups or ratios. Main sees one info notification with only the level or unavailable state; headless `--no-ui` suppresses the notification. Children use the same main-derived baseline, never contribute training samples, and additionally send a displayable custom message whose body and structured details reach the live root main, not just their immediate parent. Root delivery uses the normal host message API with `triggerTurn: false`: idle main does not start a turn; busy main may receive a steer and continue. Delivery failure warns locally, never retries, revives main or merges the ended reply into the next.
-- **Lifetime**: memory is isolated by live session and agent. Interactive/RPC input discards an unfinished window; extension input, IRC wakes and compaction do not. Session start/switch/branch/tree/shutdown clear live state. The extension never reads or replays session history, writes per-call snapshots or restores a previous process's unfinished work; custom entries are output records only.
-
-**Frozen baseline.** The calibration interval is `[2026-10-08T20:09:21Z, 2026-10-15T20:09:21Z)`. The audited local records contain 384 active main sessions; 339 contribute 1,283 reconstructed successful reply windows. Of those windows, 353 eligible replies from 111 sessions enter the fit, while 862 not-applicable and 68 incomplete windows do not. Subagents are excluded using explicit `session_init.agent` / subagent model-role evidence and the host's canonical main/child storage contracts; `parentSession` alone is not a subagent discriminator, and valid main forks remain included. Copied pre-fork history is excluded. The historical reconstruction cannot recover unpersisted `agent_end.willContinue`, builtin provenance or inputs that produced no stored message; it uses successful final assistant text and persisted input/branch boundaries, not a claim of exact live-hook replay.
-
-|Returned sources `S`|Low: followed sources `R`|Medium: `R`|High: `R`|Eligible replies|Contributing sessions|
-|---|---|---|---|---|---|
-|1–3|0|1|2 or more|137|71|
-|4–12|0–1|2|3 or more|102|55|
-|13 or more|0–1|2–6|7 or more|114|63|
-
-Refitting both width and read boundaries after holding out each session changed 1 of 353 labels; holding out each observed day changed 11 of 353. Removing the largest session changed none. Training on the first four observed days and holding out the final two changed 1 of 96 held-out labels relative to the full-week fit. These are stability checks, not accuracy against human sufficiency labels. The fit retains all 170 partial-result replies under the same returned-source definition; an empty search's partial flag contributes no evidence. Fitting only the 183 nonpartial replies changes the width cutoffs to 2 and 4, so that different population is not interchangeable. Reproduce the offline fit with:
-
-```bash
-bun ci/reading-coverage-backtest.ts --cutoff 2026-10-15T20:09:21Z
-```
-
-The extension has no config, model calls, blocking or extra install-list entry. `/update-omp` carries its three `.ts` modules through the existing managed extension rules; restart OMP to load them. The offline `ci/reading-coverage-backtest.ts` command recalibrates from local records without writing source sessions or copying their contents into the repository. A maintainer must rerun calibration and update the frozen table when model, prompt or tool-output changes invalidate the observed population. After host upgrades, verify native provenance/metadata, invocation ordering, terminal phases, child IRC/yield/wake boundaries and root delivery in real sessions; static type checks cannot prove these contracts.
 
 ### Local process resources
 
