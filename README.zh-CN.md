@@ -420,8 +420,7 @@ subagent 分三类：`task:*` 执行，`discuss:*` 只读讨论，`mentor:defaul
 |[task-split-check](#task-split-check)|拦下多主题派发和限制汇报长度的派发|否|
 |[task-completion-judge](#task-completion-judge)|worker 交付前审一次完成度|否|
 |[doc-polish](#doc-polish)|`polish_doc` / `/polish-doc`：不改原意地润色文档|否|
-|[input-polish](#input-polish)|`Ctrl+Enter` 润色输入框草稿，overlay 预览后回车发送、Esc 取消|是|
-|[wt-tool](#wt-tool)|注册 `wt` / `wt_remove`：主 agent 调用人用的 `/wt` 进入新 worktree，或检查、确认后删掉所在 worktree 回到主 checkout|否|
+|[harness-restart](#harness-restart)|注册 `harness_restart`：主 agent 调用人用的 `/restart`，以相同启动参数重启 omp 并恢复会话|是|
 |[commandcode-model-spec](#commandcode-model-spec)|修复 `--model` 指定 commandcode 模型时的认证失败|是|
 |[omp-config-autoupdate](#omp-config-autoupdate)|启动时从 GitHub 默认分支自动更新本机配置；默认关闭，`/omp-config-autoupdate on\|off` 开关，`run` 立即更新并显示详细报告|是|
 
@@ -1062,10 +1061,21 @@ bun ci/reading-coverage-backtest.ts --cutoff 2026-10-15T20:09:21Z
 
 限制：
 
-- 只能发现本进程里的使用者。其他 OMP 进程、终端、编辑器或 `exec_command` 持久会话正在用这个目录时检测不到。
 - `wt` 在本次启动里建的 worktree 被 `wt_remove` 删掉后，InteractiveMode 私有的已拥有列表里还有它。`worktree.onExit` 是 `ask` 或 `remove` 时，退出时会为这个已不存在的 worktree 弹一次确认或报一行删除失败；分支不会因此被删。`keep` 不受影响。
 
-### 配置同步
+#### harness-restart
+
+`harness-restart/` 注册一个工具 `harness_restart`，让主 agent 自己重启 omp 进程。执行的是人用的 `/restart` 原样（相同启动参数，会话从磁盘恢复），不是重新实现。
+
+- **范围**：只在交互式 TUI 的主会话里启用。工具默认不启用（`defaultInactive`），`session_start` / `session_switch` 时才加进主会话的启用列表；subagent、`omp -p`、RPC、ACP 里都没有。轻量模式保留。
+- **时机**：`/restart` 在会话运行时拒绝执行，而工具调用总发生在运行中，所以调用只登记请求，并在结果里要求模型立即结束本轮。本轮结束前再登记会报错。
+  1. 本轮真正结束（不是 `willContinue` 的 `agent_end`）后开始等待：每 50 毫秒检查一次，会话空闲且没有排队消息时执行一次。新一轮开始就停止等待，等那轮结束后再继续。
+  2. 本轮因用户按 Esc 结束时取消请求：UI 弹通知，模型在下一轮看到"什么都没变"。
+  3. 切换会话或退出丢弃请求。
+- **执行人的命令时**：请求直接调用活着的 TUI 实例的 `restart()`。标记（原因、时间戳）在重启前一刻才作为持久 `custom` 会话条目追加，所以取消或失败的重启不会留下标记。
+- **回传**：重启是整个进程的事，工具结果到不了调用方。重启后会话以一条带归因的用户消息开头："Harness restart completed（<时间>）。Reason was: <原因>。Continue what you were doing." 重启和下次启动之间如果发生 compact、`/clear` 或分支总结，标记作废。
+- **拿到 TUI 实例**：扩展 API 不暴露 InteractiveMode。TUI 下 `ctx.ui.setEditorComponent` 以 InteractiveMode 实例为 `this` 调用它的原型方法；扩展在这一次同步调用里把原型方法换成只记录 `this` 的函数，调用完立即恢复，编辑器不会真被替换。拿不到实例、会话不符或处于 collab guest 时，工具调用直接返回错误，不登记请求。
+- **参数**：`reason`，可省略；一行原因，持久记录，重启后原样带回。
 
 #### omp-config-autoupdate
 

@@ -420,8 +420,7 @@ The extensions in `agent/extensions/` and `agent/extensions-last/` patch defects
 |[task-completion-judge](#task-completion-judge)|Reviews completion once before a worker delivers|No|
 |[doc-polish](#doc-polish)|`polish_doc` / `/polish-doc`: polishes documents without changing their meaning|No|
 |[input-polish](#input-polish)|`Ctrl+Enter` polishes the input-box draft; Enter sends after the overlay preview, Esc cancels|Yes|
-|[wt-tool](#wt-tool)|Registers `wt` / `wt_remove`: the main agent invokes the human `/wt` to enter a new worktree, or after a check and confirmation removes the worktree it is in and returns to the main checkout|No|
-|[commandcode-model-spec](#commandcode-model-spec)|Fixes the auth failure when `--model` names a commandcode model|Yes|
+|[harness-restart](#harness-restart)|Registers `harness_restart`: the main agent invokes the human `/restart` to restart omp with the same launch flags and resume the session|Yes|
 |[omp-config-autoupdate](#omp-config-autoupdate)|Updates the machine's config from the GitHub default branch at startup; off by default, `/omp-config-autoupdate on\|off` switches it, `run` updates now and shows the detailed report|Yes|
 
 ### Layout and development conventions
@@ -1064,7 +1063,19 @@ Limits:
 - It can only find users inside this process. Other OMP processes, terminals, editors or persistent `exec_command` sessions using the directory go undetected.
 - After `wt_remove` deletes a worktree that `wt` created in this run, InteractiveMode's private owned list still contains it. With `worktree.onExit` set to `ask` or `remove`, exit asks once for confirmation or reports one deletion failure for the worktree that no longer exists; the branch is not deleted because of this. `keep` is unaffected.
 
-### Config sync
+#### harness-restart
+
+`harness-restart/` registers one tool, `harness_restart`, so the main agent can restart the omp harness itself. It runs the human's `/restart` as is (same launch flags, the session resumed from disk), not a reimplementation.
+
+- **Scope**: enabled only in the interactive TUI's main session. The tool is inactive by default (`defaultInactive`) and is added to the main session's active list only at `session_start` / `session_switch`; subagents, `omp -p`, RPC and ACP never have it. Light mode keeps it.
+- **Timing**: `/restart` refuses to run while the session is running, and a tool call always happens mid-run, so the call only registers a request and tells the model in the result to end the turn right away. Registering again before the turn ends is an error.
+  1. Once a turn truly ends (`agent_end` that is not `willContinue`), it starts waiting: every 50 milliseconds it checks, and runs once when the session is idle with no queued messages. When a new turn starts it stops waiting and resumes after that turn ends.
+  2. When the turn ends because the user pressed Esc, the request is cancelled: the UI shows a notice, and the model sees "nothing changed" in its next turn.
+  3. Session switch or exit discards the request.
+- **Running the human command**: the request calls the live TUI instance's `restart()` directly. The marker (reason, timestamp) is appended as a durable `custom` session entry just before restarting, so a cancelled or failed restart leaves no marker behind.
+- **Hand-back**: the restart is process-wide, so the tool result never reaches the caller. After the restart the session opens with an attributed user message: "Harness restart completed (<time>). Reason was: <reason>. Continue what you were doing." A compaction, `/clear` or branch summary between the restart and the next start discards the marker instead.
+- **Getting the TUI instance**: the extension API does not expose InteractiveMode. In the TUI, `ctx.ui.setEditorComponent` calls its prototype method with the InteractiveMode instance as `this`; within that one synchronous call the extension swaps the prototype method for a function that only records `this`, then restores it immediately, so the editor is never actually replaced. When the instance cannot be obtained, the session does not match or it is a collab guest, the tool call returns an error directly and registers no request.
+- **Parameters**: `reason`, optional; one line recorded durably and repeated back after the restart.
 
 #### omp-config-autoupdate
 
