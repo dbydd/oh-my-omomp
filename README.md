@@ -97,7 +97,7 @@ Prefer the tools' own paging and default ordering, which keep output size under 
 
 **Put disposable work in subagent contexts.** A subagent's context is a disposable working branch; important conclusions and evidence come back over subagent IRC, and the main agent distills them into its own context. What gets discarded is the execution, not the task intent.
 
-**Delegate for ownership, parallelism or independent evidence.** Keep investigation and implementation together when they form one cohesive slice. `SYSTEM_TEMPLATE.md` explains the workflow and its runtime delegation modes; do not split merely to minimize unit size. Core code and documents may be assigned to `task:high`; the other worker tiers retain their declared capability boundaries.
+**Delegate for ownership, parallelism or independent evidence.** Keep investigation and implementation together when they form one cohesive slice. `SYSTEM_TEMPLATE.md` explains the workflow and its runtime delegation modes; do not split merely to minimize unit size. Core code and documents may be assigned to `task:high` only with explicit user permission; the other worker tiers retain their declared capability boundaries.
 
 **Fork the context when the full background is needed.** Even if more than 1.5 million characters of pure design material fit into one context, one session should not carry the entire implementation. Forking the existing context to a subagent lets it focus on a local task while keeping intent that lives outside the files and was already aligned with the human; this is what `fork_task` adds to the original `task` ([fork-task](#fork-task)). If the main context still compacts in the end, the ctx chain forces the context tree and the task record replayed from todo into the compacted session; it restores recorded progress and does not assume that compaction preserves the original intent losslessly.
 
@@ -359,7 +359,7 @@ The second column below is what each agent's `description` says, i.e. the tier a
 
 |Name|Tier and cost in `description` (per 1M tokens, blended)|Can spawn|Use|
 |---|---|---|---|
-|`task:high`|Claude Opus 5.5, about 0.45 USD|All `task:*`, both discussants, mentor|Work that must be right the first time, or that cheaper tiers cannot settle; owns the contracts, acceptance and integration of the batch it spawns|
+|`task:high`|Claude Opus 5.5, about 0.45 USD|All `task:*`, both discussants, mentor|Work that must be right the first time, or that cheaper tiers cannot settle, and only with explicit user permission; owns the contracts, acceptance and integration of the batch it spawns|
 |`task:mid`|Opus class, about 0.3 USD|mentor|The default tier: delegated implementation, investigation, debugging and verification; also settles disagreements between cheaper tiers|
 |`task:low`|Opus class, about 0.01 USD|mentor|Cost-first work whose results can be delivered directly: bulk mechanical edits, lookups, routine checks; also validates `task:free` results|
 |`task:free`|Opus class, zero cost, almost unlimited concurrency|mentor|Work whose results need no independent validation: finding candidate code or documents, listing options, exploratory probes|

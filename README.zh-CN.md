@@ -97,7 +97,7 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 
 **把可丢弃的工作放进 subagent context。** subagent 的 context 是可抛弃的工作分支；重要结论和证据通过 subagent IRC 返回，由主 agent 整理并写回自己的 context。这样丢弃的是执行过程，不是任务意图。
 
-**为独立 ownership、并行或独立证据而委派。** 调查和实现属于同一连贯切片时保持在一起。`SYSTEM_TEMPLATE.md` 解释工作流及运行时委派模式，不为追求最小粒度而拆分。核心代码和文档可交给 `task:high`，其他 worker tier 保留各自声明的能力边界。
+**为独立 ownership、并行或独立证据而委派。** 调查和实现属于同一连贯切片时保持在一起。`SYSTEM_TEMPLATE.md` 解释工作流及运行时委派模式，不为追求最小粒度而拆分。核心代码和文档在用户明确允许时可交给 `task:high`，其他 worker tier 保留各自声明的能力边界。
 
 **需要完整背景时 fork context。** 即使超过 150 万字的纯设计材料能够一次装入 context，也不适合让一个会话承担全部实现。把现有 context fork 给 subagent，可以让它聚焦局部任务，同时保留文件之外、已经与人类对齐的意图；这正是 `fork_task` 对原有 `task` 的补充（[fork-task](#fork-task)）。如果主 context 最终仍发生 compact，ctx 联合链路会把 context 树和由 todo 重放得到的任务记录强制注入压缩后的会话；它恢复的是已记录的进度，不是假定压缩能够无损保留原始意图。
 
@@ -360,7 +360,7 @@ subagent 分三类：`task:*` 执行，`discuss:*` 只读讨论，`mentor:defaul
 
 |名称|`description` 里的档次与成本（每 1M token，综合）|可派发|用途|
 |---|---|---|---|
-|`task:high`|Claude Opus 5.5，约 0.45 USD|全部 `task:*`、两个 discussant、mentor|必须一次做对，或更便宜的档次裁决不了的工作；负责所派子批次的契约、验收与集成|
+|`task:high`|Claude Opus 5.5，约 0.45 USD|全部 `task:*`、两个 discussant、mentor|必须一次做对，或更便宜的档次裁决不了的工作，且仅在用户明确允许时使用；负责所派子批次的契约、验收与集成|
 |`task:mid`|Opus 级，约 0.3 USD|mentor|默认档次：委派的实现、调查、调试和验证；也裁决便宜档次之间的冲突|
 |`task:low`|Opus 级，约 0.01 USD|mentor|成本优先、结果可以直接交付的工作：批量机械改动、查询、例行检查；也负责验证 `task:free` 的结果|
 |`task:free`|Opus 级，零成本，并发几乎不限|mentor|结果不需要独立验证的工作：找候选代码或文档、列方案、探索性试验|
