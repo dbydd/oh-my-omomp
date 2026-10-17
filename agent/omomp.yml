@@ -21,6 +21,8 @@ tool-policy-nag:
     minPrograms: 3
 task-completion-judge:
   model: openai-codex/gpt-6-sol
+task-split-check:
+  model: openai-codex/gpt-6-1-sol
 system-prompt-replace:
   replacements:
     - literal: "Use `read` for static web; browser only if needed."

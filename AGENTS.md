@@ -478,6 +478,7 @@ exercised in a real omp session.
   not parse leaves the lane silent with one warning per process. Repo-managed
   template (`INTENT-*.md`), synced both ways.
 - `agent/omomp.yml` section `task-completion-judge` — the judge model of `task-completion-judge` (`{"model": "<provider/id, bare id or role alias>"}`, no `:effort` suffix; the judge always runs at low effort). The project's `.omp/omomp.*` copy wins over the agent-dir copy; re-read at every judgment, so edits apply to the next judged `yield` without restart. Managed in both directions with the rest of `omomp.yml` (field-level diff and edit; validate with `Bun.YAML.parse`).
+- `agent/omomp.yml` section `task-split-check` — the model of `task-split-check` (`{"model": "<provider/id, bare id or role alias>"}`, no `:effort` suffix; the request always runs at medium effort). The project's `.omp/omomp.*` copy wins over the agent-dir copy; re-read at every request, so edits apply without restart. Managed in both directions with the rest of `omomp.yml` (field-level diff and edit; validate with `Bun.YAML.parse`).
 - `pi/agent/pi-bansos-relay-state.json` — state file of the `pi-bansos` plugin
   (`{enabled, url, relays, statusBar}`), which the plugin reads from and writes
   to `~/.pi/agent/pi-bansos-relay-state.json` via `/bansos`. The status bar

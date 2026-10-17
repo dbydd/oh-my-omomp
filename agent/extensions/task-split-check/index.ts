@@ -1,5 +1,5 @@
 /**
- * Registers `tool_call`; reads/writes no files. Split checks are main-only;
+ * Registers `tool_call`; reads the model from the `task-split-check` section of omomp.* and writes no files. Split checks are main-only;
  * report-limit checks apply to main and sub sessions. Unexpected hook errors
  * are logged as warnings and let the call run.
  *
@@ -22,6 +22,7 @@
  *   again.
  *
  * Memory is per process, keyed by check + sha256 of the item prompt.
+ * The model is the `model` of the `task-split-check` section of omomp.*, re-read at every request; without a valid section every request fails open.
  * Every failure (model missing, provider error, unparseable answer, deadline)
  * lets the item pass for the affected checks. The deadline stays under the
  * harness's 30 s `tool_call` handler timeout, which would otherwise block the
@@ -33,8 +34,13 @@ import { THINKING_EFFORTS } from "@oh-my-pi/pi-catalog";
 import { type ExtensionAPI, type ExtensionContext, z } from "@oh-my-pi/pi-coding-agent";
 import { errorText } from "../_shared/errors.ts";
 import { textOf } from "../_shared/messages.ts";
+import { defineOmompSection, loadOmompSection } from "../_shared/omomp.ts";
 
-const MODEL = "openai-codex/gpt-6-sol";
+const configSchema = z.object({
+	/** Fast model (`provider/id`, bare id, or role alias) answering the dispatch questions. No `:effort` suffix; reasoning is always medium. */
+	model: z.string().min(1),
+});
+const omompSection = defineOmompSection(import.meta.dir, configSchema);
 const EFFORT = THINKING_EFFORTS.find((effort) => effort === "medium");
 if (EFFORT === undefined) throw new Error("task-split-check: host does not recognize medium reasoning effort");
 const DEADLINE_MS = 25_000;
@@ -179,8 +185,13 @@ type ItemVerdicts = { readonly label: string; readonly verdicts: ReadonlyMap<Che
 
 export default function taskSplitCheck(pi: ExtensionAPI): void {
 	const ask = async (ctx: ExtensionContext, systemPrompt: string, prompt: string, signal: AbortSignal): Promise<Reply> => {
-		const model = ctx.models.resolve(MODEL);
-		if (model === undefined) return { kind: "failed", why: `model unavailable: ${MODEL}` };
+		const config = loadOmompSection(omompSection, ctx.cwd);
+		if (config.kind === "none") {
+			const skipped = config.skipped.map(({ path, reason }) => `${path}: ${reason}`).join("; ");
+			return { kind: "failed", why: `no valid task-split-check section in omomp.*: ${skipped || "not found"}` };
+		}
+		const model = ctx.models.resolve(config.value.model);
+		if (model === undefined) return { kind: "failed", why: `model unavailable: ${config.value.model}` };
 		try {
 			const reply = await completeSimple(
 				model,

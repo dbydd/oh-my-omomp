@@ -29,7 +29,7 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 |`agent/extensions/user-prompt-inject/PROMPT-INJECT-*.md`|[user-prompt-inject](#user-prompt-inject) 的模板：把用户原话注入 mentor 和 discussant|`~/.omp/agent/extensions/user-prompt-inject/`|
 |`agent/extensions/turn-judge/TURN-JUDGE-*.md`|[turn-judge](#turn-judge) 的判定配置：每轮结束后通过 OMP 的 JUDGE 角色判断一个问题；仓库不带文件，只判本机自己写的|`~/.omp/agent/extensions/turn-judge/`|
 |`agent/agents/`|subagent 定义；`README.txt` 记录编写陷阱|`~/.omp/agent/agents/`|
-|`agent/extensions/`|本地扩展，每个扩展一个目录：`<名字>/index.ts` 是入口，同目录的其他 `.ts` 是它自己的模块，它自己的模板也放在这里（配置是 `omomp.yml` 的段）；`_shared/` 是多个扩展共用的代码。扩展配置是 `omomp.yml` 的段，不在这里：`lang-nag`、`input-polish`、`tool-policy-nag`、`task-completion-judge`、`system-prompt-replace` 随更新器同步；`doc-polish` 属于本机，只作示例，见 [`/update-omp`](#update-omp仓库--本机)|`~/.omp/agent/extensions/`|
+|`agent/extensions/`|本地扩展，每个扩展一个目录：`<名字>/index.ts` 是入口，同目录的其他 `.ts` 是它自己的模块，它自己的模板也放在这里（配置是 `omomp.yml` 的段）；`_shared/` 是多个扩展共用的代码。扩展配置是 `omomp.yml` 的段，不在这里：`lang-nag`、`input-polish`、`tool-policy-nag`、`task-completion-judge`、`task-split-check`、`system-prompt-replace` 随更新器同步；`doc-polish` 属于本机，只作示例，见 [`/update-omp`](#update-omp仓库--本机)|`~/.omp/agent/extensions/`|
 |`agent/extensions-last/`|要在其他按路径加载的扩展之后执行的扩展，由 `config.yml` 的 `extensions` 末项显式加载；目前只有 [system-prompt-replace](#system-prompt-replace)，替换规则在 `omomp.yml` 的 `system-prompt-replace` 段里。那里的 `README.md` 和 `README.zh-CN.md` 只给仓库看，不同步|`~/.omp/agent/extensions-last/`|
 |`pi/agent/pi-bansos-relay-state.json`|`pi-bansos` 插件状态|`~/.pi/agent/`|
 |`install-plugins.sh`、`plugin-audit.sh`|插件安装、插件漂移检查|—|
@@ -899,9 +899,9 @@ model: "(gpt-5|o3)"
 
 - `split` 看主题，不看文件数：同一个修改落到很多文件、同一主题写几份文档都算一个主题；几块互不依赖的调查、不相干的功能或 bug 放进同一项才算多个。拦截时要求按主题拆开，确认是单一主题的可以原样重派。
 - `report-limit` 指字数、字符、句、段、行、token、条目上限或“简短汇报”；给要写进仓库或文件的交付物定长度不算。拦截时要求删掉限制，长报告让 worker 写到文件（如 `local://<name>.md`）并回报路径。
-- **请求**：同一项需要判断的检查合并成一次 `openai-codex/gpt-6-sol`（推理强度 medium）请求，模型只看 prompt，逐行回答 `<检查名>: true|false`。所有项并发，共用一个 25 秒的中止信号（低于宿主 30 秒的 `tool_call` 超时）。
+- **请求**：同一项需要判断的检查合并成一次请求，发给 `omomp.yml` 的 `task-split-check` 段里 `model` 指定的模型（仓库里是 `openai-codex/gpt-6-1-sol`，每次请求时重读；推理强度 medium）。模型只看 prompt，逐行回答 `<检查名>: true|false`。所有项并发，共用一个 25 秒的中止信号（低于宿主 30 秒的 `tool_call` 超时）。
 - **缓存**：按“检查 + prompt 的 sha256”记在进程内存里。`split` 记所有有结论的；`report-limit` 只记判为无限制的。判断失败不记。
-- **失败处理**：模型不可用、请求失败或超时，这次请求里的检查都放行；某个回答解析不了，只放行那一项检查。
+- **失败处理**：模型不可用、`task-split-check` 段缺失或无效、请求失败或超时，这次请求里的检查都放行；某个回答解析不了，只放行那一项检查。
 - 做了判定的调用写一条 `task-split-check verdicts` info 日志。
 
 #### task-completion-judge
