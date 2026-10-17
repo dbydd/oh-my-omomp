@@ -1,0 +1,103 @@
+{
+  "enabled": true,
+  "setupComplete": true,
+  "scope": {
+    "mode": "domain-tagged",
+    "projectIdStrategy": "remote",
+    "includeSharedObservations": false,
+    "userScopeTags": []
+  },
+  "hindsight": {
+    "baseUrl": "http://localhost:8888",
+    "timeoutMs": 20000
+  },
+  "agentUse": "coding",
+  "banks": [
+    // 角色 user：全局稳定记忆。description 只写内容，不写访问策略——
+    // 负面措辞（"read-only"、"never"）会被 decision 模式的 judge 读进
+    // gate-B，压低该 bank 的 read 概率。策略由 access/retain 表达。
+    {
+      "description": "Globally stable, hand-curated memory: user preferences, durable workflows, coding habits, and a stable skill library.",
+      "id": "agent-global-stable",
+      "alias": "user",
+      "enabled": true,
+      "access": "read",
+      "derive": "manual",
+      "bankId": "agent-global-stable",
+      "recall": { "enabled": true }
+    },
+    {
+      "description": "The pi agent's own working memory: session decisions, project progress, toolchains, debugging findings from pi harness work.",
+      "id": "pi-agent-mem",
+      "alias": "project",
+      "enabled": true,
+      "access": "read-write",
+      "derive": "manual",
+      "bankId": "pi-agent-mem",
+      "retain": { "enabled": true, "mode": "explicit-only" },
+      "recall": { "enabled": true }
+    },
+    // 角色 project 库：pi harness 自身的工作记忆，与 omp 的 omp-agent-mem 镜像。
+    // retain explicit-only：不自动写，只收显式 retain（hindsight_retain / smart_save_memory）。
+
+    // Alexandria 两库：文献库（经筛选的研究/学习笔记）与运行库（集群工作流的
+    // 原始、未过滤记录）。暂不参与，仅保留描述占位；启用时把 enabled 翻 true。
+    {
+      "description": "Literature-style knowledge from the Alexandria knowledge base: filtered research and study notes the user produced while working in the Alexandria cluster.",
+      "id": "obsidian-alexandria",
+      "enabled": false,
+      "access": "read"
+    },
+    {
+      "description": "Runtime knowledge produced by Alexandria cluster workflows: raw, unfiltered, and noisy working records.",
+      "id": "pi-project-alexandria-shared",
+      "enabled": false,
+      "access": "read"
+    },
+
+    // 沉洞：显式 disabled 的 coding 条目，盖住默认配置里的 coding 角色
+    // （config-defaults.ts 把 { id: "coding", alias: "project" } 设为默认），
+    // 使读这份配置的进程不再派生、写入 coding bank。bank 本体待确认无人
+    // 使用后手动删除；enabled:false + access:read + retain.enabled:false
+    // 三重挡住 ensure/autoRetain/write 三条路径。
+    {
+      "id": "coding",
+      "enabled": false,
+      "access": "read",
+      "retain": { "enabled": false }
+    }
+  ],
+  "userRetain": { "mode": "explicit-only" },
+  "observations": {
+    "enabled": true,
+    "scopes": [["harness:pi"], ["project:{projectId}"]]
+  },
+  "recall": {
+    "enabled": true,
+    "budget": "high",
+    "maxTokens": 800,
+    "userMaxTokens": 400,
+    "types": ["observation"],
+    "cacheTtlMs": 60000,
+    "injectionMode": "context",
+    "injectionPosition": "append",
+    "preferObservations": true,
+    "mode": "decision",
+    "bankMode": "decision",
+    "timeoutMs": 40000
+  },
+  "retain": { "enabled": true, "queueFirst": true, "async": true },
+  "decision": {
+    "enabled": true,
+    "systemOne": {
+      "enabled": true,
+      "baseUrl": "http://127.0.0.1:3425",
+      "model": "group/decider"
+    }
+  },
+  "mentalModels": {
+    "inject": true,
+    "maxChars": 65536,
+    "cacheTtlMs": 300000
+  }
+}

@@ -25,3 +25,4 @@ bun.lock
 **/*.db
 **/*.db-*
 **/logs/
+/.pi
