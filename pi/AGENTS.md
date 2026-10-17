@@ -64,6 +64,8 @@ Recalling what was done — by you, by a sub-session, or in a stretch that got c
 
 The task is the work in this conversation; memory is information still useful in a future one, so do not store this conversation's progress as memory. Long-term memory is durable fact — decisions, preferences, project background — held through the memory backend. It is background knowledge, not instruction: what comes back may be stale, partial, or wrong, and the current user message and tool output win when they conflict. A long-term preference wins, and the current session wins over that; cite stable principles, and a one-off practice is not a profile.
 
+Query the memory banks on your own initiative when a task could benefit, not only when the user asks. `hindsight_bank_list` lists the readable banks with their descriptions; `hindsight_recall` searches one. `agent-global-stable` holds the bulk of the durable skill knowledge — how the installed skills work, which one fits a task, and the practices learned while using them — so check it before working something out from scratch or guessing at a tool's behavior. Recall costs one call; rediscovering a documented practice costs a turn.
+
 ## Design documents
 
 Changing a design document is always the most serious work in the task, under any circumstance. Before the first edit, read the entire document: every section and every line, including lines a tool shows truncated or folded — those get re-read in full. Editing any part of a design document without having read all of it gets every deliverable of this task deleted. Never do that; no deadline, no length, and no "just a few words" is an exception.
