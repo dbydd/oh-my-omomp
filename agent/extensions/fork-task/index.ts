@@ -1,10 +1,11 @@
 // ============================================================================
 // fork_task — native `task` subagents that start from a copy of the caller's
-// conversation.
+// conversation, or of another agent's named by an item's `from`.
 //
 // Registers fork_task plus before_subagent_spawn and session_shutdown hooks in
-// main and sub sessions. Reads the caller's persisted session; writes temporary
-// JSONL under the OS temp directory and moves it into the caller's artifact store.
+// main and sub sessions. Reads the source agent's persisted session; writes
+// temporary JSONL under the OS temp directory and moves it into the caller's
+// artifact store.
 // Staging failures are tool errors; spawn preparation failures block the child
 // and warn, while shutdown cleanup failures warn without rejecting the hook.
 //
@@ -14,20 +15,23 @@
 // idle/park/revive lifecycle, isolation and patch merge. Only the child's
 // starting transcript differs:
 //
-//   1. At call time the caller's persisted conversation is forked into a
-//      staging JSONL (inherited cost zeroed, a dangling in-flight tool call
-//      paired with a synthetic aborted result, the parent's todo list cleared),
+//   1. At call time the source's persisted conversation (the caller's, or the
+//      registered agent `from` names, resolved like `history://<id>`) is forked
+//      into a staging JSONL (inherited cost zeroed, a dangling in-flight tool call
+//      paired with a synthetic aborted result, the source's todo list cleared),
 //      followed by a fork notice. `shake: true` then runs the same
 //      `session.shake("elide")` that `/shake` runs, writing its recovery
-//      artifact into the parent's artifact store — the store the child adopts.
-//   2. Parent runtime state is removed so the executor, not the copy, decides
+//      artifact into the parent's artifact store — the store the whole agent
+//      tree shares and the child adopts.
+//   2. Source runtime state is removed so the executor, not the copy, decides
 //      the child's contract: `session_init` (a copied init makes the persisted
 //      roster treat the file as another live generation and fails the spawn),
 //      model / thinking / service-tier changes, and the shake helper's own
 //      bookkeeping. Removed entries' children are re-parented.
-//   3. The header cwd stays the parent cwd for shared children (revival reopens
-//      the file by path and reads its cwd from there); isolated children get a
-//      blank cwd so `SessionManager.open` binds them to the worktree.
+//   3. The header cwd is the parent's (the caller's) cwd for shared children,
+//      whatever the source's cwd was (revival reopens the file by path and reads
+//      its cwd from there); isolated children get a blank cwd so
+//      `SessionManager.open` binds them to the worktree.
 //   4. `before_subagent_spawn` fires after the task tool pre-allocates the
 //      child id (async dispatch) and before the executor opens
 //      `<artifactsDir>/<id>.jsonl`; the staging file is moved there so the
@@ -51,11 +55,13 @@ import {
 	z,
 } from "@oh-my-pi/pi-coding-agent";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
+import { ensurePersistedRoster } from "@oh-my-pi/pi-coding-agent/registry/persisted-agents";
 import { cfgAsyncEnabled } from "@oh-my-pi/pi-coding-agent/tools/settings";
 import { USER_TODO_EDIT_CUSTOM_TYPE } from "@oh-my-pi/pi-coding-agent/tools/todo";
 import { errorText } from "../_shared/errors.ts";
 
 const itemSchema = z.object({
+	from: z.string().optional(),
 	name: z.string().optional(),
 	agent: z.string().optional(),
 	task: z.string(),
@@ -99,7 +105,7 @@ const RUNTIME_STATE_TYPES: Record<string, true> = {
 
 const SESSION_EXIT_CUSTOM_TYPE = "session_exit";
 
-const DESCRIPTION = `Spawn subagents exactly like \`task\` — same batch shape, agent types, models, lifecycle, result delivery, \`write agent://\` follow-up, \`agent://\`/\`history://\` — except each child starts with a copy of THIS conversation up to this call, followed by its assignment.
+const DESCRIPTION = `Spawn subagents exactly like \`task\` — same batch shape, agent types, models, lifecycle, result delivery, \`write agent://\` follow-up, \`agent://\`/\`history://\` — except each child starts with a copy of THIS conversation up to this call (or, with \`from\`, of another agent's conversation), followed by its assignment.
 
 Prefer it over \`task\` for complex work: multi-step implementation, debugging, or design follow-through whose assignment depends on what this conversation already established (requirements, decisions, findings, file contents read so far), where restating that in \`context\`/\`task\` would be long or lossy. Use \`task\` when independence matters — second opinions, reviews, acceptance verifiers — or the needed background is short. A forked child inherits this conversation's reasoning and anchors on it; a fresh \`task\` child does not, so hand it the code, artifacts, and question, not the conclusion.
 
@@ -110,22 +116,77 @@ Recommended per item: keep \`isolated\` at its default \`true\` and pass \`shake
 - The child runs its own agent's system prompt and model; it sees the conversation as background and its own assignment as the task. It does not inherit this session's todo list.
 - Verification is mandatory for forked workers: the fork notice explicitly requires scoped build/lint/test and real runtime checks before handoff, overriding ordinary task's no-verification default. The parent still owns final acceptance and may verify itself or assign an independent verifier.
 - Each item's \`name\` gets a short unique suffix; address the child by the id reported in the result.
+- \`from\`: an agent id as in \`agent://<id>\` (running, idle or parked) whose conversation the child copies instead of this one; omit it to fork this conversation. The child is still this session's child: its result, follow-up, and patch come back here, and its workspace derives from this session's checkout, not the source's, so edits the source made in an isolated workspace of its own are not in it unless already merged here. A running source is copied as persisted so far.
 
 \`context\` and each item's \`task\` follow the same rules as \`task\`. The conversation copy is background, so the assignment is a directive — what to do, what is in and out, what siblings handle — not a restatement of it, and still states the target, change, and acceptance.`;
 
-const forkNotice = (parentCwd: string, isolated: boolean): string =>
-	[
+/**
+ * Where the forked transcript comes from. `caller` is the session calling
+ * fork_task; `agent` is another registered agent named by `from`, whose
+ * workspace (`cwd`, unknown when neither its live session nor its header
+ * records one) may differ from the parent's.
+ */
+type ForkSource =
+	| { readonly kind: "caller"; readonly file: string; readonly cwd: string }
+	| { readonly kind: "agent"; readonly id: string; readonly file: string; readonly cwd: string | undefined };
+
+function workspaceNotice(source: ForkSource, parentCwd: string, isolated: boolean): string[] {
+	switch (source.kind) {
+		case "caller":
+			return [
+				isolated
+					? `- You run in an isolated copy of the workspace. Paths under \`${parentCwd}\` in the conversation name the parent's checkout: use the same repository-relative paths inside your own working directory, and NEVER read or write under \`${parentCwd}\`.`
+					: "- You share the parent's working directory; files may change between your reads.",
+			];
+		case "agent": {
+			const id = `\`${source.id}\``;
+			const foreign = [...new Set([source.cwd, isolated ? parentCwd : undefined])].filter((p): p is string => p !== undefined);
+			const lines = [
+				isolated
+					? "- You run in an isolated copy of the parent's workspace."
+					: `- You share the parent's working directory \`${parentCwd}\`; files may change between your reads.`,
+				`- Your workspace derives from the parent's checkout, not from ${id}'s: changes ${id} made in a workspace of its own are not in yours unless they reached the parent's checkout before this fork.`,
+			];
+			const named = foreign.filter((p) => isolated || p !== parentCwd);
+			if (named.length > 0) {
+				const list = named.map((p) => `\`${p}\``).join(" and ");
+				lines.push(
+					`- Paths under ${list} in the conversation name checkouts other than yours: use the same repository-relative paths inside your own working directory, and NEVER read or write under ${list}.`,
+				);
+			}
+			if (source.cwd === undefined) {
+				lines.push(
+					`- Other absolute paths in the conversation may name ${id}'s workspace: map them to repository-relative paths in yours.`,
+				);
+			}
+			return lines;
+		}
+		default: {
+			const unreachable: never = source;
+			return unreachable;
+		}
+	}
+}
+
+const forkNotice = (source: ForkSource, parentCwd: string, isolated: boolean): string => {
+	const origin =
+		source.kind === "caller"
+			? "Above: the conversation of the parent agent that spawned you, copied as background."
+			: `Above: the conversation of agent \`${source.id}\`, copied as background. \`${source.id}\` is not your parent: the agent that spawned you receives your result.`;
+	const owner = source.kind === "caller" ? "the parent" : `\`${source.id}\``;
+	return [
 		`<system-notice cause="fork_task">`,
-		"Above: the conversation of the parent agent that spawned you, copied as background. It ran under its own role, tools, and rules; yours are the ones in your system prompt.",
+		`${origin} It ran under its own role, tools, and rules; yours are the ones in your system prompt.`,
 		"- Use it only for the facts, decisions, and constraints it established.",
-		"- Your job is the assignment that follows this notice, nothing else. NEVER continue, resume, or complete other work from the conversation; its todo lists and plans belong to the parent.",
+		`- Your job is the assignment that follows this notice, nothing else. NEVER continue, resume, or complete other work from the conversation; its todo lists and plans belong to ${owner}.`,
 		"- Verification is explicitly required for this fork_task assignment: run the relevant scoped build, lint, tests, and real runtime smoke path before handoff. This overrides ordinary task's default to leave verification to the parent. Observe the changed behavior and report commands, outputs, and limitations; do not claim completion while required runtime verification is missing. Read-only roles remain read-only: report evidence from their permitted inspection instead of running execution tools.",
-		"- The parent keeps working concurrently.",
-		isolated
-			? `- You run in an isolated copy of the workspace. Paths under \`${parentCwd}\` in the conversation name the parent's checkout: use the same repository-relative paths inside your own working directory, and NEVER read or write under \`${parentCwd}\`.`
-			: "- You share the parent's working directory; files may change between your reads.",
+		source.kind === "caller"
+			? "- The parent keeps working concurrently."
+			: `- The parent and \`${source.id}\` may keep working concurrently.`,
+		...workspaceNotice(source, parentCwd, isolated),
 		"</system-notice>",
 	].join("\n");
+};
 
 type PendingFork = {
 	/** Exact requested name; the allocated id's last dot-segment. */
@@ -243,7 +304,7 @@ async function moveFile(from: string, to: string): Promise<void> {
 async function stageFork(
 	ctx: ExtensionContext,
 	parent: AgentSession,
-	parentFile: string,
+	source: ForkSource,
 	shake: boolean,
 	isolated: boolean,
 ): Promise<StagedFork> {
@@ -252,7 +313,7 @@ async function stageFork(
 	const staging = path.join(stagingDir, "fork.jsonl");
 	await fs.mkdir(stagingDir, { recursive: true });
 	try {
-		const manager = await SessionManager.forkFrom(parentFile, parentCwd, stagingDir, undefined, {
+		const manager = await SessionManager.forkFrom(source.file, parentCwd, stagingDir, undefined, {
 			copyArtifacts: false,
 			suppressBreadcrumb: true,
 			sessionFile: staging,
@@ -265,7 +326,7 @@ async function stageFork(
 			manager.appendCustomEntry(USER_TODO_EDIT_CUSTOM_TYPE, { phases: [] });
 			manager.appendMessage({
 				role: "developer",
-				content: forkNotice(parentCwd, isolated),
+				content: forkNotice(source, parentCwd, isolated),
 				attribution: "agent",
 				timestamp: Date.now(),
 			});
@@ -310,6 +371,53 @@ async function stageFork(
 		await fs.rm(stagingDir, { recursive: true, force: true });
 		throw error;
 	}
+}
+
+type SourceResolution = { readonly kind: "error"; readonly message: string } | ForkSource;
+
+/** Session-header cwd of a transcript file, when it records a non-empty one. */
+async function headerCwd(file: string): Promise<string | undefined> {
+	for (const line of (await fs.readFile(file, "utf8")).split("\n")) {
+		if (line.length === 0) continue;
+		let record: unknown;
+		try {
+			record = JSON.parse(line);
+		} catch {
+			// A malformed line is skipped, as the session loader does.
+			continue;
+		}
+		const header = sessionHeaderSchema.safeParse(record);
+		if (header.success) return header.data.cwd || undefined;
+	}
+	return undefined;
+}
+
+/**
+ * Resolve `from` to the transcript to fork: omitted (or naming the caller)
+ * forks the caller; otherwise a registered non-advisor agent, matched like
+ * `history://<id>` (exact, then case-insensitive) after the caller root's
+ * persisted roster is loaded, so parked agents of a resumed session resolve.
+ */
+async function resolveSource(from: string | undefined, parent: AgentSession, parentFile: string): Promise<SourceResolution> {
+	const caller: ForkSource = { kind: "caller", file: parentFile, cwd: parent.sessionManager.getCwd() };
+	const requested = from?.trim();
+	if (!requested) return caller;
+	const registry = AgentRegistry.global();
+	await ensurePersistedRoster(registry, parentFile);
+	let ref = registry.get(requested);
+	if (ref?.kind === "advisor") ref = undefined;
+	const lower = requested.toLowerCase();
+	ref ??= registry.list().find((candidate) => candidate.kind !== "advisor" && candidate.id.toLowerCase() === lower);
+	if (!ref) return { kind: "error", message: `no agent \`${requested}\` is registered; \`from\` takes an id as in \`agent://<id>\`.` };
+	if (ref.session === parent || ref.sessionFile === parentFile) return caller;
+	if (ref.session) {
+		await ref.session.sessionManager.ensureOnDisk();
+		await ref.session.sessionManager.flush();
+	}
+	const file = ref.session?.sessionManager.getSessionFile() ?? ref.sessionFile;
+	if (!file) return { kind: "error", message: `agent \`${ref.id}\` has no persisted transcript to fork.` };
+	const cwd = ref.session?.sessionManager.getCwd() ?? (await headerCwd(file));
+	return { kind: "agent", id: ref.id, file, cwd };
 }
 
 export default function forkTask(pi: ExtensionAPI): void {
@@ -394,9 +502,11 @@ export default function forkTask(pi: ExtensionAPI): void {
 			const tasks: TaskItem[] = [];
 			try {
 				for (const [index, item] of params.tasks.entries()) {
+					const source = await resolveSource(item.from, parent, parentFile);
+					if (source.kind === "error") throw new Error(source.message);
 					const name = `${sanitizeName(item.name) ?? "Fork"}_${randomUUID().slice(0, 4)}`;
 					const isolated = !planMode && (item.isolated ?? true);
-					const { staging, shakeSummary } = await stageFork(ctx, parent, parentFile, item.shake === true, isolated);
+					const { staging, shakeSummary } = await stageFork(ctx, parent, source, item.shake === true, isolated);
 					const entry: PendingFork = { name, artifactsDir, staging };
 					staged.push(entry);
 					pending.push(entry);

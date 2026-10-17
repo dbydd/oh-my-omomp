@@ -887,7 +887,7 @@ No config, plugin-list entry, launcher or light-mode override is needed. `/updat
 
 #### fork-task
 
-`fork-task/` registers the `fork_task` tool. Its parameters follow `task`'s batch form (a top-level `context` plus `tasks[]`), but items have no `solutionSpace`; what it spawns is also a native `task` subagent with its own agent definition, model and tools, and Hub, `agent://`, `history://`, isolation and patch merging all follow the native path. The difference is that the subagent's initial transcript is a copy of the caller's current conversation, followed by the assignment.
+`fork-task/` registers the `fork_task` tool. Its parameters follow `task`'s batch form (a top-level `context` plus `tasks[]`), but items have no `solutionSpace`; what it spawns is also a native `task` subagent with its own agent definition, model and tools, and Hub, `agent://`, `history://`, isolation and patch merging all follow the native path. The difference is that the subagent's initial transcript is a copy of the caller's current conversation, or of the agent an item's `from` names, followed by the assignment.
 
 It suits multi-step implementation, debugging or design follow-through whose assignment depends on requirements, decisions and material already read in this conversation; use `task` when an independent view is needed or the background is short.
 
@@ -896,6 +896,7 @@ Differences from `task`:
 - `isolated` defaults to `true`; only `isolated: false` shares the directory. While the parent session is in plan mode the directory is always shared. An isolated subagent cannot be continued after it finishes.
 - Each item may set `shake: true`, which runs `session.shake("elide")` on the copy, the same as a manual `/shake`.
 - `name` gets a `_xxxx` suffix; the subagent id in the result is authoritative.
+- Each item may set `from` to an agent id (as in `agent://<id>`, matched exactly, then case-insensitively; running, idle or parked, a parked agent of a resumed session included) to copy that agent's conversation instead of the caller's. The subagent is still the caller's child: the result, follow-up and patch return to the caller, and its directory comes from the caller's checkout (shared, or an isolated copy of it), not from the source's, so changes the source made in its own isolated workspace are not visible unless already merged. A running source is copied as persisted at call time. An unknown id, an advisor transcript or an agent with no transcript fails the whole call before anything is dispatched.
 - Forked workers must verify their changed path before handoff. The route-specific developer notice makes this an explicit assignment, while ordinary `task` workers leave checks to the parent or a separately assigned verifier. Read-only roles keep their tool restrictions.
 - It needs `async.enabled: true`, otherwise it errors.
 
@@ -903,9 +904,9 @@ Differences from `task`:
 
 **Implementation**:
 
-1. Fork the caller's session into `$TMPDIR/omp-fork-task/<uuid>/`: zero inherited cost, repair interrupted tool calls, clear todo, and append a `<system-notice cause="fork_task">` defining background-only inheritance and mandatory fork-worker verification.
-2. Delete the parent session's runtime entries (`session_init`, `model_change`, `thinking_level_change`, `service_tier_change`, and the `session_exit` of shake's helper session), reattaching their children to the level above.
-3. A shared subagent keeps the parent session's cwd; an isolated subagent's cwd is cleared and bound to the worktree by the executor. Shake's artifacts are written into the parent session's artifact directory and shared by the subagents.
+1. Fork the source session (the caller's, or the one `from` names) into `$TMPDIR/omp-fork-task/<uuid>/`: zero inherited cost, repair interrupted tool calls, clear todo, and append a `<system-notice cause="fork_task">` defining background-only inheritance and mandatory fork-worker verification; with `from` the notice also names the source agent, says it is not the parent, and maps the source's workspace paths to the subagent's own directory.
+2. Delete the source session's runtime entries (`session_init`, `model_change`, `thinking_level_change`, `service_tier_change`, and the `session_exit` of shake's helper session), reattaching their children to the level above.
+3. A shared subagent gets the caller's cwd whatever the source's was; an isolated subagent's cwd is cleared and bound to the worktree by the executor. Shake's artifacts are written into the caller's artifact store, which the whole agent tree shares, so `artifact://` ids in a copied subagent transcript resolve too.
 4. When `task` dispatches asynchronously it assigns the id first and then fires `before_subagent_spawn`; here the extension moves the copy to `<parent session file without .jsonl>/<subagent id>.jsonl`, which is exactly what the executor opens. Copies that were never dispatched are cleaned up on error or at session end.
 
 This depends on OMP internals (`AgentRegistry`, child session file paths, hook order, session entry types). After every OMP upgrade, re-verify inheritance, isolation, shake and continuation in a real TUI.

@@ -8,7 +8,8 @@
  * subagent made after that point (as many as fit a fixed budget) and the
  * submitted result, and decides whether the
  * work was actually finished.
- * A `fork_task` child's transcript opens with a copy of the parent's
+ * A `fork_task` child's transcript opens with a copy of the parent's (or a
+ * `from`-named agent's)
  * conversation; everything before its own `session_init` is background, never
  * the assignment or the subagent's work.
  *

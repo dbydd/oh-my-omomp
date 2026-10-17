@@ -888,7 +888,7 @@ bun ci/reading-coverage-backtest.ts --cutoff 2026-10-15T20:09:21Z
 
 #### fork-task
 
-`fork-task/` 注册 `fork_task` 工具。参数沿用 `task` 的批量形式（顶层 `context` 加 `tasks[]`），但每项没有 `solutionSpace`；派出的也是原生 `task` 子代理：用自己的 agent 定义、模型和工具，Hub、`agent://`、`history://`、隔离与 patch 合并都走原生路径。区别在于子代理的初始 transcript 是调用方当前对话的副本，之后才是派工单。
+`fork-task/` 注册 `fork_task` 工具。参数沿用 `task` 的批量形式（顶层 `context` 加 `tasks[]`），但每项没有 `solutionSpace`；派出的也是原生 `task` 子代理：用自己的 agent 定义、模型和工具，Hub、`agent://`、`history://`、隔离与 patch 合并都走原生路径。区别在于子代理的初始 transcript 是调用方当前对话的副本（或某项 `from` 指定的 agent 的对话副本），之后才是派工单。
 
 适合派工单依赖本对话已有的需求、决定和已读内容的多步实现、调试或设计落地；需要独立视角，或背景很短时用 `task`。
 
@@ -897,6 +897,7 @@ bun ci/reading-coverage-backtest.ts --cutoff 2026-10-15T20:09:21Z
 - `isolated` 默认 `true`，写 `isolated: false` 才共享目录。父会话处于 plan mode 时一律共享。隔离的子代理结束后不能续聊。
 - 每项可选 `shake: true`，对副本执行和手动 `/shake` 相同的 `session.shake("elide")`。
 - `name` 会加 `_xxxx` 后缀，子代理 id 以结果为准。
+- 每项可设 `from` 为一个 agent id（同 `agent://<id>`，先精确匹配再忽略大小写；运行中、空闲或 parked 均可，包括恢复会话里 parked 的 agent），改为复制该 agent 的对话而不是调用方的。子代理仍是调用方的子代理：结果、续聊和 patch 回到调用方，工作目录来自调用方的 checkout（共享或其隔离副本），不是来源 agent 的，所以来源在自己隔离 workspace 里的改动，除非已合并，否则看不到。来源正在运行时，复制调用那一刻已落盘的部分。id 不存在、是 advisor transcript 或没有 transcript 时，整次调用在派发前失败。
 - fork worker 必须在 handoff 前验证改动路径；路由专属 developer notice 把它明确列为派工要求。普通 `task` worker 把检查留给父代或单独派出的验证者。只读角色仍遵守工具限制。
 - 需要 `async.enabled: true`，否则报错。
 
@@ -904,9 +905,9 @@ bun ci/reading-coverage-backtest.ts --cutoff 2026-10-15T20:09:21Z
 
 **实现**：
 
-1. 把调用方会话 fork 到 `$TMPDIR/omp-fork-task/<uuid>/`：清零继承费用，修复中断的工具调用，清空 todo，追加 `<system-notice cause="fork_task">`，明确历史只作背景并强制 fork worker 验证。
-2. 删掉父会话的运行时条目（`session_init`、`model_change`、`thinking_level_change`、`service_tier_change`、shake 辅助会话的 `session_exit`），其子条目挂到上一级。
-3. 共享子代理保留父会话的 cwd；隔离子代理的 cwd 置空，由执行器绑定到 worktree。shake 的 artifact 写进父会话的 artifact 目录，子代理共用。
+1. 把来源会话（调用方的，或 `from` 指定的）fork 到 `$TMPDIR/omp-fork-task/<uuid>/`：清零继承费用，修复中断的工具调用，清空 todo，追加 `<system-notice cause="fork_task">`，明确历史只作背景并强制 fork worker 验证；用了 `from` 时，notice 还会写明来源 agent、说明它不是父代，并把来源 workspace 的路径映射到子代理自己的目录。
+2. 删掉来源会话的运行时条目（`session_init`、`model_change`、`thinking_level_change`、`service_tier_change`、shake 辅助会话的 `session_exit`），其子条目挂到上一级。
+3. 共享子代理用调用方的 cwd，不论来源的 cwd 是什么；隔离子代理的 cwd 置空，由执行器绑定到 worktree。shake 的 artifact 写进调用方的 artifact 存储；整棵 agent 树共用这一存储，所以复制来的 subagent transcript 里的 `artifact://` id 同样能解析。
 4. `task` 异步派发时先分配 id，再触发 `before_subagent_spawn`；扩展在这里把副本移到 `<父会话文件去掉 .jsonl>/<子代理 id>.jsonl`，执行器打开的就是它。没派出去的副本在出错或会话结束时清理。
 
 这依赖 OMP 的内部实现（`AgentRegistry`、子会话文件路径、钩子顺序、会话条目类型）。每次升级 OMP 后，都要在真实 TUI 里重新验证继承、隔离、shake 和续聊。
