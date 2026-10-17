@@ -10,6 +10,5 @@ disabledExtensions:
   - extension-module:turn-judge
   - extension-module:user-prompt-inject
   - extension-module:watchdog-agent
-  - extension-module:wt-tool
 task:
   eager: "default"
