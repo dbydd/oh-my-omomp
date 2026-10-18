@@ -26,6 +26,7 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 |`agent/extensions/user-prompt-inject/PROMPT-INJECT-*.md`|[user-prompt-inject](#user-prompt-inject) 的模板：把用户原话注入 mentor 和 discussant|`~/.omp/agent/extensions/user-prompt-inject/`|
 |`agent/extensions/turn-judge/TURN-JUDGE-*.md`|[turn-judge](#turn-judge) 的判定配置：每轮结束后通过 OMP 的 JUDGE 角色判断一个问题|`~/.omp/agent/extensions/turn-judge/`|
 |`agent/agents/`|subagent 定义；`README.txt` 记录编写陷阱|`~/.omp/agent/agents/`|
+|`agent/skills/`|可移植的 OMP skill，每个 skill 一个目录、根上是 `SKILL.md`；目前有 [computer-use-decider](#computer-use-decider)|`~/.omp/agent/skills/`|
 |`agent/extensions/`|本地扩展，每个扩展一个目录：`<名字>/index.ts` 是入口，同目录的其他 `.ts` 是它自己的模块，它自己的配置和模板也放在这里；`_shared/` 是多个扩展共用的代码。扩展配置 `lang-nag/lang-nag.json`、`input-polish/input-polish.json`、`tool-policy-nag/tool-policy-nag.json` 随更新器同步；`doc-polish/doc-polish.json` 属于本机，只作示例，见 [`/update-omp`](#update-omp仓库--本机)|`~/.omp/agent/extensions/`|
 |`agent/extensions-last/`|要在其他按路径加载的扩展之后执行的扩展，由 `config.yml` 的 `extensions` 末项显式加载；目前只有 [system-prompt-replace](#system-prompt-replace)，替换规则 `system-prompt-replace.json` 在它的目录里。那里的 `README.md` 和 `README.zh-CN.md` 只给仓库看，不同步|`~/.omp/agent/extensions-last/`|
 |`pi/agent/pi-bansos-relay-state.json`|`pi-bansos` 插件状态|`~/.pi/agent/`|
@@ -43,9 +44,10 @@ Oh My Pi（OMP）配置中可以审查、可以迁移的部分，为重型编程
 1. 执行 [`/update-omp`](#update-omp仓库--本机)：把配置写进本机（包括 [omp-config-autoupdate](#omp-config-autoupdate) 扩展和它目录里的更新器 `omp-config-update.ts`），安装 `omp-light`，补装缺少的插件。
 2. 要在 OMP 里用 Claude Code 的 skills、rules、commands 等时，在本机 `~/.omp/agent/config.yml` 的 `extensions` 开头加一项 `~/.claude`。OMP 把它当扩展包根目录，加载其中的 `skills/`、`rules/`、`commands/`、`hooks/` 等。这一项属于本机：更新器保留，`/sync-omp-config` 不写回仓库，`omp-light` 也加载它，见[两个方向共同的规则](#两个方向共同的规则)。没有 `~/.claude` 的机器不要加，否则每次启动都报加载失败。
 3. 重启 OMP。追加提示词、扩展和插件都在启动时加载。
-4. 需要每次启动都从 GitHub 默认分支[自动更新](#启动时自动更新)时，执行 `/omp-config-autoupdate on`（默认关闭），从下次启动起生效；之后就不用再手动执行 `/update-omp`。
-5. 按[迁移后检查](#迁移后检查)确认结果。
-6. 需要沿用旧机器的供应商登录时，在旧机器上执行 [`/migrate-omp-keys <新机器>`](#凭据迁移migrate-omp-keys-target)。
+4. 用 `cp -a agent/skills/<name> ~/.omp/agent/skills/` 拷贝可移植 skill，从下一次会话起生效。
+5. 需要每次启动都从 GitHub 默认分支[自动更新](#启动时自动更新)时，执行 `/omp-config-autoupdate on`（默认关闭），从下次启动起生效；之后就不用再手动执行 `/update-omp`。
+6. 按[迁移后检查](#迁移后检查)确认结果。
+7. 需要沿用旧机器的供应商登录时，在旧机器上执行 [`/migrate-omp-keys <新机器>`](#凭据迁移migrate-omp-keys-target)。
 
 **本机改了配置，要收回仓库：** 先执行 `/sync-omp-config check` 查看差异，再执行 [`/sync-omp-config`](#sync-omp-config本机--仓库) 写入仓库，并提交、推送。自动更新开着时，默认分支一有新提交，下次启动就会用仓库版本覆盖本机的托管项，没收回仓库的改动会丢失。
 
@@ -380,6 +382,22 @@ harness 会把 `APPEND_SYSTEM.md` 和每个 agent 的 `description` 都注入主
 ### 内置的 `task` 和 `sonic`
 
 `task` 和 `sonic` 是 OMP 内置 subagent，不在 `agent/agents/` 里，并且列在 `task.disabledAgents` 中。Vibe 模式的第一层派发固定用它们，所以 `config.yml` 只为这个场景保留它们的模型覆盖，常规任务不用。
+
+## Skills
+
+`agent/skills/` 存放可移植的 OMP skill；每个目录一个 skill，根上是 `SKILL.md`。把目录拷进 `~/.omp/agent/skills/` 即安装，下一次会话被 skill 发现机制读取。这里的 skill 在主会话和 subagent 里都可用，都不读写配置文件。
+
+### computer-use-decider
+
+`computer-use-decider` 为重复做同类控件选择的浏览器和桌面操作提速。agent 保留目标、要输入的文字、执行与核验；通过 OMP 的 JUDGE 路由做一次决策调用，每步只选一个已观察到的动作：从 `browser` 的 `observe()` 或 `computer` 的 AX 树构造候选，让决策模型在一次调用里同时选出动作和目标，用现有元素句柄执行，再重新观察。置信度低、选择 `inspect`、或调用失败时，该步交回 agent。
+
+skill 正文写明适用场景、置信度阈值，以及针对页面变化和目标失效的防护规则。随附的 `scripts/decider.js` 负责构造候选和发起那次决策调用；它自己不发任何输入，也不打开任何东西。
+
+|内容|位置|
+|---|---|
+|Skill 说明|`agent/skills/computer-use-decider/SKILL.md`|
+|决策 helper|`agent/skills/computer-use-decider/scripts/decider.js`|
+|本机位置|`~/.omp/agent/skills/computer-use-decider/`|
 
 ## 本地扩展
 

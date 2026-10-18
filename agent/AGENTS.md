@@ -12,6 +12,8 @@ They concatenate into one region, so name files by path and rules by heading. Th
 
 Prose and wording are governed by the `writing-style` skill — prose, reports, documentation, UI copy, comments, commit messages, reviews, quotations, papers, and Chinese text aimed at the user all fall to it; read it before every write or revision of prose.
 
+Browser and desktop tasks that repeat the same control selection go through the `computer-use-decider` skill: the agent keeps goal, text, execution, and verification, and the native JUDGE route picks one observed action per step. Read it for any multi-step UI task on the `browser` or `computer` surface. Single fixed actions stay on the direct helper calls in `xd://eval/browser` and `xd://eval/computer`.
+
 ## The user sees only the final reply
 
 The reply is the whole of what the user receives; everything behind it — your reasoning, the files you read, every tool call and its result, a sub-session's report — stays invisible.

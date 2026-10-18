@@ -26,6 +26,7 @@ The reviewable, portable part of an Oh My Pi (OMP) configuration, tuned for heav
 |`agent/extensions/user-prompt-inject/PROMPT-INJECT-*.md`|Templates for [user-prompt-inject](#user-prompt-inject): inject the user's own words into the mentor and discussants|`~/.omp/agent/extensions/user-prompt-inject/`|
 |`agent/extensions/turn-judge/TURN-JUDGE-*.md`|Judge configs for [turn-judge](#turn-judge): after each turn, ask one question through OMP's JUDGE role|`~/.omp/agent/extensions/turn-judge/`|
 |`agent/agents/`|Subagent definitions; `README.txt` records authoring pitfalls|`~/.omp/agent/agents/`|
+|`agent/skills/`|Portable OMP skills, one directory per skill with `SKILL.md` at its root; currently [computer-use-decider](#computer-use-decider)|`~/.omp/agent/skills/`|
 |`agent/extensions/`|Local extensions, one directory each: `<name>/index.ts` is the entry, the other `.ts` files in the directory are its own modules, and its own config and templates live there too; `_shared/` holds code shared by several extensions. The extension configs `lang-nag/lang-nag.json`, `input-polish/input-polish.json` and `tool-policy-nag/tool-policy-nag.json` are synced by the updater; `doc-polish/doc-polish.json` belongs to the machine and is only an example, see [`/update-omp`](#update-omp-repo--machine)|`~/.omp/agent/extensions/`|
 |`agent/extensions-last/`|Extensions that must run after every other path-loaded extension, loaded explicitly as the last `extensions` entry of `config.yml`; currently only [system-prompt-replace](#system-prompt-replace), whose rules `system-prompt-replace.json` sit in its directory. `README.md` and `README.zh-CN.md` there are repo-only and not synced|`~/.omp/agent/extensions-last/`|
 |`pi/agent/pi-bansos-relay-state.json`|`pi-bansos` plugin state|`~/.pi/agent/`|
@@ -43,9 +44,10 @@ Run all of the following after starting OMP at the repository root.
 1. Run [`/update-omp`](#update-omp-repo--machine): it writes the config to the machine (including the [omp-config-autoupdate](#omp-config-autoupdate) extension and the updater `omp-config-update.ts` in its directory), installs `omp-light` and installs any missing plugins.
 2. To use Claude Code's skills, rules, commands and so on in OMP, add `~/.claude` at the start of `extensions` in the machine's `~/.omp/agent/config.yml`. OMP treats it as an extension package root and loads its `skills/`, `rules/`, `commands/`, `hooks/` and the like. The entry belongs to the machine: the updater keeps it, `/sync-omp-config` does not write it back to the repository, and `omp-light` loads it too, see [Rules shared by both directions](#rules-shared-by-both-directions). Do not add it on a machine without `~/.claude`, or every start reports a load failure.
 3. Restart OMP. Appended prompts, extensions and plugins are all loaded at startup.
-4. To [update automatically](#automatic-update-at-startup) from the GitHub default branch at every start, run `/omp-config-autoupdate on` (off by default); it applies from the next start, and `/update-omp` is no longer needed by hand.
-5. Confirm the result with [Post-migration checks](#post-migration-checks).
-6. To keep the provider logins of an old machine, run [`/migrate-omp-keys <new machine>`](#credential-migration-migrate-omp-keys-target) on the old machine.
+4. Copy the portable skills with `cp -a agent/skills/<name> ~/.omp/agent/skills/`; they are live from the next session.
+5. To [update automatically](#automatic-update-at-startup) from the GitHub default branch at every start, run `/omp-config-autoupdate on` (off by default); it applies from the next start, and `/update-omp` is no longer needed by hand.
+6. Confirm the result with [Post-migration checks](#post-migration-checks).
+7. To keep the provider logins of an old machine, run [`/migrate-omp-keys <new machine>`](#credential-migration-migrate-omp-keys-target) on the old machine.
 
 **The machine's config changed and should go back into the repository:** run `/sync-omp-config check` to see the differences, then [`/sync-omp-config`](#sync-omp-config-machine--repo) to write them into the repository, and commit and push. With automatic update on, the next start after a new commit on the default branch overwrites the machine's managed items with the repository's version, and changes not brought back into the repository are lost.
 
@@ -379,6 +381,22 @@ The dispatcher decides isolation for every spawn; it is not written into agent d
 ### The built-in `task` and `sonic`
 
 `task` and `sonic` are OMP's built-in subagents; they are not in `agent/agents/` and are listed in `task.disabledAgents`. Vibe mode's first-level dispatch always uses them, so `config.yml` keeps their model overrides for that case only; ordinary work does not use them.
+
+## Skills
+
+`agent/skills/` holds portable OMP skills; each directory carries one skill whose root is `SKILL.md`. Copy the directory into `~/.omp/agent/skills/` to install it; skill discovery picks it up on the next session. Skills there run in the main session and subagents alike, and none of them reads or writes a config file.
+
+### computer-use-decider
+
+`computer-use-decider` speeds up browser and desktop UI work that repeats the same control selection. The agent keeps the goal, the text to type, execution, and verification; a decision call through OMP's JUDGE route picks one observed action per step: build candidates from a `browser` `observe()` or a `computer` AX tree, let the judge choose action and target in one call, execute through the existing element handles, and re-observe. Low confidence, a `inspect` choice, or a failed call hands the step back to the agent.
+
+The skill covers when to use it, the confidence threshold, and the guard rules against page changes and stale targets. The bundled helper `scripts/decider.js` builds candidates and runs the one decision call; it sends no input and opens nothing by itself.
+
+|What|Where|
+|---|---|
+|Skill instructions|`agent/skills/computer-use-decider/SKILL.md`|
+|Decision helper|`agent/skills/computer-use-decider/scripts/decider.js`|
+|Machine location|`~/.omp/agent/skills/computer-use-decider/`|
 
 ## Local extensions
 
