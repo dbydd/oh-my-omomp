@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-Oh My Pi（OMP）本机配置中可以审查、可迁移的部分，为重型编程场景定制。这里不是完整备份：数据库、会话、缓存、日志、锁文件、凭据和 `models.yml` 都不进仓库。仓库也不镜像整个 `~/.omp/agent`：`APPEND_SYSTEM.md` 是刻意缺席的（自定义它会整体替换 omp 内置的 system-prompt block 0），只属于本机的部分见[仓库内容](#仓库内容)。
+Oh My Pi（OMP）本机配置中可以审查、可迁移的部分，为重型编程场景定制。数据库、会话、缓存、日志、锁文件、凭据和 `models.yml` 留在本机；只属于本机的部分见[仓库内容](#仓库内容)。
 
 - [仓库内容](#仓库内容)
 - [快速上手](#快速上手)
@@ -42,7 +42,7 @@ Oh My Pi（OMP）本机配置中可以审查、可迁移的部分，为重型编
 2. 运行 `./install-plugins.sh`（需要联网；安装它声明的插件列表）。
 3. 重启 OMP。上下文文件、扩展、插件在启动时加载，skill 由发现机制在下一次会话读取。
 
-要沿用旧机器的供应商登录，拷贝 `~/.omp/agent/agent.db` 的 `auth_credentials` 表（远端侧可用 sqlite3 的 `.backup`）；仓库从不持有凭据。
+要沿用旧机器的供应商登录，拷贝 `~/.omp/agent/agent.db` 的 `auth_credentials` 表（远端侧可用 sqlite3 的 `.backup`）。
 
 ## 设计思路
 
@@ -272,7 +272,7 @@ form 通道的 shell 违规分类、eval 违规正则、节奏（前三次只记
 
 #### lang-nag
 
-`lang-nag/` 只作用于主会话。主 agent 一轮结束后，取最后一条有正文的回复的最后一段（前 200 个字符），用辅助会话问模型这段是不是目标语言；判定为否，就在用户下一条输入前面加上 `instruction`。它不改已经发出的回复。配置 `lang-nag.json` 要求 `model`、`language`、`instruction`；cwd 下的文件优先。仓库当前不带这个文件，缺席时不发提醒。自动续写的轮次、判定失败、模型不可用都不提醒。
+`lang-nag/` 只作用于主会话。主 agent 一轮结束后，取最后一条有正文的回复的最后一段（前 200 个字符），用辅助会话问模型这段是不是目标语言；判定为否，就在用户下一条输入前面加上 `instruction`。它不改已经发出的回复。配置 `lang-nag.json` 要求 `model`、`language`、`instruction`；cwd 下的文件优先，文件属于本机。自动续写的轮次、判定失败、模型不可用都不提醒。
 
 #### repo-rules
 
@@ -280,7 +280,7 @@ form 通道的 shell 违规分类、eval 违规正则、节奏（前三次只记
 
 #### append-system-model
 
-`append-system-model/` 让追加提示词能按模型区分，而不用改写整个系统提示词。**文件**：扩展目录下的 `APPEND_SYSTEM_MODEL.md`（属于本机，仓库不带），一个文件写多块，每块先是 `---` 包起来的 YAML 头（`model`、`provider`，都是匹配模型 id 和提供商 id 的 JavaScript 正则），后面是正文。每次 `before_agent_start`，主会话和每个 subagent 按各自的模型把所有生效的块按文件顺序追加。每条 prompt 重新读文件。文件不存在时静默不注入；格式错误时不注入并按行号记 warning。
+`append-system-model/` 让追加提示词能按模型区分，而不用改写整个系统提示词。**文件**：扩展目录下的 `APPEND_SYSTEM_MODEL.md`，属于本机，一个文件写多块，每块先是 `---` 包起来的 YAML 头（`model`、`provider`，都是匹配模型 id 和提供商 id 的 JavaScript 正则），后面是正文。每次 `before_agent_start`，主会话和每个 subagent 按各自的模型把所有生效的块按文件顺序追加。每条 prompt 重新读文件。文件不存在时静默不注入；格式错误时不注入并按行号记 warning。
 
 #### system-prompt-replace
 
@@ -402,11 +402,11 @@ overlay 里上下键滚动；解释完整生成后 `C` 复制到剪贴板、`R` 
 
 #### commandcode-model-spec
 
-`commandcode-model-spec/` 修复用 `--model` 指定 commandcode 模型时选错 transport 或 provider、认证失败的问题。两种失败：缓存遮蔽（宿主的 `model_cache` 把 commandcode 模型记在宿主 transport 下，解析时跳过插件的 `commandcode-custom`，认证失败）和名称冲突（`google/gemini-3.5-flash-lite` 这类 id 解析到同名的无凭据内置 provider）。扩展只在 `session_start` 检查一次；当前模型的 `api` 不是 `commandcode-custom` 时，把它重新选回插件的同名模型。不注册 provider，不改默认模型。判断依据是 agent 目录下的 `commandcode-models.json`，这个文件不迁移，读不到时缓存为空。
+`commandcode-model-spec/` 修复用 `--model` 指定 commandcode 模型时选错 transport 或 provider、认证失败的问题。两种失败：缓存遮蔽（宿主的 `model_cache` 把 commandcode 模型记在宿主 transport 下，解析时跳过插件的 `commandcode-custom`，认证失败）和名称冲突（`google/gemini-3.5-flash-lite` 这类 id 解析到同名的无凭据内置 provider）。扩展只在 `session_start` 检查一次；当前模型的 `api` 不是 `commandcode-custom` 时，把它重新选回插件的同名模型。不注册 provider，不改默认模型。判断依据是 agent 目录下的 `commandcode-models.json`，由插件生成，读不到时缓存为空。
 
 ## 本机安装
 
-这个仓库没有更新器。一台机器的搭建方式是拷贝托管文件并安装插件；没拷贝的都归本机所有。
+一台机器的搭建方式是拷贝托管文件并安装插件；没拷贝的都归本机所有。
 
 ```bash
 mkdir -p "$HOME/.omp/agent" "$HOME/.pi/agent"
@@ -425,7 +425,7 @@ cp -a pi/agents "$HOME/.pi/agent/"
 - 这组拷贝整体覆盖文件。已有配置的机器上，`config.yml` 的本机字段（如 `compaction.thresholdTokens`、`theme`、本机自己加的 `disabledExtensions` 条目）和 `extensions` 的本机条目会被覆盖；拷贝后要把它们合并回去。
 - `~/.pi/agent/hindsight.json` 已存在时优先于旁边的 `.jsonc`；把仓库的 `hindsight.jsonc` 合并进实际加载的那个文件，不要直接拷。
 - `pi-hindsight` 插件由脚本安装而不链接到 checkout，这样本机跑的是已推送的状态；hindsight 合并后重跑 `./install-plugins.sh`。
-- `models.yml`、`agent.db`、会话、缓存和日志只属于本机。本机的 `~/.pi/agent/STATE.md` 和 `~/.omp/agent/STATE.md` 放带日期的记录，从不同步进仓库。
+- `models.yml`、`agent.db`、会话、缓存和日志只属于本机。本机的 `~/.pi/agent/STATE.md` 和 `~/.omp/agent/STATE.md` 放带日期的记录。
 
 ### 插件
 
@@ -445,7 +445,7 @@ cp -a pi/agents "$HOME/.pi/agent/"
 ## 维护须知
 
 - **本 README 有英文（`README.md`，默认）和简体中文（`README.zh-CN.md`）两份。** 两份逐节对应、同时修改，不能互相矛盾。
-- **扩展目录里新加的文件默认属于本机**：只有 `.ts` 模块和[仓库内容](#仓库内容)列出的自带模板与配置归仓库。没有更新器可以声明托管集；上面的拷贝集就是边界。
+- **扩展目录里新加的文件默认属于本机**：只有 `.ts` 模块和[仓库内容](#仓库内容)列出的自带模板与配置归仓库；上面的拷贝集就是边界。
 - **写扩展代码**：先 `bun install`，交付前 `bun run check`，规范见[目录结构与开发规范](#目录结构与开发规范)。新引入的 `@oh-my-pi/*` 子路径要在没有 `node_modules` 的目录里真实加载一次。
 - **扩展建的辅助会话必须传 `taskDepth: 1`。** 一次性的模型调用统一走 `_shared/helper-session.ts` 的 `runHelperPrompt`，它已经传了；自己建会话的只有 `fork-task` 的 shake，也传了。不传的话 SDK 把它当主会话，`dispose()` 时会销毁全局 `AgentLifecycleManager`，所有空闲 subagent 变成 `Unknown agent`。只调用 `completeSimple` 的扩展（`task-split-check`、`task-completion-judge`）不建会话，不涉及这条。
 - **升级 OMP 后**，在真实 TUI 里重新验证：[fork-task](#fork-task)、[user-prompt-inject](#user-prompt-inject)、[turn-judge](#turn-judge)、[task-completion-judge](#task-completion-judge)、[ctx-tool](#ctx-tool)（含 compact 后注入）、[ctx-tasklog](#ctx-tasklog)、[bro](#bro) 和 [wt-tool](#wt-tool)——它们依赖 OMP 内部实现（registry、会话条目、钩子、宿主投影、TUI 与 worktree 分发器）。todo-more 插件的实现更新在自己的仓库完成；本仓库验证只读协议与消费者结果。

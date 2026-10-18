@@ -2,7 +2,7 @@
 
 English | [简体中文](README.zh-CN.md)
 
-The reviewable, portable part of an Oh My Pi (OMP) machine configuration, tuned for heavy programming work. It is not a full backup: databases, sessions, caches, logs, lock files, credentials and `models.yml` never enter the repository. The repository is also not a full mirror of `~/.omp/agent`: `APPEND_SYSTEM.md` is deliberately absent (a custom one replaces omp's built-in system-prompt block 0 wholesale), and the machine-only pieces listed in [Repository contents](#repository-contents) stay on the machine.
+The reviewable, portable part of an Oh My Pi (OMP) machine configuration, tuned for heavy programming work. Databases, sessions, caches, logs, lock files, credentials and `models.yml` stay out of the repository; the machine-only pieces listed in [Repository contents](#repository-contents) stay on the machine.
 
 - [Repository contents](#repository-contents)
 - [Quick start](#quick-start)
@@ -42,7 +42,7 @@ On a new machine:
 2. Run `./install-plugins.sh` (network required; it installs the plugins declared in its list).
 3. Restart OMP. Context files, extensions, plugins and skills are all loaded at startup or picked up by skill discovery on the next session.
 
-To carry provider logins from an old machine, copy the `auth_credentials` table of `~/.omp/agent/agent.db` (for example with sqlite3's `.backup` on the remote side); the repository never holds credentials.
+To carry provider logins from an old machine, copy the `auth_credentials` table of `~/.omp/agent/agent.db` (for example with sqlite3's `.backup` on the remote side).
 
 ## Design
 
@@ -272,7 +272,7 @@ The repository's `TURN-JUDGE-甩锅.md` asks "模型是不是在甩锅？" (is t
 
 #### lang-nag
 
-`lang-nag/` acts on the main session only. After a main-agent turn, it takes the last paragraph (first 200 characters) of the last reply with body text and asks a model in a helper session whether it is in the target language; if not, it prepends `instruction` to the user's next input. It never changes a reply already sent. Config `lang-nag.json` requires `model`, `language` and `instruction`; the file under cwd wins. The repository's file currently sits in the machine copy; no reminders fire while it is absent. Automatic continuations, failed judgments and an unavailable model produce no reminder.
+`lang-nag/` acts on the main session only. After a main-agent turn, it takes the last paragraph (first 200 characters) of the last reply with body text and asks a model in a helper session whether it is in the target language; if not, it prepends `instruction` to the user's next input. It never changes a reply already sent. Config `lang-nag.json` requires `model`, `language` and `instruction`; the file under cwd wins, and the file belongs to the machine. Automatic continuations, failed judgments and an unavailable model produce no reminder.
 
 #### repo-rules
 
@@ -280,7 +280,7 @@ The repository's `TURN-JUDGE-甩锅.md` asks "模型是不是在甩锅？" (is t
 
 #### append-system-model
 
-`append-system-model/` lets appended prompts differ by model without rewriting the whole system prompt. **File**: `APPEND_SYSTEM_MODEL.md` in the extension directory (belongs to the machine; the repository ships none), with several blocks in one file, each a YAML header wrapped in `---` (`model`, `provider` — JavaScript regexes matched against the model id and provider id) followed by the body. Every matching block is appended in file order on every `before_agent_start`, main session and subagents. The file is re-read for every prompt. A missing file injects nothing; a format error injects nothing and logs a warning with the line number.
+`append-system-model/` lets appended prompts differ by model without rewriting the whole system prompt. **File**: `APPEND_SYSTEM_MODEL.md` in the extension directory, owned by the machine, with several blocks in one file, each a YAML header wrapped in `---` (`model`, `provider` — JavaScript regexes matched against the model id and provider id) followed by the body. Every matching block is appended in file order on every `before_agent_start`, main session and subagents. The file is re-read for every prompt. A missing file injects nothing; a format error injects nothing and logs a warning with the line number.
 
 #### system-prompt-replace
 
@@ -402,11 +402,11 @@ In the overlay, up/down keys scroll; once complete, `C` copies to the clipboard 
 
 #### commandcode-model-spec
 
-`commandcode-model-spec/` fixes the wrong transport or provider, and the resulting auth failure, when `--model` names a commandcode model. Two failures: cache shadowing (the host's `model_cache` records commandcode models under host transports, so resolution skips the plugin's `commandcode-custom` and auth fails) and name collision (an id like `google/gemini-3.5-flash-lite` resolves to the same-named built-in provider that has no credentials). The extension checks once at `session_start`; when the current model's `api` is not `commandcode-custom`, it reselects the plugin's same-named model. It registers no provider and changes no default. Judgment relies on `commandcode-models.json` in the agent directory, which is not migrated and is cached empty when unreadable.
+`commandcode-model-spec/` fixes the wrong transport or provider, and the resulting auth failure, when `--model` names a commandcode model. Two failures: cache shadowing (the host's `model_cache` records commandcode models under host transports, so resolution skips the plugin's `commandcode-custom` and auth fails) and name collision (an id like `google/gemini-3.5-flash-lite` resolves to the same-named built-in provider that has no credentials). The extension checks once at `session_start`; when the current model's `api` is not `commandcode-custom`, it reselects the plugin's same-named model. It registers no provider and changes no default. Judgment relies on `commandcode-models.json` in the agent directory, generated by the plugin, cached empty when unreadable.
 
 ## Machine installation
 
-There is no updater in this repository. A machine is set up by copying the managed files and installing the plugins; the machine owns everything not copied.
+A machine is set up by copying the managed files and installing the plugins; the machine owns everything not copied.
 
 ```bash
 mkdir -p "$HOME/.omp/agent" "$HOME/.pi/agent"
@@ -425,7 +425,7 @@ Notes:
 - The copy set overwrites whole files. Machine-local fields of `config.yml` (for example `compaction.thresholdTokens`, `theme`, the machine's own `disabledExtensions` additions) and machine entries of `extensions` are replaced; merge them back after copying on a machine with an existing config.
 - `~/.pi/agent/hindsight.json` exists and wins over a `.jsonc` beside it; merge the repository's `hindsight.jsonc` into the loaded file instead of copying it.
 - The `pi-hindsight` plugin is installed by the script rather than linked to a checkout, so the machine runs a pushed state; re-run `./install-plugins.sh` after a hindsight merge.
-- `models.yml`, `agent.db`, sessions, caches and logs stay machine-only. The machine's `~/.pi/agent/STATE.md` and `~/.omp/agent/STATE.md` carry dated records and are never synced here.
+- `models.yml`, `agent.db`, sessions, caches and logs stay machine-only. The machine's `~/.pi/agent/STATE.md` and `~/.omp/agent/STATE.md` carry dated records.
 
 ### Plugins
 
@@ -445,7 +445,7 @@ Nothing is pinned: GitHub URLs track the default branch, and rerunning the scrip
 ## Maintenance notes
 
 - **This README exists in English (`README.md`, the default) and Simplified Chinese (`README.zh-CN.md`).** Change both together, section for section, so they never disagree.
-- **Adding a machine-owned file inside an extension directory is the default**: only the `.ts` modules and the shipped templates and configs listed in [Repository contents](#repository-contents) belong to the repository. There is no updater to declare a managed set in; the copy set above is the boundary.
+- **Adding a machine-owned file inside an extension directory is the default**: only the `.ts` modules and the shipped templates and configs listed in [Repository contents](#repository-contents) belong to the repository; the copy set above is the boundary.
 - **Writing extension code**: run `bun install` first and `bun run check` before delivering; conventions in [Layout and development conventions](#layout-and-development-conventions). A newly introduced `@oh-my-pi/*` subpath must be loaded for real once from a directory without `node_modules`.
 - **Helper sessions an extension creates must pass `taskDepth: 1`.** One-shot model calls go through `runHelperPrompt` in `_shared/helper-session.ts`, which already passes it; the only extension creating a session itself is `fork-task`'s shake, which passes it too. Without it the SDK treats the session as a main session, and `dispose()` tears down the global `AgentLifecycleManager`, turning every idle subagent into `Unknown agent`. Extensions that only call `completeSimple` (`task-split-check`, `task-completion-judge`) create no session.
 - **After an OMP upgrade**, re-verify in a real TUI: [fork-task](#fork-task), [user-prompt-inject](#user-prompt-inject), [turn-judge](#turn-judge), [task-completion-judge](#task-completion-judge), [ctx-tool](#ctx-tool) (including post-compact injection), [ctx-tasklog](#ctx-tasklog), [bro](#bro) and [wt-tool](#wt-tool) — they depend on OMP internals (registry, session entries, hooks, host projections, the TUI and worktree dispatchers). The todo-more plugin's implementation updates happen in its own repository; this repository verifies the read protocol and consumer results.
