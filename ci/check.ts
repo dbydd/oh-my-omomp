@@ -59,21 +59,6 @@ const HOST_LOG_WARNINGS: readonly { readonly match: (record: LogRecord) => boole
 		match: (r) => r.message.startsWith("Failed to acquire power assertion"),
 		reason: "no D-Bus system bus on the CI host",
 	},
-	{
-		// modelRoles is machine-local; CI binds every role to the free model, which reasons and can
-		// exhaust omp's output budget for this background task, or return a compression omp rejects.
-		// A machine's own roles decide this, not the repo.
-		match: (r) =>
-			(r.message.startsWith("Skill description compression failed") && String(r.error ?? "").includes("Model stopped: length")) ||
-			(r.message.startsWith("Skill description compression unusable") && String(r.model ?? "").startsWith(`${FREE_PROVIDER}/`)),
-		reason: "the CI's free model, bound to every model role, produced no usable skill-description compression",
-	},
-	{
-		// The check closes each session as soon as its one reply arrives; omp aborts the background
-		// skill-description compression still running at shutdown.
-		match: (r) => r.message.startsWith("Skill description compression failed") && String(r.error ?? "").includes("Model stopped: aborted"),
-		reason: "the check ends the session right after its reply, aborting omp's background skill compression",
-	},
 ];
 
 type Phase = "install" | "apply" | "full session" | "light session" | "omp log" | "shadow proxy";
@@ -581,16 +566,21 @@ async function main(): Promise<number> {
 		const shadows = configuredModels();
 		facts.push(`configured models shadowed onto the free model: ${shadows.map((ref) => `${ref.provider}/${ref.id}`).join(", ")}`);
 		writeFileSync(join(env.PI_CODING_AGENT_DIR, "models.yml"), modelsYaml(shadows, proxy.port ?? 0));
-		// modelRoles is a machine-local field the updater never writes. A machine
-		// sets it; CI sets it to the free model, so role-driven background work
-		// (skill description compression, titles, advisor) stays on the free model.
+		// modelRoles and skills are machine-local fields the updater never writes. A
+		// machine sets them; CI binds every role to the free model, so role-driven
+		// background work (titles, advisor) stays on it, and turns skills off: the
+		// installed plugins' skills would otherwise be compressed in the background by
+		// that free model on every run, since the throwaway HOME has no compression cache.
 		const model = `${FREE_PROVIDER}/${FREE_MODEL}`;
 		const configPath = join(env.PI_CODING_AGENT_DIR, "config.yml");
 		const config: unknown = Bun.YAML.parse(readFileSync(configPath, "utf8"));
 		const roles = Object.fromEntries(
 			["default", "smol", "slow", "plan", "commit", "tiny", "memory", "task", "advisor"].map((role) => [role, model]),
 		);
-		writeFileSync(configPath, Bun.YAML.stringify({ ...(isMapping(config) ? config : {}), modelRoles: roles }, null, 2));
+		writeFileSync(
+			configPath,
+			Bun.YAML.stringify({ ...(isMapping(config) ? config : {}), modelRoles: roles, skills: { enabled: false } }, null, 2),
+		);
 		const rpc = ["--mode", "rpc", "--no-ui", "--no-session", "--model", model];
 		await runSession("full session", ["omp", ...rpc], env, work, diagnostics);
 		await runSession("light session", ["omp-light", ...rpc], env, work, diagnostics);

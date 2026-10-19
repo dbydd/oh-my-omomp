@@ -50,7 +50,7 @@ The following properties come from measurements in an isolated HOME (omp 18.8.7,
 ```mermaid
 flowchart LR
   install["install latest omp"] --> apply["updater apply (with plugins)"]
-  apply --> models["write models.yml and modelRoles<br/>start the shadow proxy"]
+  apply --> models["write models.yml, modelRoles and skills off<br/>start the shadow proxy"]
   models --> full["full-mode session<br/>omp --mode rpc"]
   full --> light["light-mode session<br/>omp-light --mode rpc"]
   light --> logs["read omp logs"]
@@ -61,11 +61,11 @@ flowchart LR
 |---|---|---|
 |install|`bun install -g @oh-my-pi/pi-coding-agent@${OMP_VERSION:-latest}`, `omp --version`|Failure is `environment`, and the check ends there|
 |apply|`bun agent/extensions/omp-config-autoupdate/omp-config-update.ts apply --source <repository> --agent-dir … --json`|Every stderr line; the JSON report's `errors`; every `pluginsMissing` entry; a missing JSON report. A missing report or any `errors` entry ends the check there: the updater installs plugins before writing, so a failed apply has written no config to run a session on|
-|models|Writes `models.yml` (free model + shadow models) and sets `config.yml`'s `modelRoles` to the free model|None|
+|models|Writes `models.yml` (free model + shadow models), sets `config.yml`'s `modelRoles` to the free model and `skills.enabled` to `false`|None|
 |full session, light session|Start in RPC mode, send one prompt after `ready`, keep stdin open until `prompt_result`, then close and wait for the process to exit|See the criteria below|
 |omp logs|Read the `warn` and `error` records in `$HOME/.omp/logs/*.log`|Every record that is not host noise|
 
-`modelRoles` is a machine-local field the updater does not write (`LOCAL_CONFIG_FIELDS`). The check run sets it the way a machine would, so the managed config being checked is not changed.
+`modelRoles` and `skills` are machine-local fields the updater does not write (`LOCAL_CONFIG_FIELDS`). The check run sets them the way a machine would, so the managed config being checked is not changed. Skills are off because the throwaway HOME has no skill description cache: with skills on, omp would have the free model compress every installed plugin skill's description in the background on every run.
 
 ### Diagnostic criteria
 
@@ -119,7 +119,7 @@ flowchart TB
 - **Shadow models rather than a config overlay.** The alternative is a `--config` overlay changing `task.agentModelOverrides` and the like to the free model. That would alter the config being checked, so the check would verify the overlay instead of the repository. Shadow models change only the machine-local `models.yml`, and the config runs as it is. Cost: `ci/check.ts` reads the shadow list from `config.yml`, the `omomp.yml` sections and `thinking-translator.json`, so a model written only in extension source would not be in the list. Models that helpers request only when tools such as `task` are called are not reached by the check's text-only prompt; when these helpers lack credentials they pass by their own rules, outside the coverage boundary.
 - **Always install the latest omp.** Operator decision: machines follow the latest version through `omp update`, so the check does too. Cost: upstream changes can turn unrelated commits red; that red is a real compatibility problem, such as upstream deleting the target of a system-prompt-replace rule. `OMP_VERSION` reproduces a specific version locally.
 - **Plugins are not pinned.** Consistent with `install-plugins.sh`: the check installs what a machine would install.
-- **Every stderr line is a diagnostic; logs exclude only host noise.** Extension warnings have no allowlist, because an allowed warning is an accepted defect that should be fixed in the config or tracked in an issue. Host noise covers only facts unrelated to the config: no local model server; no D-Bus; the free model producing no usable skill description compression — output truncated (`Model stopped: length`) or a result omp rejects as unusable — because `modelRoles` is a machine-local field, CI binds every role to a reasoning free model, and which model a machine actually uses is decided by its own `modelRoles`; and that compression aborted (`Model stopped: aborted`) because the check closes each session as soon as its one reply arrives.
+- **Every stderr line is a diagnostic; logs exclude only host noise.** Extension warnings have no allowlist, because an allowed warning is an accepted defect that should be fixed in the config or tracked in an issue. Host noise covers only facts unrelated to the config: no local model server; no D-Bus.
 
 ### Triggers and permissions
 
@@ -140,6 +140,7 @@ The check does not cover:
 - the availability and credentials of the paid models themselves;
 - TUI-only behavior (`input-polish`'s keys and overlay, `omp-thinking-translator`'s rendering);
 - the networked path of automatic update (`auto`, `/omp-config-autoupdate run`) and the maintenance commands (`/update-omp`, `/sync-omp-config`, `/migrate-omp-keys`);
+- skills: the check runs with `skills.enabled: false`, so neither the skills plugins ship nor omp's skill description compression is exercised;
 - `omp-light.cmd` on Windows.
 
 ## Local reproduction
