@@ -74,12 +74,6 @@ const HOST_LOG_WARNINGS: readonly { readonly match: (record: LogRecord) => boole
 		match: (r) => r.message.startsWith("Skill description compression failed") && String(r.error ?? "").includes("Model stopped: aborted"),
 		reason: "the check ends the session right after its reply, aborting omp's background skill compression",
 	},
-	{
-		// omp's VS Code MCP discovery warns for every project directory that has no .vscode/mcp.json
-		// (discovery/vscode.ts builds the path without checking it exists); CI's work dir has none.
-		match: (r) => /^\[VS Code\] Failed to read .*[/\\]\.vscode[/\\]mcp\.json$/.test(r.message),
-		reason: "omp warns when the session directory has no .vscode/mcp.json; CI's throwaway work dir has none",
-	},
 ];
 
 type Phase = "install" | "apply" | "full session" | "light session" | "omp log" | "shadow proxy";

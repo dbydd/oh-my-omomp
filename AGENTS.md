@@ -371,7 +371,9 @@ exercised in a real omp session.
   machine adds its own entries such as `~/.claude` in its live copy, and the updater
   keeps them ahead of the repo's entries),
   `task.agentModelOverrides` (model/fallback chains per tier),
-  `task.disabledAgents`, `task.isolation` (`enabled: true`, `merge: branch`: an isolated
+  `task.disabledAgents`, `disabledProviders: [vscode]` (omp's VS Code MCP discovery
+  warns `Failed to read <cwd>/.vscode/mcp.json` in every directory without that file;
+  no project here uses it), `task.isolation` (`enabled: true`, `merge: branch`: an isolated
   worker's commits are cherry-picked onto the parent branch with their messages,
   todo-more `Model` trailers included, instead of being flattened into one uncommitted
   patch), `compaction.methodOrder` (`compaction.thresholdTokens` is machine-local),

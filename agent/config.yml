@@ -1,6 +1,8 @@
 extensions:
   - ~/.omp/agent/extensions-last/system-prompt-replace/index.ts
 setupVersion: 2
+disabledProviders:
+  - vscode
 dev:
   autoqaConsent: denied
 composer:
