@@ -265,7 +265,7 @@ tool-policy-nag:
   - Shell 调用选中非 `none`、或 `eval` 调用选中非 `eval`/`none` 且概率 $\ge$ `threshold`（`0.5`）时，在下一个 step 边界以 `aside` 插入具体提醒（点名中文意图名、应替用的内置工具及调用原文），不计数、不封顶，并记 `Tool-policy intent verdict` info 日志。
 - **`risk` 通道（无模型确定性风险检测，仅看 shell）**：
   - 在 `tool_call` 内同步完成，与工具路由完全独立。同时满足三项即触发：① 简单命令段数 $\ge$ `minCommands`（`4`）或总字符数 $\ge$ `minChars`（`600`）；② 去掉 shell 内建管道件（`cd`/`echo`/`printf`/`export`/`source`/`test`/`mkdir` 等）后涉及的不同外部程序数 $\ge$ `minPrograms`（`3`）；③ 含写入步骤（重定向/`tee`/就地编辑、`rm`/`cp`/`mv`/`chmod`/`dd`/`tar -c|-x`/`rsync`/`scp`/`make`/`install`/`patch` 等写程序，或 `git add|commit|push|reset`、`gh … create|delete|download|upload`、`docker run|build|push|rm|exec`、`kubectl apply|delete|exec`、`orb push|create|delete`、`npm|pnpm|yarn|bun install|add`、`tofu|terraform apply|destroy|state|init`、`curl -o|-O|-T|-d|-X POST`、`wget -O` 等写子命令，仅取前两个非 `-` 参数词）。
-  - 命中即发送拆解提醒（列出段数、字符数、外部程序与写步骤），弹 UI 警告并记 `Tool-policy risk` warn 日志。
+  - 命中即发送拆解提醒（列出段数、字符数、外部程序与写步骤），弹 UI 警告并记 `Tool-policy risk` info 日志。
 
 #### watchdog-agent
 

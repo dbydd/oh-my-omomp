@@ -136,7 +136,7 @@ function heuristicCheck(
 	}
 	const nagsSent = state.nagsSent + 1;
 	const detectorArmed = nagsSent < MAX_NAGS_PER_CONTEXT;
-	pi.logger.warn("Tool-policy violation past threshold — nagging", {
+	pi.logger.info("Tool-policy violation past threshold — nagging", {
 		hits,
 		programs,
 		violations: violationDetails,
@@ -288,7 +288,7 @@ export default function toolPolicyNag(pi: ExtensionAPI): void {
 			if (lanes.risk !== null && call.kind === "shell") {
 				const finding = inspectRisk(call.command, lanes.risk);
 				if (finding !== null) {
-					pi.logger.warn("Tool-policy risk", { limits: lanes.risk, ...finding });
+					pi.logger.info("Tool-policy risk", { limits: lanes.risk, ...finding });
 					pi.sendUserMessage(
 						riskReminder(call.command, finding),
 						ctx.isIdle() ? { attribution: "agent" } : { deliverAs: "aside", attribution: "agent" },
