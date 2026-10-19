@@ -371,7 +371,10 @@ exercised in a real omp session.
   machine adds its own entries such as `~/.claude` in its live copy, and the updater
   keeps them ahead of the repo's entries),
   `task.agentModelOverrides` (model/fallback chains per tier),
-  `task.disabledAgents`, `compaction.methodOrder` (`compaction.thresholdTokens` is machine-local),
+  `task.disabledAgents`, `task.isolation` (`enabled: true`, `merge: branch`: an isolated
+  worker's commits are cherry-picked onto the parent branch with their messages,
+  todo-more `Model` trailers included, instead of being flattened into one uncommitted
+  patch), `compaction.methodOrder` (`compaction.thresholdTokens` is machine-local),
   feature toggles (`astGrep.enabled: true`, `github.enabled: true`,
   `fetch.enabled: true`, `browser.enabled: false`, `todo.enabled: false` — native
   todo is off; the installed `omp-todo-more` plugin provides `todo`).

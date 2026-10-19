@@ -116,7 +116,7 @@ Context 管理的核心矛盾是**保留已对齐的任务意图，同时剥离�
 
 #### fork-task
 
-注册 `fork_task` 工具（顶层 `context` 加不含 `solutionSpace` 的 `tasks[]`，需 `async.enabled: true`）。派出的仍是原生 `task` 子代理（拥有独立 agent 定义、模型、工具、Agent Hub 行、`agent://`/`history://` 与补丁合并），唯一区别是其初始 transcript 复制自调用方当前对话，或某项 `from: "<agent-id>"` 指定的已注册代理对话：
+注册 `fork_task` 工具（顶层 `context` 加不含 `solutionSpace` 的 `tasks[]`，需 `async.enabled: true`）。派出的仍是原生 `task` 子代理（拥有独立 agent 定义、模型、工具、Agent Hub 行、`agent://`/`history://` 与隔离合并回写），唯一区别是其初始 transcript 复制自调用方当前对话，或某项 `from: "<agent-id>"` 指定的已注册代理对话：
 
 - **关键行为差异**：
   - `isolated` 默认 `true`（仅只读调查时显式写 `isolated: false`；父会话处于 plan mode 时强制共享目录；隔离子代理结束后不可续聊）。
@@ -200,7 +200,7 @@ model-compaction:
 - **递归深度上限为 2**：主代理在 depth 0，派出的 worker 在 depth 1；仅 `task:high` 能再派 depth 2 孙代，且 depth 2 的 `task` 工具会被宿主剥离（也无法派生自己的 `mentor:default`），因此交给 depth 2 的必须是可直接执行的叶子任务。
 - **显式填 `agent`，禁覆写 `effort`**：每次调用必须显式指定 `agent`；模型与推理强度由 `config.yml` 绑定决定（`task.enableEffort: false` 隐藏了原生参数）。`config.yml` 中保留内置 `task` 与 `sonic` 的模型覆盖仅服务于 Vibe 模式的首层固定派发。
 - **每个 `task:*` 切片的强制规程**：动手前先读代码写出计划交 `mentor:default` 审阅（depth 2 除外）；全程用 `todo` 初始化完整步骤并实时更新状态，还有未完项时严禁 `yield`，也严禁通过 `drop`/`rm` 缩小派工范围。
-- **并行写入的 Worktree 隔离（`isolated: true`）**：同一仓库同时存在 $\ge 2$ 个写入 worker（同批派出，或前序共享写入 job 仍在运行）时，每个写入者必须设 `isolated: true`（`fork_task` 默认 `true`；只读调查设 `isolated: false` 以保持可续聊；plan mode 下强制共享）。给隔离 worker 的路径必须写**仓库相对路径**（OMP 的隔离靠提示词约束，写绝对路径会让命令跑回父工作区），且返回结果须确认 `Applied patches: yes` 才算落盘。
+- **并行写入的 Worktree 隔离（`isolated: true`）**：同一仓库同时存在 $\ge 2$ 个写入 worker（同批派出，或前序共享写入 job 仍在运行）时，每个写入者必须设 `isolated: true`（`fork_task` 默认 `true`；只读调查设 `isolated: false` 以保持可续聊；plan mode 下强制共享）。给隔离 worker 的路径必须写**仓库相对路径**（OMP 的隔离靠提示词约束，写绝对路径会让命令跑回父工作区）。`task.isolation.merge: branch` 把 worker 自己的提交逐个 cherry-pick 到父分支，提交信息与 todo-more 的 `Model` trailer 原样保留；返回结果须确认 `Merged branch: <name>`（或 `No changes to apply.`）才算落盘。
 
 ---
 
