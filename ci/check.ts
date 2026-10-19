@@ -61,9 +61,24 @@ const HOST_LOG_WARNINGS: readonly { readonly match: (record: LogRecord) => boole
 	},
 	{
 		// modelRoles is machine-local; CI binds every role to the free model, which reasons and can
-		// exhaust omp's output budget for this background task. A machine's own roles decide this, not the repo.
-		match: (r) => r.message.startsWith("Skill description compression failed") && String(r.error ?? "").includes("Model stopped: length"),
-		reason: "the CI's free model, bound to every model role, ran out of omp's skill-compression output budget while reasoning",
+		// exhaust omp's output budget for this background task, or return a compression omp rejects.
+		// A machine's own roles decide this, not the repo.
+		match: (r) =>
+			(r.message.startsWith("Skill description compression failed") && String(r.error ?? "").includes("Model stopped: length")) ||
+			(r.message.startsWith("Skill description compression unusable") && String(r.model ?? "").startsWith(`${FREE_PROVIDER}/`)),
+		reason: "the CI's free model, bound to every model role, produced no usable skill-description compression",
+	},
+	{
+		// The check closes each session as soon as its one reply arrives; omp aborts the background
+		// skill-description compression still running at shutdown.
+		match: (r) => r.message.startsWith("Skill description compression failed") && String(r.error ?? "").includes("Model stopped: aborted"),
+		reason: "the check ends the session right after its reply, aborting omp's background skill compression",
+	},
+	{
+		// omp's VS Code MCP discovery warns for every project directory that has no .vscode/mcp.json
+		// (discovery/vscode.ts builds the path without checking it exists); CI's work dir has none.
+		match: (r) => /^\[VS Code\] Failed to read .*[/\\]\.vscode[/\\]mcp\.json$/.test(r.message),
+		reason: "omp warns when the session directory has no .vscode/mcp.json; CI's throwaway work dir has none",
 	},
 ];
 
@@ -565,7 +580,9 @@ async function main(): Promise<number> {
 		if (version === undefined) return report(facts, diagnostics, ignored, normalize);
 		facts.push(`installed: ${version}`);
 		const applied = applyConfig(env, work, diagnostics);
-		if (applied === undefined) return report(facts, diagnostics, ignored, normalize);
+		// A failed apply wrote nothing (the updater installs plugins before any write), so
+		// there is no applied config to run a session on: report the apply diagnostics.
+		if (applied === undefined || applied.errors.length > 0) return report(facts, diagnostics, ignored, normalize);
 		facts.push(`updater wrote ${applied.written.length} entries; plugins installed: ${applied.pluginsInstalled.join(", ") || "none"}`);
 		const shadows = configuredModels();
 		facts.push(`configured models shadowed onto the free model: ${shadows.map((ref) => `${ref.provider}/${ref.id}`).join(", ")}`);

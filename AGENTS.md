@@ -498,16 +498,20 @@ exercised in a real omp session.
   only under Node.js; its `fork-features/README.md` records the customizations and sync policy),
   `oh-my-omp/omp-thinking-translator`
   (its runtime config is the portable agent-root `thinking-translator.json` above),
-  `oh-my-omp/omp-codex-image-gen`, `oh-my-omp/omp-playbooks`, and `oh-my-omp/omp-todo-more`
+  `oh-my-omp/omp-codex-image-gen`, and `oh-my-omp/omp-todo-more`
   (independent rich Todo, reminders/planning, read projection and native editing,
   with awaited Tern owner asset initialization). All unpinned: `omp install` resolves npm versions,
   and GitHub URLs track the default branch. The updater reruns `omp install` for every entry on each apply, which upgrades installed plugins too (`omp plugin upgrade` is not used: it leaves GitHub-sourced plugins on their locked commit). An existing
   npm `pi-bansos` install must be removed with `omp plugin uninstall pi-bansos` before installing the fork URL,
   and an existing `pi-unified-exec` with `omp plugin uninstall pi-unified-exec` (both register the same tools).
-  `oh-my-omp/omp-remote-build` is listed commented out and unquoted as an optional
-  plugin: not everyone needs remote build environments, and it depends on `omp-unified-exec`,
-  Mutagen, the km CLI, Komodo Core/Periphery and an SSH-reachable build host. `/sync-omp-config`
-  keeps commented entries commented even when the plugin is installed locally.
+  `oh-my-omp/omp-remote-build` and `oh-my-omp/omp-playbooks` are listed commented out
+  and unquoted as optional plugins: not everyone needs remote build environments, and
+  `omp-remote-build` depends on `omp-unified-exec`, Mutagen, the km CLI, Komodo
+  Core/Periphery and an SSH-reachable build host; `omp-playbooks` fails its install
+  validation without Tern's `tern` command on `PATH`, and a failed plugin install stops
+  the whole updater apply before any write (which is what broke the CI configuration
+  check). `/sync-omp-config` keeps commented entries commented even when the plugin is
+  installed locally.
 - `plugin-audit.sh` — drift report; base commit `5974c4fa`; requires `omp` on PATH
   and a git worktree. It counts only single-quoted entries inside `plugins=( … )`, so a
   commented optional plugin that is installed locally reports as `[保留]`.
