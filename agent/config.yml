@@ -34,6 +34,7 @@ task:
     {}
   isolation:
     enabled: true
+    merge: branch
   enableLsp: false
   enableEffort: false
   maxConcurrency: 64

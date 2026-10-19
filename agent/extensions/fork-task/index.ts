@@ -12,7 +12,7 @@
 // The spawn itself is the built-in `task` tool, called with the same batch
 // shape, so each child is an ordinary task subagent: its own agent definition
 // (system prompt, model binding, tools), Agent Hub row, `agent://`/`history://`,
-// idle/park/revive lifecycle, isolation and patch merge. Only the child's
+// idle/park/revive lifecycle, isolation and its merge-back. Only the child's
 // starting transcript differs:
 //
 //   1. At call time the source's persisted conversation (the caller's, or the
