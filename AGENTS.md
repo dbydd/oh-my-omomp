@@ -514,9 +514,14 @@ exercised in a real omp session.
   the whole updater apply before any write (which is what broke the CI configuration
   check). `/sync-omp-config` keeps commented entries commented even when the plugin is
   installed locally.
-- `plugin-audit.sh` — drift report; base commit `5974c4fa`; requires `omp` on PATH
-  and a git worktree. It counts only single-quoted entries inside `plugins=( … )`, so a
-  commented optional plugin that is installed locally reports as `[保留]`.
+- `plugin-audit.sh` — drift report; base commit `5974c4fa`; requires `omp` and `bun` on
+  PATH and a git worktree. Single-quoted entries on uncommented lines inside
+  `plugins=( … )` are required plugins; a comment line holding only a source is a
+  HEAD optional plugin, never reported missing or as an uninstall candidate, and an
+  installed one reports as `[保留]`. A Git/URL entry is keyed by the package name
+  recorded for that source (`#ref` and `.git` stripped) in the `dependencies` of
+  `~/.omp/plugins/package.json`, the name `omp plugin list` shows (e.g.
+  `omp-playbooks` → `tern-playbooks`); not installed, it falls back to the URL basename.
 - `.omp/commands/{update-omp,sync-omp-config,migrate-omp-keys}.md` — the command
   contracts; read these for exact copy/exclusion/validation rules. `update-omp.md`
   only wraps the updater, whose header and code are the repo → machine rules.
