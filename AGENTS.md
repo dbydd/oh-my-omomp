@@ -376,10 +376,13 @@ exercised in a real omp session.
   no project here uses it), `task.isolation` (`enabled: true`, `merge: branch`: an isolated
   worker's commits are cherry-picked onto the parent branch with their messages,
   todo-more `Model` trailers included, instead of being flattened into one uncommitted
-  patch), `compaction.methodOrder` (`compaction.thresholdTokens` is machine-local),
+  patch), `compaction.methodOrder` (`compaction.thresholdTokens`, `thresholdPercent` and
+  `idleThresholdTokens` are machine-local), `extendedContext: true` (models with an
+  extended context tier use it), `codexResets.autoRedeem` / `claudeResets.autoRedeem: "no"`,
   feature toggles (`astGrep.enabled: true`, `github.enabled: true`,
-  `fetch.enabled: true`, `browser.enabled: false`, `todo.enabled: false` — native
-  todo is off; the installed `omp-todo-more` plugin provides `todo`).
+  `fetch.enabled: true`, `browser.enabled: false`, `launch.enabled: false` (`bash` has
+  no service-launch mode), `todo.enabled: false` (native todo is off; the installed
+  `omp-todo-more` plugin provides `todo`)).
 - `agent/SYSTEM_TEMPLATE.md` — locally maintained Handlebars base template derived
   from `packages/coding-agent/src/prompts/system/system-prompt.md`. It owns workflow,
   explains delegation by ownership/parallelism/independent evidence, and renders live

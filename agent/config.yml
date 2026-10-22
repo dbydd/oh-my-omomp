@@ -47,8 +47,11 @@ browser:
   enabled: false
   headless: false
   cmux: false
+launch:
+  enabled: false
 cycleOrder:
   - slow
+extendedContext: true
 compaction:
   methodOrder:
     - remote
@@ -58,6 +61,8 @@ compaction:
     - shake
   thresholdTokens: 500000
 codexResets:
+  autoRedeem: "no"
+claudeResets:
   autoRedeem: "no"
 lsp:
   enabled: false

@@ -139,6 +139,8 @@ export const LOCAL_CONFIG_FIELDS: readonly string[] = [
 	"display",
 	"worktree",
 	"compaction.thresholdTokens",
+	"compaction.thresholdPercent",
+	"compaction.idleThresholdTokens",
 ];
 
 /**
