@@ -49,6 +49,41 @@ browser:
   cmux: false
 launch:
   enabled: false
+bashInterceptor:
+  enabled: true
+  # OMP's defaults minus `cat <<` heredocs piped into a program and `tail -f`
+  # (both stay shell), and minus the three rules that send services, watchers and
+  # `nohup`/`&` to `bash` with `name`: `launch.enabled` is false, so that mode
+  # does not exist here; such work belongs to `exec_command`.
+  patterns:
+    - pattern: |-
+        ^\s*(?:cat\s+(?!<<)|(?:head|less|more)\s+|tail\s+(?!(?:.*\s)?-[a-zA-Z]*[fF](?:\s|$)))
+      tool: read
+      message: Use the `read` tool instead of cat/head/tail/less/more. It provides better context and handles binary files.
+    - pattern: |-
+        ^\s*(grep|rg|ripgrep|ag|ack)\s+
+      tool: grep
+      message: Use the `grep` tool instead of grep/rg. It respects .gitignore and provides structured output.
+    - pattern: |-
+        ^\s*(find|fd|locate)\s+.*(-name|-iname|-type|--type|-glob)
+      tool: glob
+      message: Use the `glob` tool instead of find/fd. It respects .gitignore and is faster for glob patterns.
+    - pattern: |-
+        ^\s*sed\s+(-i|--in-place)
+      tool: edit
+      message: Use the `edit` tool instead of sed -i. It provides diff preview and fuzzy matching.
+    - pattern: |-
+        ^\s*perl\s+.*-[pn]?i
+      tool: edit
+      message: Use the `edit` tool instead of perl -i. It provides diff preview and fuzzy matching.
+    - pattern: |-
+        ^\s*awk\s+.*-i\s+inplace
+      tool: edit
+      message: Use the `edit` tool instead of awk -i inplace. It provides diff preview and fuzzy matching.
+    - pattern: |-
+        ^\s*(echo|printf|cat\s*<<)\s+(?:(?:[^"'>]|"[^"]*"|'[^']*')|(?<!\|)>{1,2}\|?\s*(?:"/dev/(?:null|tty|stdout|stderr)"|'/dev/(?:null|tty|stdout|stderr)'|/dev/(?:null|tty|stdout|stderr))(?:[\s;&|]|$))*(?<!\|)>{1,2}\|?\s*(?!(?:"/dev/(?:null|tty|stdout|stderr)"|'/dev/(?:null|tty|stdout|stderr)'|/dev/(?:null|tty|stdout|stderr))(?:[\s;&|]|$))[$\w./~"'-]
+      tool: write
+      message: Use the `write` tool instead of echo/cat redirection. It handles encoding and provides confirmation.
 cycleOrder:
   - slow
 extendedContext: true
