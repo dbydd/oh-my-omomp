@@ -414,7 +414,7 @@ exercised in a real omp session.
   and `index.ts` owns the first main runner's managed timer, the threshold read and
   UI/agent delivery. The threshold is `thresholdGiB` (shipped `4`, any positive number)
   in the `child-memory-warning` section of `omomp.yml`; the main session cwd's
-  `.omp/omomp.*` copy wins over the agent-dir copy, re-read every 250 ms scan, so edits
+  `.omp/omomp.*` copy wins over the agent-dir copy, re-read every 2 s scan, so edits
   apply without restart. Without a valid section tracking continues but alerts pause,
   and each new config problem warns once (log + main UI). Managed in both directions
   with the rest of `omomp.yml` (field-level diff and edit; validate with `Bun.YAML.parse`).

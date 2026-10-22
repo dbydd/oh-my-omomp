@@ -3,7 +3,7 @@
  * macOS phys_footprint exceeds the configured threshold. Main session_start starts one
  * process-shared monitor; session_switch refreshes delivery, and its owning main's
  * session_shutdown clears the managed timer before closing libproc. Child factories
- * never own it. Native 250 ms stable scans retain PID+birth ownership after
+ * never own it. Native 2 s stable scans retain PID+birth ownership after
  * reparenting; observed descendant-led process groups can discover surviving members.
  * A process born and orphaned between observations without a known surviving group
  * anchor cannot be attributed retroactively from the process table.
@@ -19,7 +19,7 @@ import { errorText } from "../_shared/errors.ts";
 import { defineOmompSection, loadOmompSection } from "../_shared/omomp.ts";
 import { type ProcessRecord, type ProcessSource, ProcessTracker } from "./tracker.ts";
 
-const POLL_MS = 250;
+const POLL_MS = 2_000;
 
 const configSchema = z
 	.object({
