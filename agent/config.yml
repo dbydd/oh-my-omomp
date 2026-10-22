@@ -95,6 +95,7 @@ compaction:
     - handoff
     - shake
   thresholdTokens: 500000
+  asyncEnabled: false
 codexResets:
   autoRedeem: "no"
 claudeResets:
