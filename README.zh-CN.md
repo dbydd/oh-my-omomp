@@ -89,7 +89,7 @@ system-prompt-replace:
       replace: "替换文字，可用 $1、$&"
 ```
 
-- **当前仓库的 9 条改写规则**：① 将 `read` 重定义为统一的 `<source><:selector>` / `<source>?<query>` 检索与 hashline 快照协议（指向 `omp://tools/read.md`）；② 将 `task` 的 `"Use most specific agent."` 改写为按成本与可信度选档（默认 `task:mid`、`task:low` 省成本与验证 `task:free`）；③ 移除原生子代理包装层的 `"Every task MUST skip build/lint/tests..."` 与 `"No TODO tracking, no progress updates."`；④ 要求并发写入强制 `isolated: true` 且共享只读调查代理以便续聊；⑤ 要求显式指定 `agent` 且不覆写 `effort`；⑥ 澄清对用户报错“不复跑去怀疑报告，但为定位原因的复现与修复后的确认仍照常执行”；⑦ 修正编译代码规则缺失的 `add`；⑧ 严禁通过 `eval` 读取、列举或搜索本地文件；⑨ 声明 `xd://<tool>` 设备只能通过 `write` JSON 调用、严禁编造 `xd__<tool>` 函数名。
+- **当前仓库的 10 条改写规则**：① 将 `read` 重定义为统一的 `<source><:selector>` / `<source>?<query>` 检索与 hashline 快照协议（指向 `omp://tools/read.md`）；② 将 `task` 的 `"Use most specific agent."` 改写为按成本与可信度选档（默认 `task:mid`、`task:low` 省成本与验证 `task:free`）；③ 移除原生子代理包装层的 `"Every task MUST skip build/lint/tests..."` 与 `"No TODO tracking, no progress updates."`；④ 要求并发写入强制 `isolated: true` 且共享只读调查代理以便续聊；⑤ 要求显式指定 `agent` 且不覆写 `effort`；⑥ 澄清对用户报错“不复跑去怀疑报告，但为定位原因的复现与修复后的确认仍照常执行”；⑦ 修正编译代码规则缺失的 `add`；⑧ 严禁通过 `eval` 读取、列举或搜索本地文件；⑨ 声明 `xd://<tool>` 设备只能通过 `write` JSON 调用、严禁编造 `xd__<tool>` 函数名；⑩ 用精确 literal 整段替换原生 `bash` 说明（上游措辞一变即触发漂移警告），新说明与 `omp://tools/bash.md` 一致：内嵌 brush shell、并发调用使用隔离 shell、管道 / `$(…)` / 程序输出重定向属正常用法、`timeout` 与转后台的区别及任务数上限时的前台回退、结果只投递一次且不得轮询、等待外部条件时用一个静默的 `async: true` / `timeout: 0` 循环且只结束一次。
 - **失效与漂移检测**：当某条规则在主会话 system prompt 中找不到目标文本时（例如升级 OMP 后上游改动了内置工具描述），每个进程每条规则弹一次 UI 警告（headless 写 stderr）并记日志，绝不阻塞 prompt；subagent 因本就可能不含 `task` 等工具说明而不做缺失检查。
 
 #### append-system-model
