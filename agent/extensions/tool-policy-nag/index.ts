@@ -4,57 +4,62 @@
  * shell or the eval kernel was used instead. Reminders only: no call is ever
  * blocked, and a working call is left alone.
  *
- * TWO LANES, configured side by side in the `tool-policy-nag` section of omomp.*
- * (project copy first, then the agent dir; re-read at every watched call, so edits apply
- * to the next shell or eval call):
+ * CONFIGURED in the `tool-policy-nag` section of omomp.* (project copy first,
+ * then the agent dir; re-read at every watched call, so edits apply to the next
+ * shell or eval call). Nothing is preset in code: without a valid section no
+ * lane runs. `detector` picks one way to catch tool-routing violations:
  *
- * - `form` — the deterministic string lane (`heuristic.ts`, `shell-parser.ts`):
- *   parses the command, counts every operation a built-in tool covers, and
- *   after the third hit injects at most three generic nudges per context, then
- *   goes quiet until a boundary that replaces the context (compaction,
- *   `/clear`, a branch summary). Branch and tree navigation rebuild the branch's
- *   own state; it does not reset it.
- * - `intent` — the intent lane (`intent.ts`): asks a judgment model one
- *   `choice` question per watched call — what is this call trying to accomplish
- *   and which built-in tool does that intent belong to — and injects a reminder
+ * - `heuristic` — the deterministic string lane (`heuristic.ts`,
+ *   `shell-parser.ts`): parses the command, counts every operation a built-in
+ *   tool covers, and after the third hit sends `form.prompt` as a steer, at
+ *   most three times per context, then goes quiet until a boundary that
+ *   replaces the context (compaction, `/clear`, a branch summary). Branch and
+ *   tree navigation rebuild the branch's own state; it does not reset it. No
+ *   JUDGE request is made and `INTENT-*.md` is not read.
+ * - `jev` — the intent lane (`intent.ts`): asks a judgment model one `choice`
+ *   question per watched call — what is this call trying to accomplish and
+ *   which built-in tool does that intent belong to — and injects a reminder
  *   naming the intent and the required tool. The question, its options and
- *   their cases come from the spec beside this extension
- *   (`INTENT-*.md`), read per call. No counting, no cap: one reminder per
- *   offending call. A failed judge request warns once per reason and reminds
- *   nothing.
- * - `risk` — the risk lane (`risk.ts`): no judge, no counting. A shell call that
- *   is long, runs many different programs and writes something has an outcome
- *   nobody can read off the call; it gets one reminder naming the length, the
- *   programs and the writing steps. Deterministic and independent of the other
- *   lanes: a call can be a tool violation, a risk, both, or neither.
+ *   their cases come from the spec beside this extension (`INTENT-*.md`), read
+ *   per call. No counting, no cap: one reminder per offending call. A failed
+ *   judge request warns once per reason and reminds nothing. An optional
+ *   `form` block makes the string lane count beside it and send its prompt
+ *   only while the intent lane cannot run (no valid enabled spec, or native
+ *   JUDGE unavailable); a failed judge request does not fall back.
  *
- * DELIVERY IS SHARED. At most one tool reminder per watched call: configured
- * intent with a valid enabled spec and native JUDGE owns delivery. Otherwise
- * form delivers its generic nudge. A native request failure does not fall back
- * to form. Risk runs independently before intent preparation.
+ * `risk` — the risk lane (`risk.ts`): no judge, no counting. A shell call that
+ * is long, runs many different programs and writes something has an outcome
+ * nobody can read off the call; it gets one reminder naming the length, the
+ * programs and the writing steps. Deterministic and independent of
+ * `detector`: a call can be a tool violation, a risk, both, or neither.
  *
- * BASH UNDER THE INTERCEPTOR. While OMP's `bashInterceptor.enabled` is true in
- * the session's live settings, `bash` calls (direct or through `xd://bash`) are
- * skipped by every lane: the interceptor already refuses routing violations
- * before they run. `exec_command`, `bash_bg` and eval stay watched. The setting
- * is read at every watched call, so a config.yml hot reload applies at once.
+ * BASH INTERCEPTOR. While `detector` is `heuristic`, every watched call first
+ * puts a runtime-only override `bashInterceptor.enabled = false` on the main
+ * session's live settings, whatever config.yml says; subagents read those
+ * settings through, so they lose the interceptor too. The override is the
+ * extension's own: it is cleared when the detector changes and at
+ * `session_shutdown`, and no other layer is touched. Under any other detector
+ * the interceptor follows config, and while it is on, `bash` calls (direct or
+ * through `xd://bash`) are skipped by every lane because the interceptor
+ * already refuses routing violations before they run; `exec_command`,
+ * `bash_bg` and eval stay watched.
  *
  * Registers session lifecycle and tool_call hooks; appends counter entries to
- * the session branch and injects attributed user reminders. Main sessions only.
- * Hook failures are logged and do not escape into omp.
+ * the session branch, overrides one OMP setting at runtime and injects
+ * attributed user reminders. Main sessions only. Hook failures are logged and
+ * do not escape into omp.
  */
 import type { Judge } from "@oh-my-pi/pi-ai";
-import { AgentRegistry, type ExtensionAPI, type ExtensionContext, z } from "@oh-my-pi/pi-coding-agent";
+import { AgentRegistry, type ExtensionAPI, type ExtensionContext, type Settings, z } from "@oh-my-pi/pi-coding-agent";
 import { cfgBashInterceptorEnabled } from "@oh-my-pi/pi-coding-agent/exec/settings";
 import { errorText } from "../_shared/errors.ts";
 import { openNativeJudge } from "../_shared/judge.ts";
 import { type WatchedCall, watchedCallOf } from "./calls.ts";
-import { type IntentLane, type Lanes, loadLanes } from "./detector-config.ts";
+import { type FormLane, type IntentLane, type Lanes, loadLanes } from "./detector-config.ts";
 import { detectEvalViolations, detectShellViolations } from "./heuristic.ts";
 import { type IntentSpec, intentReminder, intentViolation, JUDGE_TIMEOUT_MS, judgeIntent, loadIntentSpec } from "./intent.ts";
 import { inspectRisk, riskReminder } from "./risk.ts";
 
-const NAG_TEXT = "你为什么不遵守system prompt。";
 const STATE_ENTRY_TYPE = "mouriya.omp.tool-policy-nag.state";
 /** Fire on the hit that goes *past* three. */
 const HIT_THRESHOLD = 3;
@@ -106,19 +111,20 @@ function rebuildState(ctx: ExtensionContext): NagState {
 	return state;
 }
 
-/** OMP's own bash interceptor setting, from the live settings of this session. */
-function bashInterceptorEnabled(ctx: ExtensionContext): boolean {
+/** The live settings of this session, as OMP registered it. */
+function sessionSettings(ctx: ExtensionContext): Settings {
 	const session = AgentRegistry.global()
 		.list()
 		.find((ref) => ref.session?.sessionManager === ctx.sessionManager)?.session;
 	if (session == null) throw new Error("tool-policy-nag: current OMP session is not registered");
-	return cfgBashInterceptorEnabled.get(session.settings) === true;
+	return session.settings;
 }
 
 function heuristicCheck(
 	pi: ExtensionAPI,
 	ctx: ExtensionContext,
 	call: WatchedCall,
+	form: FormLane,
 	state: NagState,
 	commit: (next: NagState) => void,
 	deliver: boolean,
@@ -164,7 +170,7 @@ function heuristicCheck(
 	});
 	commit(detectorArmed ? { kind: "watching", hits, nagsSent } : { kind: "exhausted", hits, nagsSent });
 	if (!deliver) return;
-	pi.sendUserMessage(NAG_TEXT, { deliverAs: "steer", attribution: "agent" });
+	pi.sendUserMessage(form.prompt, { deliverAs: "steer", attribution: "agent" });
 	ctx.ui.notify(
 		`Shell policy nag ${nagsSent}/${MAX_NAGS_PER_CONTEXT} sent for hit #${hits} (${programs.join(", ")}) — detector ${
 			detectorArmed ? "still armed" : "exhausted until compaction"
@@ -280,6 +286,31 @@ export default function toolPolicyNag(pi: ExtensionAPI): void {
 		if (ctx.hasUI) ctx.ui.notify(summary, "warning");
 	};
 
+	/** Settings carrying this extension's interceptor override; only this override is ever cleared. */
+	let interceptorOff: Settings | null = null;
+
+	const releaseInterceptor = (reason: string): void => {
+		if (interceptorOff === null) return;
+		cfgBashInterceptorEnabled.clearOverride(interceptorOff);
+		interceptorOff = null;
+		pi.logger.info("Tool-policy bash interceptor override cleared", { reason });
+	};
+
+	/** Under the heuristic detector the interceptor is off whatever config says; otherwise config decides. */
+	const syncInterceptor = (ctx: ExtensionContext, lanes: Lanes): Settings => {
+		const settings = sessionSettings(ctx);
+		if (lanes.tool?.detector !== "heuristic") {
+			releaseInterceptor("detector is not heuristic");
+			return settings;
+		}
+		if (interceptorOff !== settings) releaseInterceptor("session settings changed");
+		if (interceptorOff === settings && cfgBashInterceptorEnabled.get(settings) === false) return settings;
+		cfgBashInterceptorEnabled.override(settings, false);
+		interceptorOff = settings;
+		pi.logger.info("Tool-policy bash interceptor overridden off", { detector: "heuristic" });
+		return settings;
+	};
+
 	pi.on("session_start", (_event, ctx) => runForMainSession(pi, ctx, () => restore("session_start", ctx)));
 	pi.on("session_switch", (_event, ctx) => runForMainSession(pi, ctx, () => restore("session_switch", ctx)));
 	pi.on("session_branch", (_event, ctx) => runForMainSession(pi, ctx, () => restore("session_branch", ctx)));
@@ -292,6 +323,8 @@ export default function toolPolicyNag(pi: ExtensionAPI): void {
 		}),
 	);
 
+	pi.on("session_shutdown", (_event, ctx) => runForMainSession(pi, ctx, () => releaseInterceptor("session_shutdown")));
+
 	pi.on("tool_call", (event, ctx) =>
 		runForMainSession(pi, ctx, async () => {
 			if (event.toolName !== "write" && nestedDeviceCalls.delete(event.toolCallId)) return;
@@ -299,9 +332,11 @@ export default function toolPolicyNag(pi: ExtensionAPI): void {
 			if (call === null) return;
 			// The device re-dispatches its payload as a nested tool call with the same id.
 			if (event.toolName === "write") nestedDeviceCalls.add(event.toolCallId);
-			if (call.kind === "shell" && call.tool === "bash" && bashInterceptorEnabled(ctx)) return;
 			const { lanes, warnings }: { lanes: Lanes; warnings: readonly string[] } = loadLanes(ctx.cwd);
 			for (const warning of warnings) warnOnce(ctx, warning);
+			// The tool runs after this hook, so the override reaches this very call.
+			const settings = syncInterceptor(ctx, lanes);
+			if (call.kind === "shell" && call.tool === "bash" && cfgBashInterceptorEnabled.get(settings) === true) return;
 			if (lanes.risk !== null && call.kind === "shell") {
 				const finding = inspectRisk(call.command, lanes.risk);
 				if (finding !== null) {
@@ -318,20 +353,30 @@ export default function toolPolicyNag(pi: ExtensionAPI): void {
 					}
 				}
 			}
-			const startedAt = epoch;
-			const intent =
-				lanes.intent === null
-					? null
-					: await prepareIntent(ctx).catch((error) => {
-							warnOnce(ctx, `tool-policy-nag: JUDGE 准备失败（${errorText(error)}）`);
-							return null;
-						});
-			if (epoch !== startedAt) return;
-			if (lanes.form !== null) heuristicCheck(pi, ctx, call, state, commit, intent === null);
-			if (lanes.intent !== null && intent !== null) {
-				void intentCheck(ctx, intent.judge, lanes.intent, intent.spec, call).catch((error) => {
-					pi.logger.warn("Tool-policy nag hook failed", { error: errorText(error) });
-				});
+			const tool = lanes.tool;
+			if (tool === null) return;
+			switch (tool.detector) {
+				case "heuristic":
+					heuristicCheck(pi, ctx, call, tool.form, state, commit, true);
+					return;
+				case "jev": {
+					const startedAt = epoch;
+					const intent = await prepareIntent(ctx).catch((error) => {
+						warnOnce(ctx, `tool-policy-nag: JUDGE 准备失败（${errorText(error)}）`);
+						return null;
+					});
+					if (epoch !== startedAt) return;
+					if (tool.fallback !== null) heuristicCheck(pi, ctx, call, tool.fallback, state, commit, intent === null);
+					if (intent === null) return;
+					void intentCheck(ctx, intent.judge, tool.intent, intent.spec, call).catch((error) => {
+						pi.logger.warn("Tool-policy nag hook failed", { error: errorText(error) });
+					});
+					return;
+				}
+				default: {
+					const unreachable: never = tool;
+					return unreachable;
+				}
 			}
 		}),
 	);

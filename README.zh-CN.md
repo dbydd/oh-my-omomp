@@ -42,7 +42,7 @@ flowchart TD
 |---|---|---|---|---|---|
 | **写入安全与计划闭环** | 模型凭记忆盲改文件、覆盖未读区域或行号错位 | `read` / `edit` 调用时 | `config.yml` (`edit.mode: hashline`) | 强制非 `:raw` `read` 获取 4 位十六进制快照标签后，才允许按锚点执行 `edit` | 启用 |
 | **写入安全与计划闭环** | 模型未立计划就直接改代码，或遇小错提前停下反问用户 | `edit` 前 / 回合结束 / `DONE` 时 | 插件 [omp-todo-more](#todo-more) (`todo`) | Todo 为空时直接封锁 `edit`；仍有未完项且非向用户提问时自动催促继续；有未提交改动时强制 `DONE` 携带 git commit 子句 | 启用 |
-| **运行期偏离遥测与纠偏** | 模型用 shell/eval 代替内置工具（破窗信号），或拼出不可预测的多程序长写管道 | 主会话 `tool_call` | [tool-policy-nag](#tool-policy-nag) + `INTENT-policy.md` | 不阻断执行；`intent` 通道调原生 JUDGE 点名应替用的内置工具（或 `form` 计数提醒）；`risk` 通道同步警告长写管道 | 禁用 |
+| **运行期偏离遥测与纠偏** | 模型用 shell/eval 代替内置工具（破窗信号），或拼出不可预测的多程序长写管道 | 主会话 `tool_call` | [tool-policy-nag](#tool-policy-nag) + `omomp.yml`（`jev` 下另用 `INTENT-policy.md`） | 不阻断执行；`detector: heuristic` 用 `form` 解析器计数并发送配置的 `form.prompt`（OMP bash 拦截器被覆盖为关闭），`detector: jev` 调原生 JUDGE 点名应替用的内置工具；`risk` 通道同步警告长写管道 | 禁用 |
 | **运行期偏离遥测与纠偏** | 模型在长任务中偏离验证要求、偷换问题，或未验证就宣布完成 | 每 $N$ 步动作 / 回合结束 | [watchdog-agent](#watchdog-agent) + [turn-judge](#turn-judge) | `watchdog-agent` 按 `target` 独立审阅分支并注入 `<watchdog>`；`turn-judge` 每轮后用原生 JUDGE 打分并在达阈值时直接输入纠偏 prompt | 禁用 |
 | **运行期偏离遥测与纠偏** | 服务端或本地 Compaction 后模型丢失中文回复约束 | 主会话 `agent_end` → 下次 `input` | [lang-nag](#lang-nag) | 检测回复末段前 200 字符语言；不符时在用户下一条真实输入前静默拼接 `说中文`，零额外回合开销 | 禁用 |
 | **防回声室与子代理门禁** | `mentor` 与 `discuss` 只看到派发方裁剪后的转述，沦为回声室放大器 | 子代理每次 `context`（含 IRC 唤醒） | [user-prompt-inject](#user-prompt-inject) + `PROMPT-INJECT-user-goal.md` | 沿 `parentId` 爬回根会话，提取全部人类原话注入顾问请求首部，令其拿人类原话审判咨询方的计划偏差 | 禁用 |
@@ -240,16 +240,17 @@ model-compaction:
 
 ### 4.2 运行期旁路纠偏与原生 JUDGE 角色共享机制
 
-`turn-judge`、`tool-policy-nag` 的 `intent` 通道与 `watchdog-agent` 的选项后端共用宿主的 **JUDGE 模型角色**（`_shared/judge.ts` 的 `openNativeJudge`）。只需在 OMP 的 `modelRoles.judge` 中配置原生判定模型（如 `futureppo-jev/decision-model-preview`），三处功能即自动启用；若 `judge` 指向普通聊天模型或未配置，需要选项概率的原生判定会静默跳过且绝不回退到聊天模型。角色设置每次触发实时解析，热重载后下一次触发即生效。
+`turn-judge`、`tool-policy-nag` 的 `intent` 通道（`detector: jev` 时）与 `watchdog-agent` 的选项后端共用宿主的 **JUDGE 模型角色**（`_shared/judge.ts` 的 `openNativeJudge`）。只需在 OMP 的 `modelRoles.judge` 中配置原生判定模型（如 `futureppo-jev/decision-model-preview`），三处功能即自动启用；若 `judge` 指向普通聊天模型或未配置，需要选项概率的原生判定会静默跳过且绝不回退到聊天模型。角色设置每次触发实时解析，热重载后下一次触发即生效。
 
 #### tool-policy-nag
 
-仅作用于主会话，在 `tool_call` 阶段检查 `bash`、`bash_bg`、`exec_command`（含经 `write` 写往 `xd://bash`、`xd://bash_bg`、`xd://exec_command` 的调用）与 `eval` 代码，**只提醒、不拦截命令**。会话实时设置里 OMP 的 `bashInterceptor.enabled` 为真时（`agent/config.yml` 已打开），三条通道都跳过 `bash` 调用，因为拦截器已在执行前拒绝绕过内置工具的命令；`exec_command`、`bash_bg` 与 `eval` 照常检查。由 `omomp.yml` 的 `tool-policy-nag` 段配置三条独立通道（按项目 `.omp/omomp.*` → agent 目录 `omomp.*` 每次调用重读；设为 `null` 关闭对应通道，兼容旧版单检测器 `{detector: "heuristic"|"jev"}` 写法）：
+仅作用于主会话，在 `tool_call` 阶段检查 `bash`、`bash_bg`、`exec_command`（含经 `write` 写往 `xd://bash`、`xd://bash_bg`、`xd://exec_command` 的调用）与 `eval` 代码，**只提醒、不拦截命令**。由 `omomp.yml` 的 `tool-policy-nag` 段配置（按项目 `.omp/omomp.*` → agent 目录 `omomp.*` 每次调用重读；代码里不带任何预设，没有有效配置段时所有通道都不运行）。`detector` 选择工具路由违规的检测方式：`heuristic`（`form` 通道）或 `jev`（`intent` 通道）；`risk` 是独立的第三条通道，缺省或设为 `null` 即关闭：
 
 ```yaml
 tool-policy-nag:
+  detector: heuristic
   form:
-    detector: heuristic
+    prompt: 你为什么不遵守system prompt，反思自己以后继续。
   intent:
     threshold: 0.5
   risk:
@@ -258,10 +259,11 @@ tool-policy-nag:
     minPrograms: 3
 ```
 
-- **工具通道投递仲裁（`intent` 与 `form` 一次调用最多发一条）**：当 `intent` 已声明、同目录 `INTENT-policy.md` 有效且启用、且原生 JUDGE 可用时，由 `intent` 负责发送提醒，`form` 照常计数、记日志并维护分支状态但不发消息；否则由 `form` 发通用提醒。原生 JUDGE 请求失败或 90s 超时时记一次 warning，不补发 `form` 提醒。
+- **`detector: heuristic`**：必须有 `form`；`intent` 段被忽略（保留它只为切回时改一个词），因此不发 JUDGE 请求、不读 `INTENT-policy.md`。每次检查被监视的调用之前，扩展在主会话实时设置上加一层仅运行期的覆盖 `bashInterceptor.enabled = false`，不论 `agent/config.yml`（已打开）怎么设；子代理透读这份设置，也一并失去拦截器。detector 改变时和 `session_shutdown` 时清除这层覆盖，不写任何磁盘文件。
+- **`detector: jev`**：必须有 `intent`；`bashInterceptor.enabled` 按配置生效，为真时三条通道都跳过 `bash` 调用，因为拦截器已在执行前拒绝绕过内置工具的命令（`exec_command`、`bash_bg` 与 `eval` 照常检查）。可选的 `form` 段在 intent 通道旁照常计数，仅当 intent 通道无法运行（同目录 `INTENT-policy.md` 缺失、无效或停用，或原生 JUDGE 不可用）时才发送它的 `prompt`；原生 JUDGE 请求失败或 90s 超时时记一次 warning，不补发 `form` 提醒。
 - **`form` 通道（启发式语法解析与计数）**：
   - 解析管道、分号、引号、heredoc、命令替换与重定向（跳过 `sudo`/`doas`/`su`/`ssh`；有效终点为 `wc` 的统计管道豁免前面的列目录/读/搜；`/dev/*` 豁免读/搜/改/写）。统计六类 shell 违规（列目录 `ls`/`find`、读文件 `cat`/`bat`/`nl`/`head`/`tail`/`less`/`more`/`sed -n`、搜索 `grep`/`rg`/`ag`/`ack`/`awk`、编辑 `sed -i`/`perl -i`/`mv`、重定向写文件 `echo`/`printf`/`cat >`、内联脚本 `node`/`bun`/`deno`/`python`/`ruby` 带 `-e`/`-c`/`--eval` 或 `-` stdin）及 `eval` 文件/目录操作（`Path.read_text`、`open`、`glob`、`os.listdir`、`readFileSync`、`Bun.file`、`readdir`、`Bun.Glob`）。
-  - 前 3 次违规仅记录；第 4 次起每次发 steer 消息 `"你为什么不遵守system prompt。"` 并弹 UI 警告，每个 context 最多发 3 条后进入 `exhausted` 停止检测，直至下次 compaction、`/clear` 或 `branch_summary`。状态存于会话条目 `mouriya.omp.tool-policy-nag.state`，随分支切换自动重建。
+  - 前 3 次违规仅记录；第 4 次起每次以 steer 发送配置的 `form.prompt`（不得为空）并弹 UI 警告，每个 context 最多发 3 条后进入 `exhausted` 停止检测，直至下次 compaction、`/clear` 或 `branch_summary`。状态存于会话条目 `mouriya.omp.tool-policy-nag.state`，随分支切换自动重建。
 - **`intent` 通道（原生 JUDGE 工具路由分类）**：
   - 每次调用并行发起一次不阻塞命令的 JUDGE `choice` 请求，题目与 12 个选项判据定义在同目录 `INTENT-policy.md`（选项：`list`、`read`、`search`、`edit`、`write`、`move`、`eval`、`ast`、`pty`、`shell`、`mixed`、`none`，内含针对 `km ls actions`、`ssh host 'cat x'`、`npm test > log`、`curl -I`、管道过滤等真实误报类的反例）。
   - Shell 调用选中非 `none`、或 `eval` 调用选中非 `eval`/`none` 且概率 $\ge$ `threshold`（`0.5`）时，在下一个 step 边界以 `aside` 插入具体提醒（点名中文意图名、应替用的内置工具及调用原文），不计数、不封顶，并记 `Tool-policy intent verdict` info 日志。

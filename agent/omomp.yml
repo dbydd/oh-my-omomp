@@ -11,8 +11,9 @@ input-polish:
   key: ctrl+enter
   instruction: 在不改变原意的前提下，改写到听起来会让人更加想努力、能激动人心，但不要太夸张。
 tool-policy-nag:
+  detector: heuristic
   form:
-    detector: heuristic
+    prompt: 你为什么不遵守system prompt，反思自己以后继续。
   intent:
     threshold: 0.5
   risk:
