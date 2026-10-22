@@ -523,8 +523,8 @@ exercised in a real omp session.
   HEAD optional plugin, never reported missing or as an uninstall candidate, and an
   installed one reports as `[保留]`. A Git/URL entry is keyed by the package name
   recorded for that source (`#ref` and `.git` stripped) in the `dependencies` of
-  `~/.omp/plugins/package.json`, the name `omp plugin list` shows (e.g.
-  `omp-playbooks` → `tern-playbooks`); not installed, it falls back to the URL basename.
+  `~/.omp/plugins/package.json`, the name `omp plugin list` shows; not installed, it
+  falls back to the URL basename.
 - `.omp/commands/{update-omp,sync-omp-config,migrate-omp-keys}.md` — the command
   contracts; read these for exact copy/exclusion/validation rules. `update-omp.md`
   only wraps the updater, whose header and code are the repo → machine rules.

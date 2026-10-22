@@ -394,7 +394,7 @@ doc-polish:
 | `pi-package-search` | `pi-package-search` | 必装（npm） | `xd://` 工具：`search_pi_packages`, `install_pi_package`；Skill：`pi-package-search` | 在会话内检索 npm 上的 `pi-package` 扩展包，并在用户明确要求时调用安装 |
 | `pi-pretty-codeblocks` | `pi-pretty-codeblocks` | 必装（npm） | TUI `Markdown.prototype.render` 补丁 | 隐藏 TUI Markdown 代码块的起止围栏行并移除默认 2 列缩进，保留源码内部缩进与 ANSI 语法高亮 |
 | `# https://github.com/oh-my-omp/omp-remote-build` | `omp-remote-build` | 可选（默认注释不装） | `xd://` 工具：`container_exec`, `container_write_stdin`, `container_list_sessions`, `container_kill_session` | 为每个 git worktree 在远端 Docker 主机维护 Mutagen 实时同步副本与 Komodo 构建容器（写工具执行后自动触发 `Mutagen flush`）。依赖 `omp-unified-exec`、Mutagen、km CLI 与 SSH 构建主机 |
-| `# https://github.com/oh-my-omp/omp-playbooks` | `tern-playbooks` | 可选（默认注释不装） | `xd://` 工具：`playbook_open`, `playbook_read`, `playbook_edit`, `playbook_compile`, `playbook_check`, `playbook_run`, `playbook_timeline`, `playbook_launch`；CLI：`tern-playbook` | 协同式 YAML Playbook 文档服务与 Tern 侧边栏表单卡片：支持 `task`/`design` 块共同编辑、外部引用展开、结合 `eval` `judge` 双重校验、Run 时间线及子代理 Launch 绑定（人类改块时实时推送 `block_changed`）。安装校验要求 PATH 上有 Tern 的 `tern` 命令（由 Tern 桌面应用提供），安装失败会让整次更新器 apply 中止，因此默认不装；装了 Tern 的机器取消注释即可 |
+| `# https://github.com/oh-my-omp/omp-playbooks` | `omp-playbooks` | 可选（默认注释不装） | `xd://` 工具：`playbook_open`, `playbook_read`, `playbook_edit`, `playbook_compile`, `playbook_check`, `playbook_run`, `playbook_timeline`, `playbook_launch`；CLI：`omp-playbook` | 协同式 YAML Playbook 文档服务与 Tern 侧边栏表单卡片：支持 `task`/`design` 块共同编辑、外部引用展开、结合 `eval` `judge` 双重校验、Run 时间线及子代理 Launch 绑定（人类改块时实时推送 `block_changed`）。安装校验要求 PATH 上有 Tern 的 `tern` 命令（由 Tern 桌面应用提供），安装失败会让整次更新器 apply 中止，因此默认不装；装了 Tern 的机器取消注释即可 |
 
 ### todo-more
 
