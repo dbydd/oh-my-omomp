@@ -9,9 +9,11 @@
  * shell or eval call). Nothing is preset in code: without a valid section no
  * lane runs. `detector` picks one way to catch tool-routing violations:
  *
- * - `heuristic` — the deterministic string lane (`heuristic.ts`,
- *   `shell-parser.ts`): parses the command, counts every operation a built-in
- *   tool covers, and once the hits exceed `form.afterHits` sends `form.prompt`
+ * - `heuristic` — the deterministic string lane (`shell-parser.ts` splits the
+ *   line, `shell-command.ts` resolves each command through wrappers to the
+ *   program it runs, `shell-programs.ts` judges each program, `heuristic.ts`
+ *   applies pipeline policy): counts every operation a built-in tool covers
+ *   whose output reaches the agent, and once the hits exceed `form.afterHits` sends `form.prompt`
  *   as a steer, at most `form.maxNags` times per context, then goes quiet until a boundary that
  *   replaces the context (compaction, `/clear`, a branch summary). Branch and
  *   tree navigation rebuild the branch's own state; it does not reset it. No
