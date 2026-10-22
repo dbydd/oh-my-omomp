@@ -112,7 +112,7 @@ Context 管理的核心矛盾是**保留已对齐的任务意图，同时剥离�
    - 当主会话已载入百万字级设计材料或与人类完成了多轮复杂对齐，无法靠几句话的 `context` 无损转述时，使用 `fork_task` 让子代理带着完整对话记忆聚焦局部切片。
 2. **推迟有损压缩（`compaction.methodOrder` + `model-compaction`）**：
    - `agent/config.yml` 将压缩方式按损耗从低到高排为 `remote → soft → snapcompact → handoff → shake`，并通过 `model-compaction` 为大窗口模型设定精确的高水位触发点。
-   - `compaction.asyncEnabled: false` 让压缩在触发点当场生成摘要。开启时，OMP 会提前最多 32k token 在后台请求摘要，存到触发点才换入，且 Anthropic 的摘要从不重新生成，节奏慢的会话就会换入一份早已过时的摘要。
+   - `compaction.asyncEnabled: false` 让压缩在触发点当场生成摘要。开启时，OMP 会提前最多 32k token 在后台请求摘要，拿到结果后一直存到触发点才换入，且 Anthropic 的摘要从不重新生成，期间每次请求仍带着完整历史。
 3. **压缩后的确定性状态重建（`omp-todo-more` 的 `todo` + `Task log` + `ctx`）**：
    - 一旦主会话发生 Compaction，模型自行生成的摘要不可全信。`omp-todo-more` 插件通过旁路记录每次成功 `todo` 调用的 `Task log`，在压缩完成后自动将子代理上下文树（`ctx list`）与确定性重放的任务时间线（`ctx show`）注入新上下文。
 

@@ -378,9 +378,9 @@ exercised in a real omp session.
   todo-more `Model` trailers included, instead of being flattened into one uncommitted
   patch), `compaction.methodOrder` (`compaction.thresholdTokens`, `thresholdPercent` and
   `idleThresholdTokens` are machine-local), `compaction.asyncEnabled: false` (OMP requests
-  the background summary up to 32k tokens before the trigger but swaps it in only at the
-  trigger and never regenerates an Anthropic one, so a slow session compacts onto a summary
-  of a state long gone; compaction now runs at the trigger), `extendedContext: true` (models with an
+  the background summary up to 32k tokens before the trigger, then holds the finished
+  result until the trigger and never regenerates an Anthropic one, so every request in
+  between still carries the full history; compaction now runs at the trigger), `extendedContext: true` (models with an
   extended context tier use it), `codexResets.autoRedeem` / `claudeResets.autoRedeem: "no"`,
   feature toggles (`astGrep.enabled: true`, `github.enabled: true`,
   `fetch.enabled: true`, `browser.enabled: false`, `launch.enabled: false` (`bash` has

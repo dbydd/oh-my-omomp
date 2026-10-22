@@ -112,7 +112,7 @@ Context management balances **preserving aligned task intent against shedding hi
    - When the main session has loaded 1.5M+ characters of design material or completed multi-turn alignment with the human that cannot be summarized losslessly into a short `context` string, use `fork_task` so the worker starts with the full conversation memory while focusing on one local slice.
 2. **Deferring lossy compaction (`compaction.methodOrder` + `model-compaction`)**:
    - `agent/config.yml` orders compaction methods from least to most lossy (`remote → soft → snapcompact → handoff → shake`), while `model-compaction` sets high fixed token triggers per model family.
-   - `compaction.asyncEnabled: false` makes compaction summarize at the trigger. With it on, OMP requests the summary in the background up to 32k tokens earlier, holds it until the trigger and never regenerates an Anthropic one, so a slow session swaps in a summary of a state long gone.
+   - `compaction.asyncEnabled: false` makes compaction summarize at the trigger. With it on, OMP requests the summary in the background up to 32k tokens earlier, then holds the finished result until the trigger and never regenerates an Anthropic one, so every request in between still carries the full history.
 3. **Deterministic post-compaction state recovery (`omp-todo-more`'s `todo` + `Task log` + `ctx`)**:
    - When the main session eventually compacts, the model's self-summary cannot be trusted alone. `omp-todo-more` logs every successful `todo` mutation to an append-only `Task log` on disk and automatically injects the subagent context tree (`ctx list`) and replayed task timeline (`ctx show`) into the freshly compacted session.
 
