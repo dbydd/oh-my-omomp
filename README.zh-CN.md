@@ -381,7 +381,7 @@ doc-polish:
 
 ## 5. 插件生态与外部能力底座
 
-仓库将轻量级的“策略与生命周期钩子”留在 `agent/extensions/`，而把重状态的持久化引擎、模型网关协议适配层、跨平台 PTY 终端与 Tern 分屏 UI 面板下沉为通过 `install-plugins.sh` 安装到 `~/.omp/plugins/` 的独立插件（共 9 个必装 + 2 个注释态可选，均不钉版本；每次更新器运行都会对必装项执行 `omp install` 以安装缺失项并升级已装项）。`plugin-audit.sh` 以 `omp install` 在 `~/.omp/plugins/package.json` 中为每个 Git/URL 条目记下的包名（第二列）作为对比键，已装的可选插件归入 `[保留]`，既不算缺失也不进卸载候选：
+仓库将轻量级的“策略与生命周期钩子”留在 `agent/extensions/`，而把重状态的持久化引擎、模型网关协议适配层、跨平台 PTY 终端与 Tern 分屏 UI 面板下沉为通过 `install-plugins.sh` 安装到 `~/.omp/plugins/` 的独立插件（共 8 个必装 + 2 个注释态可选，均不钉版本；每次更新器运行都会对必装项执行 `omp install` 以安装缺失项并升级已装项）。`plugin-audit.sh` 以 `omp install` 在 `~/.omp/plugins/package.json` 中为每个 Git/URL 条目记下的包名（第二列）作为对比键，已装的可选插件归入 `[保留]`，既不算缺失也不进卸载候选：
 
 | 声明源（`install-plugins.sh`） | `omp plugin list` 包名 | 类别 | 暴露的工具 / 命令 / 技能 / 界面 | 核心机制及与本配置的耦合契约 |
 |---|---|---|---|---|
@@ -391,7 +391,6 @@ doc-polish:
 | `pi-commandcode-provider` | `pi-commandcode-provider` | 必装（npm） | Provider：`commandcode`（`api: "commandcode-custom"`）；命令：`/commandcode-quota` | 接入 Command Code API 并生成本机 `~/.omp/agent/commandcode-models.json`，为思考翻译与 `doc-polish` 提供免费/高速模型池，配合本地扩展 `commandcode-model-spec` 使用 |
 | `https://github.com/oh-my-omp/omp-thinking-translator` | `omp-thinking-translator` | 必装（GitHub） | 助手 thinking 块实时中文翻译渲染器 + 迟到译文补发通知；命令：`/thinking-translator` | 按行去重并流式翻译思考块，读取受管配置 `~/.omp/agent/thinking-translator.json`（详见下方 [思考翻译](#思考翻译)） |
 | `https://github.com/oh-my-omp/omp-codex-image-gen` | `omp-codex-image-gen` | 必装（GitHub） | `xd://` 工具：`codex_generate_image`；Skill：`imagegen` | 复用本机 ChatGPT Plus/Pro Codex 订阅凭据调用 `gpt-image-2` 生成或基于 1–5 张本地参考图编辑 PNG |
-| `pi-schedule` | `pi-schedule` | 必装（npm） | `xd://` 工具：`schedule`；Skill：`schedule` | 周期性与延时任务调度器（`prompt`/`shell`/`notify`/`message`），内置单飞锁（`JobLockManager`）、运行账本（`RunLedger`）与三级权限守卫 |
 | `pi-package-search` | `pi-package-search` | 必装（npm） | `xd://` 工具：`search_pi_packages`, `install_pi_package`；Skill：`pi-package-search` | 在会话内检索 npm 上的 `pi-package` 扩展包，并在用户明确要求时调用安装 |
 | `pi-pretty-codeblocks` | `pi-pretty-codeblocks` | 必装（npm） | TUI `Markdown.prototype.render` 补丁 | 隐藏 TUI Markdown 代码块的起止围栏行并移除默认 2 列缩进，保留源码内部缩进与 ANSI 语法高亮 |
 | `# https://github.com/oh-my-omp/omp-remote-build` | `omp-remote-build` | 可选（默认注释不装） | `xd://` 工具：`container_exec`, `container_write_stdin`, `container_list_sessions`, `container_kill_session` | 为每个 git worktree 在远端 Docker 主机维护 Mutagen 实时同步副本与 Komodo 构建容器（写工具执行后自动触发 `Mutagen flush`）。依赖 `omp-unified-exec`、Mutagen、km CLI 与 SSH 构建主机 |

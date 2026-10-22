@@ -13,7 +13,6 @@ plugins=(
   'pi-commandcode-provider'
   'pi-package-search'
   'pi-pretty-codeblocks'
-  'pi-schedule'
   'https://github.com/oh-my-omp/omp-thinking-translator'
   'https://github.com/oh-my-omp/omp-codex-image-gen'
   # 可选，默认不装：不是谁都需要远端构建环境，且依赖太多（omp-unified-exec、Mutagen、km CLI、Komodo Core/Periphery、可 SSH 的构建主机）。需要时加上引号取消注释。

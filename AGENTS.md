@@ -500,7 +500,7 @@ exercised in a real omp session.
   item in both directions (field-level diff and edit; validate with `JSON.parse`).
 - `doc-polish` section of `omomp.*` (machine-local, never in the repo) — `splitModel`, `polishModel`, `checkModel` (optional) and `concurrency`. The updater never writes or creates it; `/update-omp` asks before creating a missing one. A project's `.omp/omomp.*` copy wins over the agent-dir copy. **Distinct** from `ctx` `.md`/`.json` sidecar artifacts.
 - `install-plugins.sh` — declared plugin list: `pi-commandcode-provider`,
-  `pi-package-search`, `pi-pretty-codeblocks`, `pi-schedule`, and
+  `pi-package-search`, `pi-pretty-codeblocks`, and
   the GitHub URLs `mouriya-s-lab/pi-bansos` (our fork of npm `pi-bansos`, carrying
   fixes also submitted upstream to `mannnrachman/pi-bansos`), `oh-my-omp/omp-unified-exec`
   (our fork of `iamwrm/pi-unified-exec`, renamed, which skips the Pi-only compact codemode
