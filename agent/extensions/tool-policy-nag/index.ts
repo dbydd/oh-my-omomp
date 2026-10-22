@@ -11,8 +11,8 @@
  *
  * - `heuristic` — the deterministic string lane (`heuristic.ts`,
  *   `shell-parser.ts`): parses the command, counts every operation a built-in
- *   tool covers, and after the third hit sends `form.prompt` as a steer, at
- *   most three times per context, then goes quiet until a boundary that
+ *   tool covers, and once the hits exceed `form.afterHits` sends `form.prompt`
+ *   as a steer, at most `form.maxNags` times per context, then goes quiet until a boundary that
  *   replaces the context (compaction, `/clear`, a branch summary). Branch and
  *   tree navigation rebuild the branch's own state; it does not reset it. No
  *   JUDGE request is made and `INTENT-*.md` is not read.
@@ -61,9 +61,6 @@ import { type IntentSpec, intentReminder, intentViolation, JUDGE_TIMEOUT_MS, jud
 import { inspectRisk, riskReminder } from "./risk.ts";
 
 const STATE_ENTRY_TYPE = "mouriya.omp.tool-policy-nag.state";
-/** Fire on the hit that goes *past* three. */
-const HIT_THRESHOLD = 3;
-const MAX_NAGS_PER_CONTEXT = 3;
 /** The intent spec is read from beside this extension, not from the agent root. */
 const SPEC_DIR = import.meta.dir;
 
@@ -129,7 +126,8 @@ function heuristicCheck(
 	commit: (next: NagState) => void,
 	deliver: boolean,
 ): void {
-	if (state.kind === "exhausted") return;
+	// The configured cap decides, so raising `maxNags` re-arms an exhausted context.
+	if (state.nagsSent >= form.maxNags) return;
 	const violations = call.kind === "shell" ? detectShellViolations(call.command) : detectEvalViolations(call.language, call.code);
 	if (violations.length === 0) return;
 
@@ -138,33 +136,29 @@ function heuristicCheck(
 	const hits = state.hits + violations.length;
 	const programs = violations.map((violation) => `${violation.program} ${violation.target}`);
 	const violationDetails = violations.map(({ categories, program, target }) => ({ categories, program, target }));
-	if (hits <= HIT_THRESHOLD) {
+	if (hits <= form.afterHits) {
 		pi.logger.info("Tool-policy violation observed", {
 			hits,
-			threshold: HIT_THRESHOLD,
+			threshold: form.afterHits,
 			programs,
 			violations: violationDetails,
 			nagNumber: state.nagsSent,
 			nagsSent: state.nagsSent,
-			maxNags: MAX_NAGS_PER_CONTEXT,
+			maxNags: form.maxNags,
 			detectorArmed: true,
 		});
 		commit({ kind: "watching", hits, nagsSent: state.nagsSent });
 		return;
 	}
-	if (state.nagsSent >= MAX_NAGS_PER_CONTEXT) {
-		commit({ kind: "exhausted", hits, nagsSent: state.nagsSent });
-		return;
-	}
 	const nagsSent = state.nagsSent + 1;
-	const detectorArmed = nagsSent < MAX_NAGS_PER_CONTEXT;
+	const detectorArmed = nagsSent < form.maxNags;
 	pi.logger.info("Tool-policy violation past threshold — nagging", {
 		hits,
 		programs,
 		violations: violationDetails,
 		nagNumber: nagsSent,
 		nagsSent,
-		maxNags: MAX_NAGS_PER_CONTEXT,
+		maxNags: form.maxNags,
 		detectorArmed,
 		delivering: deliver,
 	});
@@ -172,7 +166,7 @@ function heuristicCheck(
 	if (!deliver) return;
 	pi.sendUserMessage(form.prompt, { deliverAs: "steer", attribution: "agent" });
 	ctx.ui.notify(
-		`Shell policy nag ${nagsSent}/${MAX_NAGS_PER_CONTEXT} sent for hit #${hits} (${programs.join(", ")}) — detector ${
+		`Shell policy nag ${nagsSent}/${form.maxNags} sent for hit #${hits} (${programs.join(", ")}) — detector ${
 			detectorArmed ? "still armed" : "exhausted until compaction"
 		}`,
 		"warning",

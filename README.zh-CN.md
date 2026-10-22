@@ -251,6 +251,8 @@ tool-policy-nag:
   detector: heuristic
   form:
     prompt: 你为什么不遵守system prompt，反思自己以后继续。
+    afterHits: 3
+    maxNags: 3
   intent:
     threshold: 0.5
   risk:
@@ -263,7 +265,7 @@ tool-policy-nag:
 - **`detector: jev`**：必须有 `intent`；`bashInterceptor.enabled` 按配置生效，为真时三条通道都跳过 `bash` 调用，因为拦截器已在执行前拒绝绕过内置工具的命令（`exec_command`、`bash_bg` 与 `eval` 照常检查）。可选的 `form` 段在 intent 通道旁照常计数，仅当 intent 通道无法运行（同目录 `INTENT-policy.md` 缺失、无效或停用，或原生 JUDGE 不可用）时才发送它的 `prompt`；原生 JUDGE 请求失败或 90s 超时时记一次 warning，不补发 `form` 提醒。
 - **`form` 通道（启发式语法解析与计数）**：
   - 解析管道、分号、引号、heredoc、命令替换与重定向（跳过 `sudo`/`doas`/`su`/`ssh`；有效终点为 `wc` 的统计管道豁免前面的列目录/读/搜；`/dev/*` 豁免读/搜/改/写）。统计六类 shell 违规（列目录 `ls`/`find`、读文件 `cat`/`bat`/`nl`/`head`/`tail`/`less`/`more`/`sed -n`、搜索 `grep`/`rg`/`ag`/`ack`/`awk`、编辑 `sed -i`/`perl -i`/`mv`、重定向写文件 `echo`/`printf`/`cat >`、内联脚本 `node`/`bun`/`deno`/`python`/`ruby` 带 `-e`/`-c`/`--eval` 或 `-` stdin）及 `eval` 文件/目录操作（`Path.read_text`、`open`、`glob`、`os.listdir`、`readFileSync`、`Bun.file`、`readdir`、`Bun.Glob`）。
-  - 前 3 次违规仅记录；第 4 次起每次以 steer 发送配置的 `form.prompt`（不得为空）并弹 UI 警告，每个 context 最多发 3 条后进入 `exhausted` 停止检测，直至下次 compaction、`/clear` 或 `branch_summary`。状态存于会话条目 `mouriya.omp.tool-policy-nag.state`，随分支切换自动重建。
+  - 前 `form.afterHits`（`3`）次违规仅记录；超过后每次违规以 steer 发送配置的 `form.prompt`（不得为空）并弹 UI 警告，每个 context 最多发 `form.maxNags`（`3`）条，之后停止，直至下次 compaction、`/clear` 或 `branch_summary`（在配置里调高 `maxNags` 立即恢复）。三个字段均必填。状态存于会话条目 `mouriya.omp.tool-policy-nag.state`，随分支切换自动重建。
 - **`intent` 通道（原生 JUDGE 工具路由分类）**：
   - 每次调用并行发起一次不阻塞命令的 JUDGE `choice` 请求，题目与 12 个选项判据定义在同目录 `INTENT-policy.md`（选项：`list`、`read`、`search`、`edit`、`write`、`move`、`eval`、`ast`、`pty`、`shell`、`mixed`、`none`，内含针对 `km ls actions`、`ssh host 'cat x'`、`npm test > log`、`curl -I`、管道过滤等真实误报类的反例）。
   - Shell 调用选中非 `none`、或 `eval` 调用选中非 `eval`/`none` 且概率 $\ge$ `threshold`（`0.5`）时，在下一个 step 边界以 `aside` 插入具体提醒（点名中文意图名、应替用的内置工具及调用原文），不计数、不封顶，并记 `Tool-policy intent verdict` info 日志。

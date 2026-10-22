@@ -8,8 +8,9 @@
  * the call at all:
  *
  * - `detector: heuristic` — the deterministic string lane (`heuristic.ts`):
- *   parses the command, counts the operations a built-in tool covers and sends
- *   `form.prompt`. `form` is required; an `intent` block is ignored, so no
+ *   parses the command, counts the operations a built-in tool covers and, once
+ *   the hits exceed `form.afterHits`, sends `form.prompt`, at most
+ *   `form.maxNags` times per context. `form` is required; an `intent` block is ignored, so no
  *   JUDGE request is made and `INTENT-*.md` is not read. OMP's bash
  *   interceptor is overridden off for the session while this detector is set.
  * - `detector: jev` — the intent lane (`intent.ts`): asks OMP's native JUDGE
@@ -21,7 +22,7 @@
  *   `null` leaves it off.
  *
  *   { "detector": "heuristic",
- *     "form": { "prompt": "…" },
+ *     "form": { "prompt": "…", "afterHits": 3, "maxNags": 3 },
  *     "intent": { "threshold": 0.5 },
  *     "risk": { "minCommands": 4, "minChars": 600, "minPrograms": 3 } }
  *
@@ -32,7 +33,14 @@ import { defineOmompSection, loadOmompSection } from "../_shared/omomp.ts";
 import type { RiskConfig } from "./risk.ts";
 
 /** The deterministic string lane and the text it sends. */
-export type FormLane = { readonly kind: "heuristic"; readonly prompt: string };
+export type FormLane = {
+	readonly kind: "heuristic";
+	readonly prompt: string;
+	/** Violations recorded silently before the first prompt is sent. */
+	readonly afterHits: number;
+	/** Prompts sent per context before the lane goes quiet. */
+	readonly maxNags: number;
+};
 
 /** The intent lane: one judged choice question per watched call. */
 export type IntentLane = {
@@ -59,7 +67,11 @@ const thresholdSchema = z.number().refine((value) => value > 0 && value <= 1, "t
 const positiveCount = (label: string) =>
 	z.number().refine((value) => Number.isInteger(value) && value > 0, `${label} must be a positive integer`);
 const intentBlock = z.object({ threshold: thresholdSchema });
-const formBlock = z.object({ prompt: z.string().refine((value) => value.trim().length > 0, "form.prompt must not be empty") });
+const formBlock = z.object({
+	prompt: z.string().refine((value) => value.trim().length > 0, "form.prompt must not be empty"),
+	afterHits: z.number().refine((value) => Number.isInteger(value) && value >= 0, "form.afterHits must be a non-negative integer"),
+	maxNags: positiveCount("form.maxNags"),
+});
 const riskBlock = z.object({
 	minCommands: positiveCount("minCommands"),
 	minChars: positiveCount("minChars"),
@@ -83,7 +95,7 @@ const lanesSchema = z.union([
 const omompSection = defineOmompSection(import.meta.dir, lanesSchema);
 
 function formOf(block: z.infer<typeof formBlock>): FormLane {
-	return { kind: "heuristic", prompt: block.prompt };
+	return { kind: "heuristic", prompt: block.prompt, afterHits: block.afterHits, maxNags: block.maxNags };
 }
 
 function lanesOf(value: z.infer<typeof lanesSchema>): Lanes {

@@ -251,6 +251,8 @@ tool-policy-nag:
   detector: heuristic
   form:
     prompt: 你为什么不遵守system prompt，反思自己以后继续。
+    afterHits: 3
+    maxNags: 3
   intent:
     threshold: 0.5
   risk:
@@ -263,7 +265,7 @@ tool-policy-nag:
 - **`detector: jev`** requires `intent`; `bashInterceptor.enabled` follows config, and while it is on, `bash` calls are skipped by every lane because the interceptor already refuses routing violations before they run (`exec_command`, `bash_bg` and `eval` stay watched). An optional `form` block counts beside the intent lane and sends its `prompt` only while the intent lane cannot run (adjacent `INTENT-policy.md` missing, invalid or disabled, or native JUDGE unavailable); a native JUDGE failure or 90s timeout warns once per reason and never triggers a fallback `form` nudge.
 - **`form` lane (heuristic parser and counter)**:
   - Recognizes pipes, semicolons, quotes, heredocs, command substitutions and redirects (skipping `sudo`/`doas`/`su`/`ssh`; pipelines effectively ending in `wc` exempt preceding list/read/search steps; `/dev/*` targets exempt read/search/edit/write). Counts six shell violation classes (listing `ls`/`find`, reading `cat`/`bat`/`nl`/`head`/`tail`/`less`/`more`/`sed -n`, searching `grep`/`rg`/`ag`/`ack`/`awk`, editing `sed -i`/`perl -i`/`mv`, redirected writes `echo`/`printf`/`cat >`, inline scripts `node`/`bun`/`deno`/`python`/`ruby` with `-e`/`-c`/`--eval` or `-` stdin) and `eval` file/directory calls (`Path.read_text`, `open`, `glob`, `os.listdir`, `readFileSync`, `Bun.file`, `readdir`, `Bun.Glob`).
-  - Records the first 3 hits silently; from the 4th hit on, steers the configured `form.prompt` (non-empty) with a UI warning, up to 3 times per context before entering `exhausted` until the next compaction, `/clear` or `branch_summary`. State persists in session custom entry `mouriya.omp.tool-policy-nag.state` and rebuilds across branch switches.
+  - Records the first `form.afterHits` (`3`) hits silently; past that, every hit steers the configured `form.prompt` (non-empty) with a UI warning, up to `form.maxNags` (`3`) times per context, then stays quiet until the next compaction, `/clear` or `branch_summary` (raising `maxNags` in config re-arms it at once). All three fields are required. State persists in session custom entry `mouriya.omp.tool-policy-nag.state` and rebuilds across branch switches.
 - **`intent` lane (native JUDGE tool-routing classification)**:
   - Fires one non-blocking parallel JUDGE `choice` request per watched call using the question and 12 option rubrics in `INTENT-policy.md` (`list`, `read`, `search`, `edit`, `write`, `move`, `eval`, `ast`, `pty`, `shell`, `mixed`, `none`, with explicit counterexamples for `km ls actions`, `ssh host 'cat x'`, `npm test > log`, `curl -I`, stream filters, etc.).
   - When a shell call picks anything other than `none` (or an `eval` call picks anything other than `eval`/`none`) with probability $\ge$ `threshold` (`0.5`), inserts an `aside` reminder at the next step boundary naming the Chinese intent title, the required built-in tool and the call text, uncapped, and logs `Tool-policy intent verdict`.
