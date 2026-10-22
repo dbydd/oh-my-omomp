@@ -55,7 +55,7 @@ flowchart TD
 | **提示词分层与模型适配** | OMP 原生提示词与自动压缩阈值无法按模型家族正则差异化配置 | 每次 `before_agent_start` | [append-system-model](#append-system-model) + [model-compaction](#model-compaction) | 按 `model`/`provider` 正则追加模型专属提示词，并为匹配模型写入原生 `"provider/id": "f<N>"` 压缩水位 | 启用 |
 | **宿主环境与运维补齐** | OMP 默认不扫描仓库 `.claude/rules` 与 `.pi/rules` | `session_start` / `before_agent_start` | [repo-rules](#repo-rules) | 从 `cwd` 向上至 git 根扫描 `.claude/rules`、`.agents/rules`、`.pi/rules` 并去重注入 | 启用 |
 | **宿主环境与运维补齐** | 仅人类能在 TUI 输入 `/wt`、`/move`、`/restart`，主代理无法自主切 worktree 或重启生效新配置 | 主 TUI 会话空闲时 | [wt-tool](#wt-tool) (`wt`/`wt_remove`) + [harness-restart](#harness-restart) | 排队并在回合真正结束后调用 TUI 原生命令分发器执行 worktree 切换、两阶段验证删除与带原因重启恢复 | 启用 |
-| **宿主环境与运维补齐** | 子进程内存泄漏（含脱离父进程的孤儿进程）拖垮宿主机 | macOS 每 250 ms | [child-memory-warning](#child-memory-warning) | 通过 Bun FFI 调 `libproc` 采样后代进程 `phys_footprint`，超过 4 GiB 时告警主 UI 与主 agent | 启用 |
+| **宿主环境与运维补齐** | 子进程内存泄漏（含脱离父进程的孤儿进程）拖垮宿主机 | macOS 每 250 ms | [child-memory-warning](#child-memory-warning) | 通过 Bun FFI 调 `libproc` 采样后代进程 `phys_footprint`，超过 `omomp.yml#child-memory-warning.thresholdGiB`（仓库配置 4 GiB）时告警主 UI 与主 agent | 启用 |
 | **宿主环境与运维补齐** | `--model` 指定 `commandcode` 模型时因宿主缓存遮蔽或内置 provider 同名冲突报鉴权失败 | `session_start` | [commandcode-model-spec](#commandcode-model-spec) | 识别 `commandcode-models.json` 中的模型并在 `api !== "commandcode-custom"` 时重选回插件实时注册模型 | 启用 |
 | **人机协同与多机同步** | 人类草稿需激励性润色、长文档需无损重排审校、多机配置需原子同步 | 按键 / 命令 / 启动时 | [input-polish](#input-polish) + [doc-polish](#doc-polish) + [omp-config-autoupdate](#omp-config-autoupdate) | `Ctrl+Enter` 浮层流式润色输入；三代理流水线生成 `/tmp/doc-polish` 对照审校报告；启动时子进程拉取默认分支自动应用 | `doc-polish` 禁用，其余启用 |
 
@@ -306,7 +306,8 @@ tool-policy-nag:
 macOS（Darwin）专属，完整模式与轻量模式均启用。首个主会话在 `session_start` 通过 Bun FFI 调用系统 LP64 `libproc`/`sysctl` ABI，启动每进程唯一的 250 ms 采样定时器（主会话切换只刷新投递上下文，主会话关闭时先清定时器再关句柄；非 Darwin 平台仅记一条 `未启用` info 日志）：
 
 - **物理内存口径与孤儿归属**：读取 `proc_pid_rusage` 的 `ri_phys_footprint`（含压缩与换出内存，非 RSS），以 `PID + 内核启动时间` 标识进程身份。经两遍进程表核对后追踪本 OMP 进程的全部后代及由后代组长创建的进程组；已被观测到的后代即使父进程退出变成孤儿（`PPID === 1`）仍保留归属直至进程结束（仅在两次采样间隔内出生并立即变成无存活组锚点孤儿的短命进程无法追溯）。
-- **告警投递**：当任一归属后代的 `phys_footprint > 4 GiB` 时，每个进程身份告警一次（弹主 UI warning，并向主 agent 发送含 PID、PPID、是否孤儿、GiB/bytes 读数与 240 字符命令的 `attribution: "agent"` 消息），**只告警、不发信号杀进程**。
+- **阈值配置**：`omomp.yml#child-memory-warning.thresholdGiB`（仓库配置 `4`，任意正数，可带小数）。主会话 cwd 下 `.omp/omomp.*` 的同名段优先于 agent 目录的段；每次采样都重读，改动从下一次 250 ms 采样起生效，无需重启。没有有效配置段时继续追踪进程归属但暂停告警；每出现一个新的配置问题（配置段缺失或无效、项目副本被跳过）记一条 warning 日志并弹一次主 UI warning。
+- **告警投递**：当任一归属后代的 `phys_footprint` 超过阈值时，每个进程身份告警一次（弹主 UI warning，并向主 agent 发送含 PID、PPID、是否孤儿、GiB/bytes 读数、阈值与 240 字符命令的 `attribution: "agent"` 消息），**只告警、不发信号杀进程**。
 
 #### input-polish
 
@@ -368,7 +369,7 @@ doc-polish:
 | 11 | `watchdog-agent` | [§4.2](#watchdog-agent) | 主 + 子 | 否 | `WATCHDOG-*.md`（本机独占） |
 | 12 | `turn-judge` | [§4.2](#turn-judge) | 主会话 | 否 | `TURN-JUDGE-*.md`（本机自建） |
 | 13 | `lang-nag` | [§4.2](#lang-nag) | 主会话 | 否 | `omomp.yml#lang-nag`（仓库托管） |
-| 14 | `child-memory-warning` | [§4.3](#child-memory-warning) | 主进程全局 | 是 | 无配置文件 |
+| 14 | `child-memory-warning` | [§4.3](#child-memory-warning) | 主进程全局 | 是 | `omomp.yml#child-memory-warning`（仓库托管） |
 | 15 | `input-polish` | [§4.3](#input-polish) | 主 TUI | 是 | `omomp.yml#input-polish`（仓库托管） |
 | 16 | `doc-polish` | [§4.3](#doc-polish) | 主 + 子 | 否 | `omomp.yml#doc-polish`（本机独占） |
 | 17 | `wt-tool` | [§4.3](#wt-tool) | 主 TUI | 是 | 无配置文件 |
@@ -472,7 +473,7 @@ flowchart LR
 | `PROMPT-INJECT-*.md`、`TURN-JUDGE-*.md`、`INTENT-*.md` | 仓库带则归仓库；本机自建归本机 | 覆盖仓库自带模板；本机在同目录自建的模板文件绝不触碰或删除 | 仅收回仓库已有的同名模板 | 下次派发 / 下一轮 / 下次调用 |
 | `APPEND_SYSTEM_MODEL.md`、`WATCHDOG-*.md` | 本机独占 | 绝不写入或删除（仅在旧平铺迁移时从根目录移入扩展目录） | 绝不收回仓库 | 下一条 prompt / 写入即刻重读 |
 | `agent/config.yml`（4 个结构化文件之一） | 仓库 + 本机按字段合并 | 仓库键覆盖本机同名键；**本机字段 `LOCAL_CONFIG_FIELDS`**（`providers.webSearchOrder`、`modelRoles`、`defaultThinkingLevel`、`skills`、`symbolPreset`、`theme`、`colorBlindMode`、`hideThinkingBlock`、`statusLine`、`terminal`、`tui`、`display`、`worktree`、`compaction.thresholdTokens`、`compaction.thresholdPercent`、`compaction.idleThresholdTokens`）及本机独有键保留不动；**共享列表 `MACHINE_LIST_FIELDS`（`extensions`）** 将本机独有条目（如 `~/.claude`）保留在仓库条目**之前** | 先 `read` 两边，仅用 `edit` 修改非本机字段的差异行，绝不整文件重序列化；本机字段与 `extensions` 本机条目不写回仓库 | OMP 实时热重载 |
-| `agent/omomp.yml`（4 个结构化文件之二） | 仓库 6 段 + 本机 3 段按段合并 | 覆盖仓库托管的 6 个段（`lang-nag`、`input-polish`、`tool-policy-nag`、`task-completion-judge`、`task-split-check`、`system-prompt-replace`）；保留本机独占的 3 个段 `LOCAL_OMOMP_SECTIONS`（`doc-polish`、`model-compaction`、`omp-config-autoupdate`） | 仅用 `edit` 修改仓库托管 6 个段的差异行；本机 3 个段不写回仓库 | 随各扩展读取时机生效 |
+| `agent/omomp.yml`（4 个结构化文件之二） | 仓库 7 段 + 本机 3 段按段合并 | 覆盖仓库托管的 7 个段（`lang-nag`、`input-polish`、`tool-policy-nag`、`task-completion-judge`、`task-split-check`、`child-memory-warning`、`system-prompt-replace`）；保留本机独占的 3 个段 `LOCAL_OMOMP_SECTIONS`（`doc-polish`、`model-compaction`、`omp-config-autoupdate`） | 仅用 `edit` 修改仓库托管 7 个段的差异行；本机 3 个段不写回仓库 | 随各扩展读取时机生效 |
 | `agent/thinking-translator.json`（4 个结构化文件之三） | 仓库 + 本机按字段合并 | 按字段合并覆盖仓库键，保留本机额外键 | 仅用 `edit` 修改差异字段 | 下一条消息开始时 |
 | `pi/agent/pi-bansos-relay-state.json`（4 个结构化文件之四） | 仓库 + 本机按字段合并 | 写入 `~/.pi/agent/pi-bansos-relay-state.json` | 从 `~/.pi/agent/` 按字段比对写回（本机文件不存在时不视为删除，保持仓库原样） | 下次会话启动或 `/bansos` |
 | 应用托管文件（首行 `// @orca-managed-pi-extension` 或含 `marker: _otty`） | 外部应用（Orca / Otty）独占 | 每次覆盖与删除前检查标记并跳过（记入 `skipped`） | 跳过不收回 | — |

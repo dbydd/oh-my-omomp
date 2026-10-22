@@ -23,6 +23,8 @@ task-completion-judge:
   model: openai-codex/gpt-6-1-sol
 task-split-check:
   model: openai-codex/gpt-6-1-sol
+child-memory-warning:
+  thresholdGiB: 4
 system-prompt-replace:
   replacements:
     - literal: "Use `read` for static web; browser only if needed."
