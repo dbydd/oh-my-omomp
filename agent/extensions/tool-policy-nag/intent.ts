@@ -114,9 +114,7 @@ export async function judgeIntent(judge: Judge, spec: IntentSpec, call: WatchedC
 		const criteria: Record<string, string> = {};
 		for (const option of spec.options) criteria[option.label] = option.rubric;
 		const state: JudgmentState =
-			call.kind === "shell"
-				? { tool: call.tool, command: call.command, tty: call.tty }
-				: { tool: "eval", language: call.language, code: call.code };
+			call.kind === "shell" ? { tool: call.tool, command: call.command } : { tool: "eval", language: call.language, code: call.code };
 		const result = await judge.judge(
 			{ state, questions: { intent: { type: "choice", instructions: spec.instructions, criteria } } },
 			{ signal },

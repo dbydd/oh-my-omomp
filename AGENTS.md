@@ -382,7 +382,11 @@ exercised in a real omp session.
   feature toggles (`astGrep.enabled: true`, `github.enabled: true`,
   `fetch.enabled: true`, `browser.enabled: false`, `launch.enabled: false` (`bash` has
   no service-launch mode), `todo.enabled: false` (native todo is off; the installed
-  `omp-todo-more` plugin provides `todo`)).
+  `omp-todo-more` plugin provides `todo`)), and `bashInterceptor` (enabled: `bash`
+  commands that redo `read`/`grep`/`glob`/`edit`/`write` work are refused before
+  they run; OMP's rules minus piped `cat <<` heredocs, `tail -f` and the
+  service-mode rules `launch.enabled: false` makes dead ends; `tool-policy-nag`
+  skips `bash` while it is on).
 - `agent/SYSTEM_TEMPLATE.md` — locally maintained Handlebars base template derived
   from `packages/coding-agent/src/prompts/system/system-prompt.md`. It owns workflow,
   explains delegation by ownership/parallelism/independent evidence, and renders live

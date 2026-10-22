@@ -1,11 +1,11 @@
 import { z } from "@oh-my-pi/pi-coding-agent";
 
 export type WatchedCall =
-	| { readonly kind: "shell"; readonly tool: string; readonly command: string; readonly tty: boolean }
+	| { readonly kind: "shell"; readonly tool: string; readonly command: string }
 	| { readonly kind: "eval"; readonly language: string; readonly code: string };
 
 const shellSchema = z.object({ command: z.string() });
-const execSchema = z.object({ cmd: z.string(), tty: z.unknown().optional() });
+const execSchema = z.object({ cmd: z.string() });
 const writeSchema = z.object({ path: z.string(), content: z.string() });
 const evalSchema = z.object({ language: z.string(), code: z.string() });
 
@@ -36,10 +36,10 @@ function deviceShellCall(path: string, content: string): WatchedCall | null {
 function shellCall(tool: string, input: unknown): WatchedCall | null {
 	if (tool === "exec_command") {
 		const parsed = execSchema.safeParse(input);
-		return parsed.success ? { kind: "shell", tool, command: parsed.data.cmd, tty: parsed.data.tty === true } : null;
+		return parsed.success ? { kind: "shell", tool, command: parsed.data.cmd } : null;
 	}
 	const parsed = shellSchema.safeParse(input);
-	return parsed.success ? { kind: "shell", tool, command: parsed.data.command, tty: false } : null;
+	return parsed.success ? { kind: "shell", tool, command: parsed.data.command } : null;
 }
 
 export function watchedCallOf(toolName: string, input: unknown): WatchedCall | null {

@@ -33,12 +33,19 @@
  * form delivers its generic nudge. A native request failure does not fall back
  * to form. Risk runs independently before intent preparation.
  *
+ * BASH UNDER THE INTERCEPTOR. While OMP's `bashInterceptor.enabled` is true in
+ * the session's live settings, `bash` calls (direct or through `xd://bash`) are
+ * skipped by every lane: the interceptor already refuses routing violations
+ * before they run. `exec_command`, `bash_bg` and eval stay watched. The setting
+ * is read at every watched call, so a config.yml hot reload applies at once.
+ *
  * Registers session lifecycle and tool_call hooks; appends counter entries to
  * the session branch and injects attributed user reminders. Main sessions only.
  * Hook failures are logged and do not escape into omp.
  */
 import type { Judge } from "@oh-my-pi/pi-ai";
-import { type ExtensionAPI, type ExtensionContext, z } from "@oh-my-pi/pi-coding-agent";
+import { AgentRegistry, type ExtensionAPI, type ExtensionContext, z } from "@oh-my-pi/pi-coding-agent";
+import { cfgBashInterceptorEnabled } from "@oh-my-pi/pi-coding-agent/exec/settings";
 import { errorText } from "../_shared/errors.ts";
 import { openNativeJudge } from "../_shared/judge.ts";
 import { type WatchedCall, watchedCallOf } from "./calls.ts";
@@ -97,6 +104,15 @@ function rebuildState(ctx: ExtensionContext): NagState {
 		if (parsed !== null) state = parsed;
 	}
 	return state;
+}
+
+/** OMP's own bash interceptor setting, from the live settings of this session. */
+function bashInterceptorEnabled(ctx: ExtensionContext): boolean {
+	const session = AgentRegistry.global()
+		.list()
+		.find((ref) => ref.session?.sessionManager === ctx.sessionManager)?.session;
+	if (session == null) throw new Error("tool-policy-nag: current OMP session is not registered");
+	return cfgBashInterceptorEnabled.get(session.settings) === true;
 }
 
 function heuristicCheck(
@@ -283,6 +299,7 @@ export default function toolPolicyNag(pi: ExtensionAPI): void {
 			if (call === null) return;
 			// The device re-dispatches its payload as a nested tool call with the same id.
 			if (event.toolName === "write") nestedDeviceCalls.add(event.toolCallId);
+			if (call.kind === "shell" && call.tool === "bash" && bashInterceptorEnabled(ctx)) return;
 			const { lanes, warnings }: { lanes: Lanes; warnings: readonly string[] } = loadLanes(ctx.cwd);
 			for (const warning of warnings) warnOnce(ctx, warning);
 			if (lanes.risk !== null && call.kind === "shell") {
@@ -290,7 +307,7 @@ export default function toolPolicyNag(pi: ExtensionAPI): void {
 				if (finding !== null) {
 					pi.logger.info("Tool-policy risk", { limits: lanes.risk, ...finding });
 					pi.sendUserMessage(
-						riskReminder(call.command, finding),
+						riskReminder(call.tool, call.command, finding),
 						ctx.isIdle() ? { attribution: "agent" } : { deliverAs: "aside", attribution: "agent" },
 					);
 					if (ctx.hasUI) {

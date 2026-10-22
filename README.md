@@ -242,7 +242,7 @@ Intercepts terminal structured `yield` calls inside `task:low`, `task:mid` and `
 
 #### tool-policy-nag
 
-Main session only. Inspects `bash`, `bash_bg`, `exec_command` (including JSON written to `xd://bash`, `xd://bash_bg`, `xd://exec_command`) and `eval` at `tool_call`; **it only reminds and never blocks a command**. Three independent lanes are configured in the `tool-policy-nag` section of `omomp.yml` (re-read per watched call from project `.omp/omomp.*` then agent-dir `omomp.*`; set a lane to `null` to disable it; legacy single-detector `{detector: "heuristic"|"jev"}` shapes still parse):
+Main session only. Inspects `bash`, `bash_bg`, `exec_command` (including JSON written to `xd://bash`, `xd://bash_bg`, `xd://exec_command`) and `eval` at `tool_call`; **it only reminds and never blocks a command**. While OMP's `bashInterceptor.enabled` is true in the session's live settings (`agent/config.yml` turns it on), `bash` calls are skipped by every lane, because the interceptor already refuses routing violations before they run; `exec_command`, `bash_bg` and `eval` stay watched. Three independent lanes are configured in the `tool-policy-nag` section of `omomp.yml` (re-read per watched call from project `.omp/omomp.*` then agent-dir `omomp.*`; set a lane to `null` to disable it; legacy single-detector `{detector: "heuristic"|"jev"}` shapes still parse):
 
 ```yaml
 tool-policy-nag:

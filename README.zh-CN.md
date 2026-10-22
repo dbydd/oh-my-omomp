@@ -242,7 +242,7 @@ model-compaction:
 
 #### tool-policy-nag
 
-仅作用于主会话，在 `tool_call` 阶段检查 `bash`、`bash_bg`、`exec_command`（含经 `write` 写往 `xd://bash`、`xd://bash_bg`、`xd://exec_command` 的调用）与 `eval` 代码，**只提醒、不拦截命令**。由 `omomp.yml` 的 `tool-policy-nag` 段配置三条独立通道（按项目 `.omp/omomp.*` → agent 目录 `omomp.*` 每次调用重读；设为 `null` 关闭对应通道，兼容旧版单检测器 `{detector: "heuristic"|"jev"}` 写法）：
+仅作用于主会话，在 `tool_call` 阶段检查 `bash`、`bash_bg`、`exec_command`（含经 `write` 写往 `xd://bash`、`xd://bash_bg`、`xd://exec_command` 的调用）与 `eval` 代码，**只提醒、不拦截命令**。会话实时设置里 OMP 的 `bashInterceptor.enabled` 为真时（`agent/config.yml` 已打开），三条通道都跳过 `bash` 调用，因为拦截器已在执行前拒绝绕过内置工具的命令；`exec_command`、`bash_bg` 与 `eval` 照常检查。由 `omomp.yml` 的 `tool-policy-nag` 段配置三条独立通道（按项目 `.omp/omomp.*` → agent 目录 `omomp.*` 每次调用重读；设为 `null` 关闭对应通道，兼容旧版单检测器 `{detector: "heuristic"|"jev"}` 写法）：
 
 ```yaml
 tool-policy-nag:
