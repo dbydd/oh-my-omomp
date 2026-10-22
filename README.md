@@ -36,7 +36,7 @@ flowchart TD
 
 ### Failure-Mode and Runtime Countermeasure Matrix
 
-Every one of the repository's **20 local extensions**, **10+1 external plugins** and core config settings counters a specific model failure mode or harness gap:
+Every one of the repository's **21 local extensions**, **10+1 external plugins** and core config settings counters a specific model failure mode or harness gap:
 
 | Control loop | Model failure mode / harness gap | Interception / trigger hook | Countermeasure carrier | Runtime control action | Light mode |
 |---|---|---|---|---|---|
@@ -57,6 +57,7 @@ Every one of the repository's **20 local extensions**, **10+1 external plugins**
 | **Host environment & ops patches** | Only a human can type `/wt`, `/move` or `/restart` in the TUI; the main agent cannot manage its own session worktree or restart | Main TUI session when idle | [wt-tool](#wt-tool) (`wt`/`wt_remove`) + [harness-restart](#harness-restart) | Queues and runs TUI slash-command dispatchers after the turn ends for worktree creation, two-phase verified removal and session-resuming restart | Yes |
 | **Host environment & ops patches** | Runaway descendant processes (including reparented orphans) exhaust host RAM | macOS every 2 s | [child-memory-warning](#child-memory-warning) | Samples descendant `phys_footprint` via Bun FFI `libproc` and alerts the main UI and agent past `omomp.yml#child-memory-warning.thresholdGiB` (repository value 4 GiB) | Yes |
 | **Host environment & ops patches** | `--model` with a `commandcode` model fails auth due to `models.db` cache shadowing or built-in provider name collision | `session_start` | [commandcode-model-spec](#commandcode-model-spec) | Detects catalog models in `commandcode-models.json` running with `api !== "commandcode-custom"` and rebinds them to the live plugin model | Yes |
+| **Host environment & ops patches** | OMP's hand-captured Antigravity wire table lacks newer wire ids (`gemini-4-argon-*`), so small caller budgets such as compaction's 512-token short summary go out unchanged and Gemini spends them all on thinking | Root `session_start` | [antigravity-wire-profiles](#antigravity-wire-profiles) | Fetches `fetchAvailableModels` for every Antigravity account and writes each served wire id's `maxOutputTokens` / `model_enum` into the provider's table in place | Yes |
 | **Human-agent UX & fleet sync** | Operator drafts need motivating polish, long docs need meaning-preserving restructuring, and multi-machine configs need atomic sync | Chord / command / startup | [input-polish](#input-polish) + [doc-polish](#doc-polish) + [omp-config-autoupdate](#omp-config-autoupdate) | `Ctrl+Enter` streams a draft rewrite in an overlay; 3-agent pipeline writes `/tmp/doc-polish` reviews; child process auto-applies default-branch commits at startup | `doc-polish`: No; others: Yes |
 
 ---
@@ -352,6 +353,10 @@ Enables `harness_restart` in the interactive TUI's main session (retained in lig
 
 Fixes two host auth failures when `--model` selects a `commandcode` model at startup: ① **cache shadowing** (`models.db` caches discovered commandcode models as `openai-completions`/`anthropic-messages`, so `--model` uses the host transport instead of the plugin's `commandcode-custom` and gets 401); ② **prefix collision** (ids like `google/gemini-3.5-flash-lite` resolve to a credential-less built-in `google` provider). At `session_start`, the extension reads `<agentDir>/commandcode-models.json` (or `COMMANDCODE_MODELS_CACHE`), and when the selected model belongs to the catalog with `api !== "commandcode-custom"` (and is not an available credentialed built-in model), calls `setModel` to rebind it to the live model registered by `pi-commandcode-provider`.
 
+#### antigravity-wire-profiles
+
+Makes every Antigravity (`google-antigravity`) request take `generationConfig.maxOutputTokens` and `labels.model_enum` from the backend model list instead of OMP's hand-captured `ANTIGRAVITY_MODEL_WIRE_PROFILES` table (`@oh-my-pi/pi-catalog/wire/gemini-headers`). The provider replaces the caller's `maxTokens` only for wire ids in that table; ids added after it was captured (`gemini-4-argon-*`) are missing, so compaction's short summary went out with 512 output tokens at high thinking and failed with `thought-only response without final output`. At the root session's `session_start` (awaited, 20 s budget; `before_agent_start` awaits the same load) the extension calls `POST <baseUrl>/v1internal:fetchAvailableModels` with the session's credential and every stored Antigravity account, unions the served rows (not internal or disabled, positive integer `maxOutputTokens`) and writes them into the exported table in place. It only adds or overwrites entries and never deletes one, because one account's roster does not prove another account lacks a model. The provider reads the table per request, so agent turns, compaction and in-process subagents all use the backend values, and a listed wire id ignores the caller's `maxTokens` (the table's existing contract). When no account yields a usable list, the table keeps its previous contents, a warning goes to the log and the main UI, and the next root session start retries.
+
 ### Local Extensions Index
 
 | # | Extension directory | Section | Scope | Light mode | Config source (`omomp.yml` section or sibling file) |
@@ -375,7 +380,8 @@ Fixes two host auth failures when `--model` selects a `commandcode` model at sta
 | 17 | `wt-tool` | [§4.3](#wt-tool) | Main TUI | Yes | No config file |
 | 18 | `harness-restart` | [§4.3](#harness-restart) | Main TUI | Yes | No config file |
 | 19 | `commandcode-model-spec` | [§4.3](#commandcode-model-spec) | Main + Sub | Yes | Reads machine-local `commandcode-models.json` |
-| 20 | `omp-config-autoupdate` | [§7.2](#omp-config-autoupdate) | Root main | Yes | `omomp.yml#omp-config-autoupdate` (machine-owned) |
+| 20 | `antigravity-wire-profiles` | [§4.3](#antigravity-wire-profiles) | Root main (process-wide table) | Yes | Backend `fetchAvailableModels` list; no file |
+| 21 | `omp-config-autoupdate` | [§7.2](#omp-config-autoupdate) | Root main | Yes | `omomp.yml#omp-config-autoupdate` (machine-owned) |
 
 ---
 
@@ -432,7 +438,7 @@ providers:
 
 ## 6. Dual Runtime Modes: Full Mode vs omp-light
 
-Full mode (`omp`) runs the complete suite of dispatch gates, sideband judges and mandatory advisors for heavy engineering; quick questions and small edits do not need that ceremony tax. `omp-light` launches a trimmed process whose overrides apply only to that process without modifying any files on disk, partitioning all 20 local extensions into **10 disabled + 1 path-excluded + 9 retained**:
+Full mode (`omp`) runs the complete suite of dispatch gates, sideband judges and mandatory advisors for heavy engineering; quick questions and small edits do not need that ceremony tax. `omp-light` launches a trimmed process whose overrides apply only to that process without modifying any files on disk, partitioning all 21 local extensions into **10 disabled + 1 path-excluded + 10 retained**:
 
 | Dimension | Full mode (`omp`) | Light mode (`omp-light`) |
 |---|---|---|
@@ -440,7 +446,7 @@ Full mode (`omp`) runs the complete suite of dispatch gates, sideband judges and
 | Proactive delegation (`task.eager`) | `preferred` | `default` (less proactive delegation; subagents remain available) |
 | **10** local extensions disabled via `disabledExtensions` | All enabled | Disabled: `doc-polish`, `fork-task`, `isolation-nudge`, `lang-nag`, `task-completion-judge`, `task-split-check`, `tool-policy-nag`, `turn-judge`, `user-prompt-inject`, `watchdog-agent` |
 | **1** trailing extension excluded via `extensions: []` | `system-prompt-replace` enabled | `config-light.yml` sets `extensions: []` to drop `extensions-last/system-prompt-replace` (`disabledExtensions` filters by module name and cannot reach file-path entries); `omp-light.ts` reads the machine's `config.yml` and passes every non-`/extensions-last/` entry (such as `~/.claude`) back via `-e` |
-| **9** local extensions kept enabled | Enabled | Enabled: `append-system-model`, `child-memory-warning`, `commandcode-model-spec`, `harness-restart`, `input-polish`, `model-compaction`, `omp-config-autoupdate`, `repo-rules`, `wt-tool` |
+| **10** local extensions kept enabled | Enabled | Enabled: `antigravity-wire-profiles`, `append-system-model`, `child-memory-warning`, `commandcode-model-spec`, `harness-restart`, `input-polish`, `model-compaction`, `omp-config-autoupdate`, `repo-rules`, `wt-tool` |
 | Installed plugins (`omp-todo-more`'s `todo` and `ctx` included) | All loaded | All loaded (`disabledExtensions` does not filter plugins) |
 | Tool availability difference | Full toolset | Only `polish_doc` and `fork_task` disappear; `todo`, `ctx`, `wt`, `wt_remove` and `harness_restart` remain available |
 

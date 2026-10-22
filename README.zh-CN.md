@@ -36,7 +36,7 @@ flowchart TD
 
 ### 失效模式与运行时对策全景矩阵
 
-仓库中的全部 **20 个本地扩展**、**10+1 个外部插件**与核心配置项均对应明确的模型失效模式或宿主能力缺口，不存在无归属的装饰性脚本：
+仓库中的全部 **21 个本地扩展**、**10+1 个外部插件**与核心配置项均对应明确的模型失效模式或宿主能力缺口，不存在无归属的装饰性脚本：
 
 | 控制环路 | 真实模型失效模式 / 宿主能力缺口 | 拦截 / 触发时机 | 对策载体 | 运行时控制动作 | 轻量模式 |
 |---|---|---|---|---|---|
@@ -57,6 +57,7 @@ flowchart TD
 | **宿主环境与运维补齐** | 仅人类能在 TUI 输入 `/wt`、`/move`、`/restart`，主代理无法自主切 worktree 或重启生效新配置 | 主 TUI 会话空闲时 | [wt-tool](#wt-tool) (`wt`/`wt_remove`) + [harness-restart](#harness-restart) | 排队并在回合真正结束后调用 TUI 原生命令分发器执行 worktree 切换、两阶段验证删除与带原因重启恢复 | 启用 |
 | **宿主环境与运维补齐** | 子进程内存泄漏（含脱离父进程的孤儿进程）拖垮宿主机 | macOS 每 2 s | [child-memory-warning](#child-memory-warning) | 通过 Bun FFI 调 `libproc` 采样后代进程 `phys_footprint`，超过 `omomp.yml#child-memory-warning.thresholdGiB`（仓库配置 4 GiB）时告警主 UI 与主 agent | 启用 |
 | **宿主环境与运维补齐** | `--model` 指定 `commandcode` 模型时因宿主缓存遮蔽或内置 provider 同名冲突报鉴权失败 | `session_start` | [commandcode-model-spec](#commandcode-model-spec) | 识别 `commandcode-models.json` 中的模型并在 `api !== "commandcode-custom"` 时重选回插件实时注册模型 | 启用 |
+| **宿主环境与运维补齐** | OMP 手工抓包的 Antigravity wire 表缺少较新的 wire id（`gemini-4-argon-*`），调用方的小输出预算（如 compaction short summary 的 512 token）原样发出，被 Gemini 的 thinking 全部耗尽 | 根会话 `session_start` | [antigravity-wire-profiles](#antigravity-wire-profiles) | 按每个 Antigravity 账号拉取 `fetchAvailableModels`，把每个在服 wire id 的 `maxOutputTokens` / `model_enum` 原地写入 provider 读取的表 | 启用 |
 | **人机协同与多机同步** | 人类草稿需激励性润色、长文档需无损重排审校、多机配置需原子同步 | 按键 / 命令 / 启动时 | [input-polish](#input-polish) + [doc-polish](#doc-polish) + [omp-config-autoupdate](#omp-config-autoupdate) | `Ctrl+Enter` 浮层流式润色输入；三代理流水线生成 `/tmp/doc-polish` 对照审校报告；启动时子进程拉取默认分支自动应用 | `doc-polish` 禁用，其余启用 |
 
 ---
@@ -352,6 +353,10 @@ doc-polish:
 
 修复通过 `--model` 启动参数指定 `commandcode` 模型时出现的两类宿主认证失败：① **缓存遮蔽**（`models.db` 将发现的 commandcode 模型缓存为 `openai-completions`/`anthropic-messages`，导致 `--model` 走宿主 transport 而非插件的 `commandcode-custom` 报 401）；② **前缀冲突**（如 `google/gemini-3.5-flash-lite` 被切分到无凭据的内置 `google` provider 报缺 API key）。扩展在 `session_start` 读取 `<agentDir>/commandcode-models.json`（可由 `COMMANDCODE_MODELS_CACHE` 覆盖），当所选模型在目录中且当前 `api !== "commandcode-custom"`（且非内置已授权可用模型）时，调用 `setModel` 将其重选回 `pi-commandcode-provider` 插件实时注册的模型。
 
+#### antigravity-wire-profiles
+
+让每个 Antigravity（`google-antigravity`）请求的 `generationConfig.maxOutputTokens` 与 `labels.model_enum` 以后端模型列表为准，而不是 OMP 手工抓包的 `ANTIGRAVITY_MODEL_WIRE_PROFILES` 表（`@oh-my-pi/pi-catalog/wire/gemini-headers`）。provider 只对表里有的 wire id 替换调用方的 `maxTokens`；抓包之后新增的 id（`gemini-4-argon-*`）不在表里，于是 compaction 的 short summary 以 512 输出 token、high thinking 发出，报 `thought-only response without final output`。扩展在根会话 `session_start`（同步等待，预算 20 s；`before_agent_start` 等待同一次加载）用本会话凭据和全部已存 Antigravity 账号调用 `POST <baseUrl>/v1internal:fetchAvailableModels`，合并在服的行（非 internal、非 disabled、`maxOutputTokens` 为正整数），原地写入导出的表。只新增或覆盖条目、从不删除，因为一个账号的列表不能证明别的账号没有该模型。provider 每次请求都读这张表，所以普通轮次、compaction 和同进程子代理都用后端值；表里有的 wire id 会忽略调用方的 `maxTokens`（这张表原有的约定）。所有账号都拿不到可用列表时，表保持原内容，日志与主 UI 各出一条警告，下次根会话启动时重试。
+
 ### 本地扩展总览表
 
 | 序号 | 扩展目录 | 所属章节 | 作用域 | 轻量模式 | 配置源（`omomp.yml` 段或同目录文件） |
@@ -375,7 +380,8 @@ doc-polish:
 | 17 | `wt-tool` | [§4.3](#wt-tool) | 主 TUI | 是 | 无配置文件 |
 | 18 | `harness-restart` | [§4.3](#harness-restart) | 主 TUI | 是 | 无配置文件 |
 | 19 | `commandcode-model-spec` | [§4.3](#commandcode-model-spec) | 主 + 子 | 是 | 读取本机 `commandcode-models.json` |
-| 20 | `omp-config-autoupdate` | [§7.2](#omp-config-autoupdate) | 根主会话 | 是 | `omomp.yml#omp-config-autoupdate`（本机独占） |
+| 20 | `antigravity-wire-profiles` | [§4.3](#antigravity-wire-profiles) | 根主会话（表为进程全局） | 是 | 后端 `fetchAvailableModels` 列表；无文件 |
+| 21 | `omp-config-autoupdate` | [§7.2](#omp-config-autoupdate) | 根主会话 | 是 | `omomp.yml#omp-config-autoupdate`（本机独占） |
 
 ---
 
@@ -432,7 +438,7 @@ providers:
 
 ## 6. 双轨运行模式：Full 模式与 omp-light
 
-Full 模式（直接运行 `omp`）挂载了全套派发门禁、旁路判定器与强制顾问，适合重型长程工程；而日常简单问答或小修小补不需要承担这套流程税。`omp-light` 启动一个仅对当前进程生效、不改写任何磁盘文件的精简模式，将全部 20 个本地扩展精确划分为 **10 个禁用 + 1 个路径排除 + 9 个保留**：
+Full 模式（直接运行 `omp`）挂载了全套派发门禁、旁路判定器与强制顾问，适合重型长程工程；而日常简单问答或小修小补不需要承担这套流程税。`omp-light` 启动一个仅对当前进程生效、不改写任何磁盘文件的精简模式，将全部 21 个本地扩展精确划分为 **10 个禁用 + 1 个路径排除 + 10 个保留**：
 
 | 维度 | Full 模式（`omp`） | 轻量模式（`omp-light`） |
 |---|---|---|
@@ -440,7 +446,7 @@ Full 模式（直接运行 `omp`）挂载了全套派发门禁、旁路判定器
 | 主动委派倾向 (`task.eager`) | `preferred` | `default`（减弱主动派工，但不关闭 subagent） |
 | 经 `disabledExtensions` 禁用的 **10** 个本地扩展 | 全部启用 | 禁用：`doc-polish`、`fork-task`、`isolation-nudge`、`lang-nag`、`task-completion-judge`、`task-split-check`、`tool-policy-nag`、`turn-judge`、`user-prompt-inject`、`watchdog-agent` |
 | 经 `extensions: []` 排除的 **1** 个末尾扩展 | 启用 `system-prompt-replace` | `config-light.yml` 将 `extensions` 置空以排除 `extensions-last/system-prompt-replace`（`disabledExtensions` 按模块名过滤，管不到写成文件路径的条目）；启动器 `omp-light.ts` 读取本机 `config.yml`，将其余路径不含 `/extensions-last/` 的本机条目（如 `~/.claude`）通过 `-e` 补回 |
-| 保留启用的 **9** 个本地扩展 | 启用 | 启用：`append-system-model`、`child-memory-warning`、`commandcode-model-spec`、`harness-restart`、`input-polish`、`model-compaction`、`omp-config-autoupdate`、`repo-rules`、`wt-tool` |
+| 保留启用的 **10** 个本地扩展 | 启用 | 启用：`antigravity-wire-profiles`、`append-system-model`、`child-memory-warning`、`commandcode-model-spec`、`harness-restart`、`input-polish`、`model-compaction`、`omp-config-autoupdate`、`repo-rules`、`wt-tool` |
 | 已安装插件（含 `omp-todo-more` 的 `todo` 与 `ctx`） | 全部加载 | 全部加载（`disabledExtensions` 不作用于插件） |
 | 工具差异 | 全量工具 | 仅 `polish_doc` 与 `fork_task` 消失；`todo`、`ctx`、`wt`、`wt_remove`、`harness_restart` 均照常可用 |
 
