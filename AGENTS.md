@@ -151,6 +151,12 @@ that passes and the touched extension has been exercised in a real omp session.
 - **Injected user-role messages carry `attribution: "agent"`.** The default is
   `user`, and `user-prompt-inject` treats `user`-attributed messages as the
   human's own prompts.
+- **A reminder an extension sends on its own initiative is a custom message,
+  not a user message.** `pi.sendMessage({ customType, content, display: true, attribution: "agent" })`
+  reaches the model as a developer message; `pi.sendUserMessage` puts the same
+  text in the human's mouth, which is what makes a steering reminder read as
+  the user interrupting. Reserve `sendUserMessage` for text the human actually
+  authored.
 - **Imports:** omp host package roots (`pi-agent-core`, `pi-ai`, `pi-catalog`,
   `pi-coding-agent`, `pi-natives`, `pi-tui`, `pi-utils`), Node/Bun built-ins and
   relative paths. Use a host subpath only when an extension already loads it in

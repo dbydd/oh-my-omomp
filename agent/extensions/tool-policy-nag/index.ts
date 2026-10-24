@@ -48,12 +48,14 @@
  *
  * Registers session lifecycle and tool_call hooks; appends counter entries to
  * the session branch, overrides one OMP setting at runtime and injects
- * attributed user reminders. Main sessions only. Hook failures are logged and
- * do not escape into omp.
+ * `tool-policy-nag` custom messages, which reach the model as developer
+ * messages rather than as the human's own words. Main sessions only. Hook
+ * failures are logged and do not escape into omp.
  */
 import type { Judge } from "@oh-my-pi/pi-ai";
 import { AgentRegistry, type ExtensionAPI, type ExtensionContext, type Settings, z } from "@oh-my-pi/pi-coding-agent";
 import { cfgBashInterceptorEnabled } from "@oh-my-pi/pi-coding-agent/exec/settings";
+import type { CustomMessagePayload } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { errorText } from "../_shared/errors.ts";
 import { openNativeJudge } from "../_shared/judge.ts";
 import { type WatchedCall, watchedCallOf } from "./calls.ts";
@@ -65,6 +67,14 @@ import { inspectRisk, riskReminder } from "./risk.ts";
 const STATE_ENTRY_TYPE = "dbydd.omp.tool-policy-nag.state";
 /** The intent spec is read from beside this extension, not from the agent root. */
 const SPEC_DIR = import.meta.dir;
+
+/** One custom message type for every lane, so a reminder is never read as a user turn. */
+const MESSAGE_TYPE = "tool-policy-nag";
+
+/** The payload every lane sends: a visible custom message attributed to the extension. */
+function nagMessage(content: string): CustomMessagePayload {
+	return { customType: MESSAGE_TYPE, content, display: true, attribution: "agent" };
+}
 
 type NagState =
 	| { readonly kind: "watching"; readonly hits: number; readonly nagsSent: number }
@@ -166,7 +176,7 @@ function heuristicCheck(
 	});
 	commit(detectorArmed ? { kind: "watching", hits, nagsSent } : { kind: "exhausted", hits, nagsSent });
 	if (!deliver) return;
-	pi.sendUserMessage(form.prompt, { deliverAs: "steer", attribution: "agent" });
+	pi.sendMessage(nagMessage(form.prompt), { deliverAs: "steer" });
 	ctx.ui.notify(
 		`Shell policy nag ${nagsSent}/${form.maxNags} sent for hit #${hits} (${programs.join(", ")}) — detector ${
 			detectorArmed ? "still armed" : "exhausted until compaction"
@@ -275,10 +285,7 @@ export default function toolPolicyNag(pi: ExtensionAPI): void {
 			if (ctx.hasUI) ctx.ui.notify(`${summary}；判断返回前会话已切换，未发送提醒`, "info");
 			return;
 		}
-		pi.sendUserMessage(
-			intentReminder(call, option),
-			ctx.isIdle() ? { attribution: "agent" } : { deliverAs: "aside", attribution: "agent" },
-		);
+		pi.sendMessage(nagMessage(intentReminder(call, option)), ctx.isIdle() ? { triggerTurn: true } : { deliverAs: "aside" });
 		if (ctx.hasUI) ctx.ui.notify(summary, "warning");
 	};
 
@@ -337,9 +344,9 @@ export default function toolPolicyNag(pi: ExtensionAPI): void {
 				const finding = inspectRisk(call.command, lanes.risk);
 				if (finding !== null) {
 					pi.logger.info("Tool-policy risk", { limits: lanes.risk, ...finding });
-					pi.sendUserMessage(
-						riskReminder(call.tool, call.command, finding),
-						ctx.isIdle() ? { attribution: "agent" } : { deliverAs: "aside", attribution: "agent" },
+					pi.sendMessage(
+						nagMessage(riskReminder(call.tool, call.command, finding)),
+						ctx.isIdle() ? { triggerTurn: true } : { deliverAs: "aside" },
 					);
 					if (ctx.hasUI) {
 						ctx.ui.notify(
