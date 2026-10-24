@@ -1,0 +1,68 @@
+# omp-config unified extension configuration (omomp).
+# One top-level section per extension; the section id is the extension's directory name.
+# Installed as <agent dir>/omomp.yml. Machine-local sections (doc-polish, model-compaction,
+# omp-config-autoupdate) live only on the machine and are never written from here.
+lang-nag:
+  model: openai-codex/gpt-6-luna
+  language: 中文
+  instruction: 说中文
+input-polish:
+  model: opencode-go/muse-spark-1.3-contributor:high
+  key: ctrl+enter
+  instruction: 在不改变原意的前提下，改写到听起来会让人更加想努力、能激动人心，但不要太夸张。
+tool-policy-nag:
+  detector: heuristic
+  form:
+    prompt: 你为什么不遵守system prompt，反思自己以后继续。
+    afterHits: 3
+    maxNags: 3
+  intent:
+    threshold: 0.5
+  risk:
+    minCommands: 4
+    minChars: 600
+    minPrograms: 3
+task-completion-judge:
+  model: openai-codex/gpt-6-1-sol
+task-split-check:
+  model: openai-codex/gpt-6-1-sol
+child-memory-warning:
+  thresholdGiB: 4
+system-prompt-replace:
+  replacements:
+    - literal: "Use `read` for static web; browser only if needed."
+      replace: "Use `read` as OMP's unified retrieval protocol, not merely as a file reader. One `path` selects both the source and its view: `<source><:selector>` or `<source>?<query>`. Sources include local files and directories, archive members, SQLite and JSON queries, documents and notebooks, images and video, web URLs, internal URIs, and POSIX SSH paths. Start with the bare source when you need structure or metadata, then re-read that source with an explicit range, view, or `:raw` selector for exact content. A non-raw read of a mutable local file records the snapshot and seen lines consumed by `edit`; `:raw` is exact and intentionally unanchored. Follow the result's recovery ranges and truncation notices rather than guessing omitted content. Full protocol, limits, and edge cases: `omp://tools/read.md`. Use `read` for static web content; use the browser when interaction or rendered page state is required."
+    - literal: Use most specific agent.
+      replace: "Choose a worker tier by cost and required trust, not task type, difficulty, ambiguity, code volume, or tool familiarity. Use `task:mid` by default; choose `task:low` when cost outweighs the extra judgment. Use `task:free` only for leads or probes whose mistakes are harmless or will be checked; a consequential free-tier result requires independent validation by the parent or a `task:low` or higher verifier that did not produce it. Free-tier agreement is not validation. Keep the operator's model bindings and role assignments unchanged."
+    - regex: "Every task MUST skip build/lint/tests/formatters mid-flight; run once afterward\\.|No TODO tracking, no progress updates\\."
+      replace: ""
+    - literal: Shared edits need one integration owner
+      replace: "Concurrent writers MUST use `isolated: true`, with non-overlapping file/state ownership and one integration owner. Research-only agents stay shared so they remain reachable. Use repository-relative paths for isolated assignments; identify pre-existing parent changes. Shared edits need one integration owner"
+    - regex: "Omit `agent` only for default \\(`[^`]*`\\); NEVER specify it\\."
+      replace: "Always set `agent` explicitly; never rely on the default. User says `parallel` or `parallelize` → use task subagents, not merely parallel tool calls. Omit per-spawn `effort` unless the user explicitly requests it; the configured agent binding chooses model and effort."
+    - literal: "User-reported errors, failures, observations are ground truth; NEVER rerun checks to confirm them."
+      replace: "User-reported errors, failures, observations are ground truth; NEVER rerun checks to doubt them. Reproducing to locate the cause and confirming the fix still apply."
+    - literal: "Compiled code: NEVER avoidable allocation, copying, computation."
+      replace: "Compiled code: NEVER add avoidable allocation, copying, computation."
+    - literal: "On error, retry only the failed step; earlier steps may have taken effect."
+      replace: "On error, retry only the failed step; earlier steps may have taken effect.\nRefuse to investigate files through `eval`: reading content (`open`, `Path.read_text`, `Bun.file`, `readFileSync`, the prelude `read()`), listing or finding files (`os.listdir`, `os.walk`, `glob.glob`, `readdirSync`), and searching text (regex over file content, `subprocess` running `cat`/`ls`/`find`/`grep`/`rg`) belong to `read`, `glob` and `grep`. A quick look, many files at once, or fewer tool calls are not exceptions. `eval` starts only where the work needs language semantics on data already in hand: computation, transforms, structured parsing, library calls."
+    - regex: "Write JSON args as `content` to `xd://<tool>` via `([^`]+)`\\."
+      replace: "Write JSON args as `content` to `xd://<tool>` via `$1`. Devices are not functions: no `xd__<tool>`, `xd_<tool>`, or bare `<tool>` function exists, so never call one; the only call is `$1` with `path` set to `xd://<tool>`."
+    - literal: |-
+        Persistent shell: one fact command/pipeline; dependencies use `&&`.
+        // Scripts/heredocs/`$(…)`/complex pipelines → `eval`.
+        // `cwd`, not `cd`; `pty` only interactive.
+        // Internal URIs work as paths for builtins/coreutils, redirects, globs.
+        // `async` defers finite results but keeps the deadline (default 300s); `timeout: 0` for watchers and long jobs.
+        // No `head`/`tail`/redirection; output trunc by default, full result at `artifact://<id>`.
+        //
+        // Non-`pty` calls still running after 60s (or 1s before `timeout`, if sooner) usually move to background job `bg_N` and keep running to `timeout` (not when the client terminal runs the command or the job cap is reached); the result arrives automatically as a follow-up message. NEVER poll.
+      replace: |-
+        Runs command text synchronously in OMP's embedded POSIX shell (brush), not /bin/bash: the call waits for the command and returns its output. It is the default way to run a command. Write POSIX shell and do not switch shells inside a call (`bash -c`, `zsh -c`, `pwsh -Command`). Keep each call to one cohesive operation; chain only dependent steps with `&&`.
+        // Use it for real programs and short pipelines: builds, tests, git, package managers, CLIs, probes, remote/container commands, filters over a program's output. Reading, listing and searching files → `read`/`glob`/`grep`; file content you author → `write`/`edit`; inline Python/JS or computation needing language semantics → `eval`. A command that runs long or must keep running, waits on an outside condition, needs a terminal (REPL, TUI, password prompt, `sudo`, interactive `ssh`) or needs another shell → `xd://exec_command` where mounted.
+        // Set `cwd` instead of `cd`. Shell variables may persist between calls, but overlapping calls run in isolated one-shot shells, so make every command self-contained. Pipes, `$(…)` and redirecting a program's output (`2>&1`, `>/dev/null`) are ordinary shell. Internal URIs work as file paths for builtins/coreutils, redirects and globs.
+        // Do not add `head`/`tail` just to shorten output: stdout and stderr arrive merged, long output keeps its head and tail, and the result links an `artifact://<id>` when the full capture is available.
+        //
+        // `timeout` is the deadline in seconds from call start: default 300; positive values are clamped to 1–3600 and may be capped lower by configuration. Size it to the command; work that may outlast it belongs in `exec_command`.
+        // A call still running after 60s may move to background job `bg_N` (it stays in the foreground at the job cap); its result then arrives once, as a follow-up, to the session that started it. Do not wait for it with more tool calls (`sleep`, `ps`, `tail`, repeated `read proc://bg_N`): continue other work; with nothing left, end the turn (main session) or call `wait` (subagent). `read proc://bg_N` is for one-off diagnosis; `write proc://bg_N/kill` cancels.
+        // To wait for a condition outside your control (a host coming back, CI finishing, a deploy), start one quiet loop with `xd://exec_command` that prints only when it ends, e.g. 24h: `(for i in $(seq 288); do probe >/dev/null 2>&1 && exit 0; sleep 300; done; exit 1) && echo READY || echo GAVE_UP`, then attach `xd://monitor` without `condition`, which wakes you once when it ends. Failed checks print nothing; do not add a per-check marker.

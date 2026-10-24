@@ -1,4 +1,4 @@
-// Reads cwd/doc-polish.json before the adjacent doc-polish.json; reads source
+// Reads the doc-polish section of omomp.* (the project copy before the agent-dir copy); reads source
 // documents and writes original copies, split indexes, and reviews under /tmp/doc-polish.
 // Available in main and sub sessions. Invalid/missing config falls back to defaults;
 // runtime model failures retry three times, while unparseable polish output is reported
@@ -33,10 +33,10 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, extname, isAbsolute, join, resolve as resolvePath } from "node:path";
 import { type ExtensionAPI, type ExtensionContext, z } from "@oh-my-pi/pi-coding-agent";
-import { loadJsonConfig } from "../_shared/config.ts";
 import { errorText } from "../_shared/errors.ts";
 import { runHelperPrompt } from "../_shared/helper-session.ts";
 import { type ModelChoice as ResolvedModel, resolveModelChain } from "../_shared/models.ts";
+import { defineOmompSection, loadOmompSection } from "../_shared/omomp.ts";
 
 const BATCH_LIMIT = 5000; // code points per polish request; a block over this goes alone, never truncated.
 
@@ -98,13 +98,15 @@ const configSchema = z.object({
 	concurrency: z.number().int().min(1).optional(),
 });
 
+const omompSection = defineOmompSection(import.meta.dir, configSchema);
+
 type DocPolishConfig = { splitModel?: string; polishModel?: string; checkModel?: string; concurrency?: number };
 
-// Optional predefined model config. A `doc-polish.json` in the caller's cwd (wins)
-// or next to this extension supplies default model specs and concurrency; explicit
-// tool/command arguments still override it.
+// Optional predefined model config: the `doc-polish` section of omomp.* (the
+// project's `.omp/` copy wins over the agent-dir copy) supplies default model
+// specs and concurrency; explicit tool/command arguments still override it.
 function loadConfig(cwd: string): DocPolishConfig {
-	const loaded = loadJsonConfig("doc-polish.json", configSchema, [cwd, import.meta.dir]);
+	const loaded = loadOmompSection(omompSection, cwd);
 	switch (loaded.kind) {
 		case "found":
 			return loaded.value;
@@ -136,7 +138,7 @@ class DocPolishModelError extends Error {}
 class DocPolishRuntimeError extends Error {}
 
 type ModelRole = "splitModel" | "polishModel" | "checkModel";
-type ModelSource = "调用参数" | "doc-polish.json" | "当前会话模型";
+type ModelSource = "调用参数" | "omomp 配置 doc-polish" | "当前会话模型";
 
 interface ModelChoice {
 	readonly role: ModelRole;
@@ -155,7 +157,7 @@ function missingModelMessage(missing: readonly ModelChoice[]): string {
 		"- `polishModel`（润色）：在不改变原意的前提下，把每个批次重排/润色成工程师更易读的文本，并给出词表变更；无工具。",
 		"- `checkModel`（校验）：对合并后的每个编组判断语义是否保持、如何理解；无工具。未设置时回退到 `splitModel`。",
 		"",
-		"改 `doc-polish.json` 或在调用时传入可用模型后重新调用（`omp models` 可查看可用模型）。",
+		"改 omomp 配置的 `doc-polish` 段或在调用时传入可用模型后重新调用（`omp models` 可查看可用模型）。",
 	].join("\n");
 }
 
@@ -640,11 +642,11 @@ async function polishDocuments(
 	progress: Progress,
 ): Promise<{ source: string; review: string }[]> {
 	const config = loadConfig(ctx.cwd);
-	// The model each role will actually use: call parameter > doc-polish.json >
+	// The model each role will actually use: call parameter > omomp doc-polish >
 	// current session model (checkModel falls back to splitModel's choice).
 	const choose = (role: ModelRole, explicit: string | undefined, configured: string | undefined): ModelChoice | undefined => {
 		if (explicit !== undefined) return { role, spec: explicit, source: "调用参数" };
-		if (configured !== undefined) return { role, spec: configured, source: "doc-polish.json" };
+		if (configured !== undefined) return { role, spec: configured, source: "omomp 配置 doc-polish" };
 		return undefined;
 	};
 	const split: ModelChoice = choose("splitModel", options.splitModel, config.splitModel) ?? {

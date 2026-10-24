@@ -1,6 +1,7 @@
 type RedirectOperator = "write" | "append" | "hereDoc" | "hereString" | "other";
 export type CommandToken =
-	| { readonly kind: "word"; readonly text: string }
+	/** `dynamic`: the word's text holds an unexpanded `$…` or a command substitution, so its runtime value is unknown. */
+	| { readonly kind: "word"; readonly text: string; readonly dynamic: boolean }
 	/** `<` — the following word is a file the command reads. */
 	| { readonly kind: "readFrom"; readonly fd: number }
 	/** `>`, `>>`, `2>`, `<<`, `<<<` — the following word is not a file being read. */
@@ -52,6 +53,10 @@ function parseRedirect(command: string, index: number, ch: "<" | ">", fdPrefix: 
 		} else if (command[index + 1] === "&") {
 			operator = "other";
 			consumed = 1;
+		} else if (command[index + 1] === "|") {
+			// `>|` clobbers like `>`; the `|` is not a pipe.
+			operator = "write";
+			consumed = 1;
 		} else {
 			operator = "write";
 		}
@@ -78,8 +83,16 @@ function parseRedirect(command: string, index: number, ch: "<" | ">", fdPrefix: 
  * consumed (their content stays a single word), `$(`/backtick substitutions and
  * control operators end the current command, so `echo $(cat f)` still exposes
  * `cat f` as its own simple command. Here-document bodies are opaque.
+ * `piped`: the command is a later stage of a `|`/`|&` pipeline, so its stdin is
+ * the previous stage's stdout. `captured`: the command runs inside a `$(…)` or
+ * backtick substitution, so its stdout becomes words of the enclosing command.
  */
-export type SimpleCommand = { readonly tokens: CommandToken[]; readonly pipelineId: number };
+export type SimpleCommand = {
+	readonly tokens: CommandToken[];
+	readonly pipelineId: number;
+	readonly piped: boolean;
+	readonly captured: boolean;
+};
 
 export function splitSimpleCommands(command: string): SimpleCommand[] {
 	const commands: SimpleCommand[] = [];
@@ -89,18 +102,21 @@ export function splitSimpleCommands(command: string): SimpleCommand[] {
 	let word = "";
 	let wordStart: number | null = null;
 	let wordCanBeFd = true;
+	let wordDynamic = false;
+	let piped = false;
 	let quote: '"' | "'" | null = null;
 	const substitutions: Array<{ readonly delimiter: "$(" | "`"; readonly resumeQuote: '"' | null }> = [];
-	const suspendedCommands: Array<{ readonly current: CommandToken[]; readonly pipelineId: number }> = [];
+	const suspendedCommands: Array<{ readonly current: CommandToken[]; readonly pipelineId: number; readonly piped: boolean }> = [];
 	const hereDocuments: HereDocument[] = [];
 	let expectingHereDocumentDelimiter: HereDocument | null = null;
 	const flushWord = (): void => {
 		if (word.length === 0) {
 			wordStart = null;
 			wordCanBeFd = true;
+			wordDynamic = false;
 			return;
 		}
-		current.push({ kind: "word", text: word });
+		current.push({ kind: "word", text: word, dynamic: wordDynamic });
 		if (expectingHereDocumentDelimiter !== null) {
 			hereDocuments.push({ delimiter: word, stripTabs: expectingHereDocumentDelimiter.stripTabs });
 			expectingHereDocumentDelimiter = null;
@@ -108,21 +124,27 @@ export function splitSimpleCommands(command: string): SimpleCommand[] {
 		word = "";
 		wordStart = null;
 		wordCanBeFd = true;
+		wordDynamic = false;
 	};
 	const flushCommand = (): void => {
 		flushWord();
 		if (current.length === 0) return;
-		commands.push({ tokens: current, pipelineId });
+		commands.push({ tokens: current, pipelineId, piped, captured: substitutions.length > 0 });
 		current = [];
+		piped = false;
 	};
 	const flushPipeline = (): void => {
 		flushCommand();
+		piped = false;
 		pipelineId = nextPipelineId++;
 	};
 	const beginSubstitution = (delimiter: "$(" | "`", resumeQuote: '"' | null): void => {
+		// The word fragment before the substitution and any fragment glued after it are dynamic.
+		wordDynamic = true;
 		flushWord();
-		suspendedCommands.push({ current, pipelineId });
+		suspendedCommands.push({ current, pipelineId, piped });
 		current = [];
+		piped = false;
 		pipelineId = nextPipelineId++;
 		substitutions.push({ delimiter, resumeQuote });
 	};
@@ -131,8 +153,10 @@ export function splitSimpleCommands(command: string): SimpleCommand[] {
 		const suspended = suspendedCommands.pop();
 		current = suspended?.current ?? [];
 		pipelineId = suspended?.pipelineId ?? 0;
+		piped = suspended?.piped ?? false;
 		const substitution = substitutions.pop();
 		quote = substitution?.resumeQuote ?? null;
+		wordDynamic = true;
 	};
 
 	for (let i = 0; i < command.length; i++) {
@@ -153,6 +177,7 @@ export function splitSimpleCommands(command: string): SimpleCommand[] {
 				beginSubstitution("`", '"');
 				quote = null;
 			} else {
+				if (quote === '"' && ch === "$") wordDynamic = true;
 				word += ch;
 			}
 			continue;
@@ -203,11 +228,20 @@ export function splitSimpleCommands(command: string): SimpleCommand[] {
 				i++;
 			} else {
 				flushCommand();
+				piped = true;
 				if (command[i + 1] === "&") i++;
 			}
 			continue;
 		}
-		if (isOperatorChar(ch) && !(ch === "&" && command[i + 1] === ">")) {
+		if (ch === "&" && command[i + 1] === ">") {
+			// `&>` / `&>>` send stdout (and stderr) to the following word.
+			flushWord();
+			const redirect = parseRedirect(command, i + 1, ">", 1);
+			current.push(redirect.token);
+			i += 1 + redirect.consumed;
+			continue;
+		}
+		if (isOperatorChar(ch)) {
 			flushPipeline();
 			continue;
 		}
@@ -229,6 +263,7 @@ export function splitSimpleCommands(command: string): SimpleCommand[] {
 			continue;
 		}
 		if (wordStart === null) wordStart = i;
+		if (ch === "$") wordDynamic = true;
 		word += ch;
 	}
 	flushPipeline();

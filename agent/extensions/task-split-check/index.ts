@@ -1,5 +1,5 @@
 /**
- * Registers `tool_call`; reads/writes no files. Split checks are main-only;
+ * Registers `tool_call`; reads the model from the `task-split-check` section of omomp.* and writes no files. Split checks are main-only;
  * report-limit checks apply to main and sub sessions. Unexpected hook errors
  * are logged as warnings and let the call run.
  *
@@ -11,18 +11,18 @@
  * item is flagged by any check the whole call is blocked with the reasons of
  * every flagging check. Checks differ only in their definition:
  *
- * - `split`: main session `task` calls, items for a leaf or mid-tier lane
- *   (`labor`, `engineer`, `theorist`, `philosopher`, `fusion-worker`,
- *   `fusion-deepthink`); does the item cover more than one topic. A prompt that
- *   got a verdict passes unchanged the second time, so the main agent can force
- *   an item it judges to be one topic.
+ * - `split`: main session `task` calls, items for `task:low` / `task:free` /
+ *   `task:mid`; does the item cover more than one topic. A prompt that got a
+ *   verdict passes unchanged the second time, so the main agent can force an
+ *   item it judges to be one topic.
  * - `report-limit`: every session, `task` and `fork_task`, every task-series
- *   item (a lane name, or `agent` omitted); does the dispatch cap the length of
+ *   item (`task:*`, or `agent` omitted); does the dispatch cap the length of
  *   the worker's report. No re-dispatch bypass — the cap must go and long
  *   reports go to a file; only `false` prompts are remembered, to skip asking
  *   again.
  *
  * Memory is per process, keyed by check + sha256 of the item prompt.
+ * The model is the `model` of the `task-split-check` section of omomp.*, re-read at every request; without a valid section every request fails open.
  * Every failure (model missing, provider error, unparseable answer, deadline)
  * lets the item pass for the affected checks. The deadline stays under the
  * harness's 30 s `tool_call` handler timeout, which would otherwise block the
@@ -34,8 +34,13 @@ import { THINKING_EFFORTS } from "@oh-my-pi/pi-catalog";
 import { type ExtensionAPI, type ExtensionContext, z } from "@oh-my-pi/pi-coding-agent";
 import { errorText } from "../_shared/errors.ts";
 import { textOf } from "../_shared/messages.ts";
+import { defineOmompSection, loadOmompSection } from "../_shared/omomp.ts";
 
-const MODEL = "magpie/group/fusion-flattened";
+const configSchema = z.object({
+	/** Fast model (`provider/id`, bare id, or role alias) answering the dispatch questions. No `:effort` suffix; reasoning is always medium. */
+	model: z.string().min(1),
+});
+const omompSection = defineOmompSection(import.meta.dir, configSchema);
 const EFFORT = THINKING_EFFORTS.find((effort) => effort === "medium");
 if (EFFORT === undefined) throw new Error("task-split-check: host does not recognize medium reasoning effort");
 const DEADLINE_MS = 25_000;
@@ -83,16 +88,7 @@ type Check = {
 	readonly reason: (labels: string) => string;
 };
 
-/** Leaf and mid-tier lanes; the two top routers fan out by design, so they are exempt. */
-const SPLIT_AGENTS: Record<string, true> = {
-	task: true,
-	labor: true,
-	engineer: true,
-	theorist: true,
-	philosopher: true,
-	"fusion-worker": true,
-	"fusion-deepthink": true,
-};
+const SPLIT_AGENTS: Record<string, true> = { "task:low": true, "task:free": true, "task:mid": true };
 
 const CHECKS: readonly Check[] = [
 	{
@@ -189,8 +185,13 @@ type ItemVerdicts = { readonly label: string; readonly verdicts: ReadonlyMap<Che
 
 export default function taskSplitCheck(pi: ExtensionAPI): void {
 	const ask = async (ctx: ExtensionContext, systemPrompt: string, prompt: string, signal: AbortSignal): Promise<Reply> => {
-		const model = ctx.models.resolve(MODEL);
-		if (model === undefined) return { kind: "failed", why: `model unavailable: ${MODEL}` };
+		const config = loadOmompSection(omompSection, ctx.cwd);
+		if (config.kind === "none") {
+			const skipped = config.skipped.map(({ path, reason }) => `${path}: ${reason}`).join("; ");
+			return { kind: "failed", why: `no valid task-split-check section in omomp.*: ${skipped || "not found"}` };
+		}
+		const model = ctx.models.resolve(config.value.model);
+		if (model === undefined) return { kind: "failed", why: `model unavailable: ${config.value.model}` };
 		try {
 			const reply = await completeSimple(
 				model,

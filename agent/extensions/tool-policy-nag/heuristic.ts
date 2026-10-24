@@ -1,77 +1,17 @@
+import { isDeviceTarget, resolveCommand, type ShellWord } from "./shell-command.ts";
 import { type CommandToken, type SimpleCommand, splitSimpleCommands } from "./shell-parser.ts";
-
-/** Programs that source file bytes the `read` tool owns. */
-const READ_PROGRAMS: Record<string, true> = {
-	cat: true,
-	bat: true,
-	nl: true,
-	head: true,
-	tail: true,
-	less: true,
-	more: true,
-	sed: true,
-};
-const EVAL_PROGRAMS: Record<string, true> = {
-	node: true,
-	bun: true,
-	deno: true,
-	python: true,
-	python3: true,
-	ruby: true,
-};
-/**
- * Privilege elevation and remote execution: the command runs as another user or
- * on another host, where the built-in tools cannot reach, so it is never a hit.
- */
-const EXEMPT_PROGRAMS: Record<string, true> = {
-	sudo: true,
-	doas: true,
-	su: true,
-	ssh: true,
-};
-/** Prefixes that delegate to the real program in the same command position. */
-const WRAPPER_PROGRAMS: Record<string, true> = {
-	command: true,
-	env: true,
-	time: true,
-	nohup: true,
-	builtin: true,
-	exec: true,
-	stdbuf: true,
-	nice: true,
-	xargs: true,
-};
-
-type ViolationCategory = "list" | "read" | "search" | "edit" | "write" | "eval";
-type ShellProgram =
-	| "ls"
-	| "find"
-	| "cat"
-	| "bat"
-	| "nl"
-	| "head"
-	| "tail"
-	| "less"
-	| "more"
-	| "sed"
-	| "grep"
-	| "egrep"
-	| "fgrep"
-	| "rg"
-	| "ag"
-	| "ack"
-	| "awk"
-	| "perl"
-	| "mv"
-	| "echo"
-	| "printf"
-	| "node"
-	| "bun"
-	| "deno"
-	| "python"
-	| "python3"
-	| "ruby";
-type NonEmptyReadonlyArray<T> = readonly [T, ...T[]];
+import {
+	type Analysis,
+	type AnalysisContext,
+	analyzeProgram,
+	type Finding,
+	isShellProgram,
+	type NonEmptyReadonlyArray,
+	type ShellProgram,
+	type ShellViolation,
+	type StreamRole,
+	type ViolationCategory,
+} from "./shell-programs.ts";
 
 /** Library entry points the eval tool's `code` uses to reimplement `read`/`glob`. */
 type EvalApi =
@@ -91,545 +31,137 @@ type EvalApi =
 	| "fs.readdir"
 	| "Bun.Glob";
 
-/** One shell command matched by one or more policy categories. */
-type ShellViolation = {
+type EvalViolation = {
 	readonly categories: NonEmptyReadonlyArray<ViolationCategory>;
-	readonly program: ShellProgram | EvalApi;
+	readonly program: EvalApi;
 	readonly target: string;
 };
-const basename = (path: string): string => {
-	const slash = path.lastIndexOf("/");
-	return slash === -1 ? path : path.slice(slash + 1);
-};
 
-const isEnvAssignment = (text: string): boolean => /^[A-Za-z_][A-Za-z0-9_]*=/.test(text);
+/** Stands for the operands `xargs` appends when its stdin is a path stream. */
+const XARGS_OPERAND = "<xargs>";
 
-const isFlag = (text: string): boolean => text.length > 1 && text.startsWith("-");
+/** `xargs`: the program runs on arguments xargs built from stdin, so it consumes the upstream output. */
+type Stage = { readonly program: ShellProgram | null; readonly analysis: Analysis; readonly xargs: boolean };
 
-const firstScriptOperand = (args: readonly string[]): string | undefined => {
-	let options = true;
-	for (const arg of args) {
-		if (options && arg === "--") {
-			options = false;
-			continue;
-		}
-		if (options && isFlag(arg) && arg !== "-") continue;
-		return arg;
-	}
-	return undefined;
-};
+const UNKNOWN_STAGE: Stage = { program: null, analysis: { findings: [], nested: [], role: "other" }, xargs: false };
 
-type ParsedArguments = { readonly flags: readonly string[]; readonly operands: readonly string[] };
-
-const parseArguments = (args: readonly string[], consumesValue: (flag: string) => boolean): ParsedArguments => {
-	const flags: string[] = [];
-	const operands: string[] = [];
-	let options = true;
-	for (let i = 0; i < args.length; i++) {
-		const arg = args[i];
-		if (arg === undefined) continue;
-		if (options && arg === "--") {
-			options = false;
-			continue;
-		}
-		if (options && isFlag(arg)) {
-			flags.push(arg);
-			if (consumesValue(arg)) i++;
-			continue;
-		}
-		operands.push(arg);
-	}
-	return { flags, operands };
-};
-
-const optionName = (flag: string): string => {
-	const equals = flag.indexOf("=");
-	return equals === -1 ? flag : flag.slice(0, equals);
-};
-
-const noOptionValue = (_flag: string): boolean => false;
-
-const readOptionConsumesValue = (program: string, flag: string): boolean => {
-	const name = optionName(flag);
-	if ((program === "head" || program === "tail") && (name === "-n" || name === "-c" || name === "--lines" || name === "--bytes")) {
-		return flag === name;
-	}
-	if (
-		program === "nl" &&
-		(name === "-w" ||
-			name === "-s" ||
-			name === "-v" ||
-			name === "-i" ||
-			name === "--width" ||
-			name === "--separator" ||
-			name === "--starting-line-number" ||
-			name === "--line-increment")
-	) {
-		return flag === name;
-	}
-	return false;
-};
-
-const sedIsQuiet = (flags: readonly string[]): boolean =>
-	flags.some((flag) => flag === "--quiet" || flag === "--silent" || /^-[^-]*n/.test(flag));
-
-const sedIsInPlace = (flags: readonly string[]): boolean =>
-	flags.some((flag) => flag === "--in-place" || flag.startsWith("--in-place=") || /^-[^-]*i/.test(flag));
-
-/** With `-e`/`-f` the script is not an operand, so every operand is a file. */
-const sedScriptIsFlag = (flags: readonly string[]): boolean =>
-	flags.some((flag) => {
-		const name = optionName(flag);
-		return name === "-e" || name === "-f" || name === "--expression" || name === "--file";
-	});
-
-const sedOptionConsumesValue = (flag: string): boolean => {
-	const name = optionName(flag);
-	return (name === "-e" || name === "-f" || name === "--expression" || name === "--file") && flag === name;
-};
-
-const perlOptionConsumesValue = (flag: string): boolean => {
-	const name = optionName(flag);
-	return (name === "-e" || name === "-f" || name === "--eval" || name === "--file") && flag === name;
-};
-const mvTarget = (args: readonly string[], operands: readonly string[]): string | undefined => {
-	let targetDirectory: string | undefined;
-	for (let i = 0; i < args.length; i++) {
-		const arg = args[i];
-		if (arg === undefined) continue;
-		if (arg === "-t" || arg === "--target-directory") {
-			targetDirectory = args[i + 1];
-			i++;
-		} else if (arg.startsWith("--target-directory=")) {
-			targetDirectory = arg.slice("--target-directory=".length);
-		} else if (arg.startsWith("-t") && arg.length > 2) {
-			targetDirectory = arg.slice(2);
-		}
-	}
-	if (targetDirectory !== undefined && operands.length > 0) return targetDirectory;
-	if (operands.length < 2) return undefined;
-	return lastNonDashOperand(operands);
-};
-
-const searchOptionConsumesValue = (flag: string): boolean => {
-	const name = optionName(flag);
-	return (
-		(name === "-e" ||
-			name === "-f" ||
-			name === "--regexp" ||
-			name === "--file" ||
-			name === "--include" ||
-			name === "--exclude" ||
-			name === "--exclude-dir" ||
-			name === "-g" ||
-			name === "--glob" ||
-			name === "--type" ||
-			name === "--type-add") &&
-		flag === name
-	);
-};
-
-const FIND_OPTIONS_WITH_VALUES: Record<string, true> = {
-	"-D": true,
-	"-maxdepth": true,
-	"-mindepth": true,
-	"-name": true,
-	"-iname": true,
-	"-path": true,
-	"-ipath": true,
-	"-wholename": true,
-	"-iwholename": true,
-	"-regex": true,
-	"-iregex": true,
-	"-type": true,
-	"-user": true,
-	"-group": true,
-	"-perm": true,
-	"-size": true,
-	"-printf": true,
-	"-fprintf": true,
-};
-
-const findOptionConsumesValue = (flag: string): boolean => {
-	const name = optionName(flag);
-	return FIND_OPTIONS_WITH_VALUES[name] === true && flag === name;
-};
-
-const awkOptionConsumesValue = (flag: string): boolean => {
-	const name = optionName(flag);
-	return (name === "-f" || name === "-v" || name === "-F") && flag === name;
-};
-
-const isSearchFlag = (flag: string): boolean => {
-	if (flag === "--include" || flag.startsWith("--include=")) return true;
-	if (flag.startsWith("--")) return false;
-	return flag.slice(1).includes("r") || flag.slice(1).includes("R") || flag.slice(1).includes("l");
-};
-
-const firstNonDashOperand = (operands: readonly string[]): string | undefined => operands.find((operand) => operand !== "-");
-
-const lastNonDashOperand = (operands: readonly string[]): string | undefined => {
-	for (let i = operands.length - 1; i >= 0; i--) {
-		const operand = operands[i];
-		if (operand === undefined) continue;
-		if (operand !== "-" && operand.length > 0) return operand;
-	}
-	return undefined;
-};
-
-/** `/dev/*` is a kernel stream, not file bytes any tool can fetch. */
-const isDeviceTarget = (target: string): boolean => target.startsWith("/dev/");
-
-type OutputRedirect = { readonly operator: "write" | "append"; readonly target: string };
-
-function inlineEvalTarget(program: string, args: readonly string[]): string | null {
-	for (let i = 0; i < args.length; i++) {
-		const arg = args[i];
-		if (arg === undefined) continue;
-		if (arg === "-e" || arg === "-c" || arg === "--eval" || arg === "-p") return args[i + 1] ?? "<inline>";
-		if (arg.startsWith("--eval=")) return arg.slice("--eval=".length);
-		if (!arg.startsWith("--") && /^-[ecp].+/.test(arg)) return arg.slice(2);
-	}
-	if (program === "deno" && args[0] === "eval") return firstScriptOperand(args.slice(1)) ?? "<inline>";
-	return firstScriptOperand(args) === "-" ? "<stdin>" : null;
-}
-
-function isShellProgram(program: string): program is ShellProgram {
-	switch (program) {
-		case "ls":
-		case "find":
-		case "cat":
-		case "bat":
-		case "nl":
-		case "head":
-		case "tail":
-		case "less":
-		case "more":
-		case "sed":
-		case "grep":
-		case "egrep":
-		case "fgrep":
-		case "rg":
-		case "ag":
-		case "ack":
-		case "awk":
-		case "perl":
-		case "mv":
-		case "echo":
-		case "printf":
-		case "node":
-		case "bun":
-		case "deno":
-		case "python":
-		case "python3":
-		case "ruby":
-			return true;
-		default:
-			return false;
-	}
-}
-
-function analyzeSimpleCommand(tokens: readonly CommandToken[]): ShellViolation[] {
-	let index = 0;
-	while (index < tokens.length) {
-		const token = tokens[index];
-		if (token === undefined) return [];
-		if (token.kind === "readFrom" || token.kind === "otherRedirect") {
-			index += 2;
-			continue;
-		}
-		if (token.kind !== "word") return [];
-		if (isEnvAssignment(token.text) || WRAPPER_PROGRAMS[basename(token.text)] === true) {
-			index++;
-			continue;
-		}
-		break;
-	}
-	const head = tokens[index];
-	if (head === undefined || head.kind !== "word") return [];
-	const program = basename(head.text);
-	if (EXEMPT_PROGRAMS[program] === true) return [];
-	const args: string[] = [];
-	const readInputs: string[] = [];
-	const outputRedirects: OutputRedirect[] = [];
-	for (let j = 0; j < tokens.length; j++) {
-		const token = tokens[j];
-		if (token === undefined) continue;
-		if (token.kind === "word") {
-			if (j > index) args.push(token.text);
-			continue;
-		}
-		const target = tokens[j + 1];
-		if (target?.kind === "word") {
-			if (token.kind === "readFrom" && token.fd === 0) {
-				readInputs.push(target.text);
-			} else if (
-				token.kind === "otherRedirect" &&
-				token.fd === 1 &&
-				!isDeviceTarget(target.text) &&
-				(token.operator === "write" ||
-					token.operator === "append" ||
-					(token.operator === "other" && !/^\d+$/.test(target.text) && target.text !== "-"))
-			) {
-				outputRedirects.push({ operator: token.operator === "append" ? "append" : "write", target: target.text });
-			}
-			j++;
-		}
-	}
-
-	let categories: NonEmptyReadonlyArray<ViolationCategory> | null = null;
-	let firstTarget: string | undefined;
-	const addMatch = (category: ViolationCategory, target: string): void => {
-		if (category !== "list" && category !== "eval" && isDeviceTarget(target)) return;
-		firstTarget ??= target;
-		if (categories === null) {
-			categories = [category];
-		} else if (!categories.includes(category)) {
-			categories = [...categories, category];
-		}
+function analyzeTokens(tokens: readonly CommandToken[], piped: boolean, provenance: StreamRole | null): Stage {
+	const invocation = resolveCommand(tokens, piped);
+	if (invocation === null) return UNKNOWN_STAGE;
+	if (!isShellProgram(invocation.program)) return { ...UNKNOWN_STAGE, xargs: invocation.feed.kind === "xargs" };
+	// `find … | xargs grep foo`: xargs appends the paths, so the program gets file operands.
+	const fed =
+		invocation.feed.kind === "xargs" && !invocation.feed.replace && provenance === "paths"
+			? {
+					...invocation,
+					words: [...invocation.words, { text: XARGS_OPERAND, dynamic: true }],
+					args: [...invocation.args, XARGS_OPERAND],
+				}
+			: invocation;
+	const context: AnalysisContext = { provenance, shell: detectShellViolations, command: analyzeWords };
+	return {
+		program: invocation.program,
+		analysis: analyzeProgram(invocation.program, fed, context),
+		xargs: invocation.feed.kind === "xargs",
 	};
-
-	if (program === "ls") {
-		const parsed = parseArguments(args, noOptionValue);
-		addMatch("list", firstNonDashOperand(parsed.operands) ?? ".");
-	} else if (program === "find") {
-		const parsed = parseArguments(args, findOptionConsumesValue);
-		const target = firstNonDashOperand(parsed.operands);
-		if (target !== undefined) addMatch("list", target);
-	}
-
-	if (program === "sed") {
-		const parsed = parseArguments(args, sedOptionConsumesValue);
-		if (sedIsInPlace(parsed.flags)) {
-			const target = lastNonDashOperand(parsed.operands) ?? readInputs[0];
-			if (target !== undefined) addMatch("edit", target);
-		} else if (sedIsQuiet(parsed.flags)) {
-			const fileOperands = sedScriptIsFlag(parsed.flags) ? parsed.operands : parsed.operands.slice(1);
-			const target = firstNonDashOperand(fileOperands) ?? readInputs[0];
-			if (target !== undefined) addMatch("read", target);
-		}
-	} else if (READ_PROGRAMS[program] === true) {
-		const parsed = parseArguments(args, (flag) => readOptionConsumesValue(program, flag));
-		const target = firstNonDashOperand(parsed.operands) ?? readInputs[0];
-		if (target !== undefined) addMatch("read", target);
-	}
-
-	if (program === "perl") {
-		const parsed = parseArguments(args, perlOptionConsumesValue);
-		const inPlace = parsed.flags.some((flag) => flag === "--in-place" || flag.startsWith("--in-place=") || /^-[^-]*i/.test(flag));
-		if (inPlace) {
-			const target = lastNonDashOperand(parsed.operands) ?? readInputs[0];
-			if (target !== undefined) addMatch("edit", target);
-		}
-	} else if (program === "mv") {
-		const parsed = parseArguments(args, () => false);
-		const target = mvTarget(args, parsed.operands);
-		if (target !== undefined) addMatch("edit", target);
-	}
-
-	if (program === "grep" || program === "egrep" || program === "fgrep" || program === "rg" || program === "ag" || program === "ack") {
-		const parsed = parseArguments(args, searchOptionConsumesValue);
-		const hasSearchModeFlag = parsed.flags.some(isSearchFlag);
-		const patternInOption = parsed.flags.some((flag) => {
-			const name = optionName(flag);
-			return name === "-e" || name === "-f" || name === "--regexp" || name === "--file";
-		});
-		const fileOperand = parsed.operands.length > (patternInOption ? 0 : 1) ? parsed.operands[patternInOption ? 0 : 1] : readInputs[0];
-		const target = fileOperand !== undefined && fileOperand !== "-" ? fileOperand : hasSearchModeFlag ? "." : undefined;
-		if (target !== undefined && (hasSearchModeFlag || readInputs.length > 0 || parsed.operands.length > (patternInOption ? 0 : 1))) {
-			addMatch("search", target);
-		}
-	} else if (program === "awk") {
-		const parsed = parseArguments(args, awkOptionConsumesValue);
-		const operands = parsed.operands.filter((operand) => !isEnvAssignment(operand) && operand !== "-");
-		const usesFileOption = parsed.flags.some((flag) => optionName(flag) === "-f");
-		const target = usesFileOption ? operands[0] : operands[1];
-		if (target !== undefined) {
-			addMatch("search", target);
-		} else if (operands.length > 0 && readInputs[0] !== undefined) {
-			addMatch("search", readInputs[0]);
-		}
-	}
-
-	if (program === "echo" || program === "printf" || program === "cat") {
-		const redirect = outputRedirects[0];
-		if (redirect !== undefined) addMatch("write", redirect.target);
-	}
-
-	if (EVAL_PROGRAMS[program] === true) {
-		const target = inlineEvalTarget(program, args);
-		if (target !== null) addMatch("eval", target);
-	}
-
-	if (categories === null || firstTarget === undefined || !isShellProgram(program)) return [];
-	return [{ categories, program, target: firstTarget }];
 }
 
-type CommandParts = {
-	readonly program: string;
-	readonly args: readonly string[];
-	readonly hasInputRedirect: boolean;
-};
+/** A command built from words (a `find -exec` body): no redirections, no pipe. */
+function analyzeWords(words: readonly ShellWord[]): ShellViolation[] {
+	const tokens: CommandToken[] = words.map((word) => ({ kind: "word", text: word.text, dynamic: word.dynamic }));
+	const stage = analyzeTokens(tokens, false, null);
+	return [...stageViolation(stage, stage.analysis.findings), ...stage.analysis.nested];
+}
 
-const commandParts = (tokens: readonly CommandToken[]): CommandParts | null => {
-	const words: string[] = [];
-	let hasInputRedirect = false;
-	for (let i = 0; i < tokens.length; i++) {
-		const token = tokens[i];
-		if (token === undefined) continue;
-		if (token.kind === "word") {
-			words.push(token.text);
-			continue;
-		}
-		const target = tokens[i + 1];
-		if (token.kind === "readFrom" && token.fd === 0 && target?.kind === "word") hasInputRedirect = true;
-		if (target?.kind === "word") i++;
+/** One violation per command: its categories in first-seen order, named by the first target. */
+function stageViolation(stage: Stage, findings: readonly Finding[]): ShellViolation[] {
+	// `/dev/*` is a stream, not file bytes; listing `/dev` and inline scripts still count.
+	const counted = findings.filter(
+		(finding) => finding.category === "list" || finding.category === "eval" || !isDeviceTarget(finding.target),
+	);
+	const [first, ...rest] = counted;
+	if (stage.program === null || first === undefined) return [];
+	const categories: [ViolationCategory, ...ViolationCategory[]] = [first.category];
+	for (const finding of rest) if (!categories.includes(finding.category)) categories.push(finding.category);
+	return [{ categories, program: stage.program, target: first.target }];
+}
+
+/** Indices of the commands in `index`'s pipeline that come before it, nearest first. */
+function upstreamOf(commands: readonly SimpleCommand[], index: number): number[] {
+	const pipelineId = commands[index]?.pipelineId;
+	const upstream: number[] = [];
+	for (let earlier = index - 1; earlier >= 0; earlier--) if (commands[earlier]?.pipelineId === pipelineId) upstream.push(earlier);
+	return upstream;
+}
+
+/** What reaches a piped stage: the role of the nearest upstream stage that is not a pure filter. */
+function provenanceOf(commands: readonly SimpleCommand[], stages: readonly Stage[], index: number): StreamRole | null {
+	if (commands[index]?.piped !== true) return null;
+	for (const earlier of upstreamOf(commands, index)) {
+		const role = stages[earlier]?.analysis.role ?? "other";
+		if (role !== "filter") return role;
 	}
-
-	let index = 0;
-	while (index < words.length) {
-		const word = words[index];
-		if (word === undefined) return null;
-		if (isEnvAssignment(word) || WRAPPER_PROGRAMS[basename(word)] === true) {
-			index++;
-			continue;
-		}
-		return { program: basename(word), args: words.slice(index + 1), hasInputRedirect };
-	}
-	return null;
-};
-
-const SORT_OPTIONS_WITH_VALUES: Record<string, true> = {
-	"-k": true,
-	"--key": true,
-	"-t": true,
-	"--field-separator": true,
-	"-S": true,
-	"--buffer-size": true,
-	"-T": true,
-	"--temporary-directory": true,
-	"--compress-program": true,
-	"--batch-size": true,
-	"--parallel": true,
-	"--files0-from": true,
-};
-
-const sortOptionConsumesValue = (flag: string): boolean => {
-	const name = optionName(flag);
-	return SORT_OPTIONS_WITH_VALUES[name] === true && flag === name;
-};
-
-const UNIQ_OPTIONS_WITH_VALUES: Record<string, true> = {
-	"-f": true,
-	"--skip-fields": true,
-	"-s": true,
-	"--skip-chars": true,
-	"-w": true,
-	"--check-chars": true,
-	"--group": true,
-	"--all-repeated": true,
-};
-
-const uniqOptionConsumesValue = (flag: string): boolean => {
-	const name = optionName(flag);
-	return UNIQ_OPTIONS_WITH_VALUES[name] === true && flag === name;
-};
-
-const WC_OPTIONS_WITH_VALUES: Record<string, true> = {
-	"--files0-from": true,
-};
-
-const wcOptionConsumesValue = (flag: string): boolean => {
-	const name = optionName(flag);
-	return WC_OPTIONS_WITH_VALUES[name] === true && flag === name;
-};
-
-const isWcCommand = (tokens: readonly CommandToken[]): boolean => {
-	const parts = commandParts(tokens);
-	if (parts === null || parts.program !== "wc" || parts.hasInputRedirect) return false;
-	const parsed = parseArguments(parts.args, wcOptionConsumesValue);
-	return firstNonDashOperand(parsed.operands) === undefined;
-};
-
-const isStreamReshaperWithoutFile = (tokens: readonly CommandToken[]): boolean => {
-	const parts = commandParts(tokens);
-	if (parts === null || parts.hasInputRedirect) return false;
-	if (parts.program === "tr") return true;
-	if (parts.program === "sort") return firstNonDashOperand(parseArguments(parts.args, sortOptionConsumesValue).operands) === undefined;
-	if (parts.program === "uniq") return firstNonDashOperand(parseArguments(parts.args, uniqOptionConsumesValue).operands) === undefined;
-	if (parts.program === "head" || parts.program === "tail") {
-		return firstNonDashOperand(parseArguments(parts.args, (flag) => readOptionConsumesValue(parts.program, flag)).operands) === undefined;
-	}
-	if (
-		parts.program !== "grep" &&
-		parts.program !== "egrep" &&
-		parts.program !== "fgrep" &&
-		parts.program !== "rg" &&
-		parts.program !== "ag" &&
-		parts.program !== "ack"
-	) {
-		return false;
-	}
-	const parsed = parseArguments(parts.args, searchOptionConsumesValue);
-	const patternInOption = parsed.flags.some((flag) => {
-		const name = optionName(flag);
-		return name === "-e" || name === "-f" || name === "--regexp" || name === "--file";
-	});
-	const fileOperands = parsed.operands.slice(patternInOption ? 0 : 1).filter((operand) => operand !== "-");
-	return fileOperands.length === 0;
-};
-
-const isCountExemptViolation = (violation: ShellViolation): boolean =>
-	violation.categories.every((category) => category === "list" || category === "read" || category === "search");
+	return "other";
+}
 
 /**
- * Walk backward over trailing stream reshapers to find the effective sink.
- * Only a `wc` sink makes read-only producers an allowed count pipeline.
+ * Whether a stage's output goes to another program rather than to the agent,
+ * so a listing, read or search there is not what a built-in tool would give:
+ * it passes only through stdin filters into a counter (`wc`, `uniq -c`), or
+ * becomes the arguments of an `xargs` program. `ls -dt … | head` reaches the
+ * agent.
  */
-const countPipelineSinkIndex = (commands: readonly SimpleCommand[], lastIndex: number): number => {
-	let index = lastIndex;
-	while (index > 0) {
-		const current = commands[index];
-		const previous = commands[index - 1];
-		if (
-			current === undefined ||
-			previous === undefined ||
-			current.pipelineId !== previous.pipelineId ||
-			!isStreamReshaperWithoutFile(current.tokens)
-		) {
-			break;
-		}
-		index--;
+function outputConsumed(commands: readonly SimpleCommand[], stages: readonly Stage[], index: number): boolean {
+	const pipelineId = commands[index]?.pipelineId;
+	let counts = false;
+	for (let later = index + 1; later < commands.length; later++) {
+		if (commands[later]?.pipelineId !== pipelineId) continue;
+		const stage = stages[later];
+		if (stage?.xargs === true) return true;
+		const role = stage?.analysis.role;
+		if (role === "counter") counts = true;
+		else if (role !== "filter") return false;
 	}
-	return index;
-};
+	return counts;
+}
+
+const COUNTABLE: ReadonlySet<ViolationCategory> = new Set(["list", "read", "search"]);
 
 /**
- * A terminal `wc` makes the preceding list/read/search producers part of an
- * allowed count pipeline. `ls -dt ... | head` remains a violation because the
- * glob contract makes `ls`'s newest-first ordering tool-covered; `head` is not
- * a counter.
+ * Every shell command whose work a built-in tool owns. Commands are resolved
+ * through wrappers (`timeout`, `xargs`, `env`, …) and reserved words; nested
+ * command lines (`bash -c '…'`, `eval '…'`, `find -exec … ;`) are analyzed in
+ * place. A stage's stdin source decides pathless forms (`rg foo` searches the
+ * working directory unless piped) and authored writes (`printf … | tee f`).
+ * Listing, reading and searching whose output feeds the shell — a `$(…)`
+ * capture, a count, `xargs` arguments — is not counted.
  */
 export function detectShellViolations(command: string): ShellViolation[] {
 	const commands = splitSimpleCommands(command);
-	const pipelineLast = new Map<number, number>();
-	for (const [index, simple] of commands.entries()) pipelineLast.set(simple.pipelineId, index);
-
-	const violations: ShellViolation[] = [];
+	const stages: Stage[] = [];
 	for (const [index, simple] of commands.entries()) {
-		const commandViolations = analyzeSimpleCommand(simple.tokens);
-		if (commandViolations.length === 0) continue;
-		const lastIndex = pipelineLast.get(simple.pipelineId);
-		const sinkIndex = lastIndex === undefined ? undefined : countPipelineSinkIndex(commands, lastIndex);
-		const isCountPipelineProducer = sinkIndex !== undefined && sinkIndex > index && isWcCommand(commands[sinkIndex]?.tokens ?? []);
-		if (isCountPipelineProducer) {
-			violations.push(...commandViolations.filter((violation) => !isCountExemptViolation(violation)));
-		} else {
-			violations.push(...commandViolations);
+		stages.push(analyzeTokens(simple.tokens, simple.piped, provenanceOf(commands, stages, index)));
+	}
+	const violations: ShellViolation[] = [];
+	for (const [index, stage] of stages.entries()) {
+		const { findings, nested } = stage.analysis;
+		if (findings.length === 0 && nested.length === 0) continue;
+		const consumed = commands[index]?.captured === true || outputConsumed(commands, stages, index);
+		if (!consumed) {
+			violations.push(...stageViolation(stage, findings), ...nested);
+			continue;
 		}
+		violations.push(
+			...stageViolation(
+				stage,
+				findings.filter((finding) => !COUNTABLE.has(finding.category)),
+			),
+		);
+		violations.push(...nested.filter((violation) => violation.categories.some((category) => !COUNTABLE.has(category))));
 	}
 	return violations;
 }
+
 type EvalLanguage = "py" | "js";
 /** One library call the eval tool's `code` uses where a built-in tool exists. */
 type EvalPattern = {
@@ -680,10 +212,10 @@ const isEvalLanguage = (language: string): language is EvalLanguage => language 
  * (directory/path listing), at most one violation per category. Write,
  * subprocess, and pure in-memory work are intentionally ignored.
  */
-export function detectEvalViolations(language: string, code: string): ShellViolation[] {
+export function detectEvalViolations(language: string, code: string): EvalViolation[] {
 	if (!isEvalLanguage(language)) return [];
 	const seen: Record<"read" | "list", boolean> = { read: false, list: false };
-	const violations: ShellViolation[] = [];
+	const violations: EvalViolation[] = [];
 	for (const { category, program, test } of EVAL_PATTERNS[language]) {
 		if (seen[category]) continue;
 		const match = test.exec(code);

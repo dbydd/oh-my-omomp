@@ -1,22 +1,41 @@
 /**
  * Warns the interactive omp process's main UI and agent when an owned descendant's
- * macOS phys_footprint exceeds 4 GiB. Main session_start starts one process-shared
- * monitor; session_switch refreshes delivery, and its owning main's session_shutdown
- * clears the managed timer before closing libproc. Child factories never own it.
- * Native 250 ms stable scans retain PID+birth ownership after reparenting; observed
- * descendant-led process groups can discover surviving members. A process born and
- * orphaned between observations without a known surviving group anchor cannot be
- * attributed retroactively from the process table.
- * No config, files, model calls, sampling subprocesses, signals, or automatic kills.
+ * macOS phys_footprint exceeds the configured threshold. Main session_start starts one
+ * process-shared monitor; session_switch refreshes delivery, and its owning main's
+ * session_shutdown clears the managed timer before closing libproc. Child factories
+ * never own it. Native 2 s stable scans retain PID+birth ownership after
+ * reparenting; observed descendant-led process groups can discover surviving members.
+ * A process born and orphaned between observations without a known surviving group
+ * anchor cannot be attributed retroactively from the process table.
+ * Reads `thresholdGiB` from the `child-memory-warning` section of omomp.* every scan
+ * (the main session cwd's `.omp/` copy wins over the agent-dir copy); without a valid
+ * section, tracking continues but alerts pause, and each new config problem warns once.
+ * No model calls, sampling subprocesses, signals, or automatic kills.
  * Unsupported platforms log once and never import the Darwin binding. Native/hook
  * failures warn without escaping into omp; delivery is attempted once per identity.
  */
-import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
+import { type ExtensionAPI, type ExtensionContext, z } from "@oh-my-pi/pi-coding-agent";
 import { errorText } from "../_shared/errors.ts";
+import { defineOmompSection, loadOmompSection } from "../_shared/omomp.ts";
 import { type ProcessRecord, type ProcessSource, ProcessTracker } from "./tracker.ts";
 
-const THRESHOLD_BYTES = 4n * 1024n ** 3n;
-const POLL_MS = 250;
+const POLL_MS = 2_000;
+
+const configSchema = z
+	.object({
+		thresholdGiB: z.number().refine((value) => Number.isFinite(value) && value > 0, "a positive number"),
+	})
+	.strict();
+const omompSection = defineOmompSection(import.meta.dir, configSchema);
+
+interface Threshold {
+	readonly gib: number;
+	readonly bytes: bigint;
+}
+
+type ThresholdLoad =
+	| { readonly kind: "found"; readonly threshold: Threshold; readonly problem: string | null }
+	| { readonly kind: "none"; readonly problem: string };
 
 interface Monitor {
 	readonly pi: ExtensionAPI;
@@ -25,6 +44,7 @@ interface Monitor {
 	readonly tracker: ProcessTracker;
 	readonly timer: Timer;
 	problem: string | null;
+	configProblem: string | null;
 }
 
 type Lifetime =
@@ -44,11 +64,46 @@ function warn(pi: ExtensionAPI, message: string, error: unknown): void {
 	}
 }
 
-function deliver(monitor: Monitor, current: ProcessRecord, bytes: bigint, command: string): void {
+function loadThreshold(cwd: string): ThresholdLoad {
+	const loaded = loadOmompSection(omompSection, cwd);
+	const skipped = loaded.skipped.map(({ path, reason }) => `跳过 ${path}：${reason}`).join("；");
+	switch (loaded.kind) {
+		case "found": {
+			const gib = loaded.value.thresholdGiB;
+			return { kind: "found", threshold: { gib, bytes: BigInt(Math.round(gib * 1024 ** 3)) }, problem: skipped || null };
+		}
+		case "none":
+			return { kind: "none", problem: `没有有效的 omomp ${omompSection.id} 配置段，告警暂停${skipped ? `（${skipped}）` : ""}` };
+		default: {
+			const unreachable: never = loaded;
+			return unreachable;
+		}
+	}
+}
+
+/** Config problems are user-actionable: report each new one to the log and the main UI, once. */
+function reportConfigProblem(monitor: Monitor, problem: string | null): void {
+	if (problem === monitor.configProblem) return;
+	monitor.configProblem = problem;
+	if (problem === null) return;
+	const text = `child-memory-warning: ${problem}`;
+	try {
+		monitor.pi.logger.warn(text);
+	} catch {
+		// A failing logger must not suppress the UI channel.
+	}
+	try {
+		monitor.ctx.ui.notify(text, "warning");
+	} catch (error) {
+		warn(monitor.pi, "UI config warning failed", error);
+	}
+}
+
+function deliver(monitor: Monitor, current: ProcessRecord, bytes: bigint, command: string, threshold: Threshold): void {
 	const { pi, ctx } = monitor;
 	const text =
 		`子进程内存超限：PID ${current.pid}，PPID ${current.parentPid}，孤儿：${current.parentPid === 1 ? "是" : "否"}；` +
-		`phys_footprint ${(Number(bytes) / 1024 ** 3).toFixed(2)} GiB（${bytes} bytes），阈值 > 4 GiB。\n命令：${command}\n仅告警，未结束该进程。`;
+		`phys_footprint ${(Number(bytes) / 1024 ** 3).toFixed(2)} GiB（${bytes} bytes），阈值 > ${threshold.gib} GiB。\n命令：${command}\n仅告警，未结束该进程。`;
 	try {
 		ctx.ui.notify(text, "warning");
 	} catch (error) {
@@ -70,17 +125,22 @@ function sample(monitor: Monitor): void {
 			return;
 		}
 		monitor.problem = null;
-		for (const tracked of monitor.tracker.observe(result.snapshot)) {
+		// Ownership tracking must see every scan, even while alerts are paused by config.
+		const owned = monitor.tracker.observe(result.snapshot);
+		const config = loadThreshold(monitor.ctx.cwd);
+		reportConfigProblem(monitor, config.problem);
+		if (config.kind === "none") return;
+		for (const tracked of owned) {
 			if (tracked.alerted) continue;
 			const { pid, startedAt } = tracked.identity;
 			const bytes = monitor.source.footprint(pid);
-			if (bytes === null || bytes <= THRESHOLD_BYTES) continue;
+			if (bytes === null || bytes <= config.threshold.bytes) continue;
 			const command = monitor.source.command(pid);
 			// A PID can exit/recycle while memory and argv are read. Also use the latest PPID.
 			const current = monitor.source.process(pid);
 			if (current === null || current.startedAt !== startedAt) continue;
 			tracked.alerted = true;
-			deliver(monitor, current, bytes, command);
+			deliver(monitor, current, bytes, command, config.threshold);
 		}
 	} catch (error) {
 		const problem = errorText(error);
@@ -113,7 +173,7 @@ async function start(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
 		const timer = ctx.setInterval(() => {
 			if (lifetime.kind === "active" && lifetime.monitor.pi === pi) sample(lifetime.monitor);
 		}, POLL_MS);
-		const monitor: Monitor = { pi, ctx: starting.ctx, source, tracker, timer, problem: null };
+		const monitor: Monitor = { pi, ctx: starting.ctx, source, tracker, timer, problem: null, configProblem: null };
 		lifetime = { kind: "active", monitor };
 		source = null; // Ownership moves to the active monitor before its first sample.
 		sample(monitor);

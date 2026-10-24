@@ -255,7 +255,7 @@ export function inspectRisk(command: string, limits: RiskConfig): RiskFinding | 
 	return { commands: simple, chars, programs: foreign, writes: [...writes].sort() };
 }
 
-/** The risk, why it is one, and the call itself. */
+/** The risk, why it is one, and the call itself, naming the tool that ran it. */
 export function riskReminder(tool: string, command: string, finding: RiskFinding): string {
 	return [
 		`你这次 \`${tool}\` 调用有 ${finding.commands} 段命令、${finding.chars} 字符，牵涉 ${finding.programs.length} 个外部程序（${finding.programs

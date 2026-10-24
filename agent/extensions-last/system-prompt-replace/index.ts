@@ -1,12 +1,11 @@
 // ============================================================================
 // system-prompt-replace — text replacement over the final system prompt.
 //
-// WHY THIS EXISTS. OMP bundles its built-in prompt templates (tool
-// descriptions included) into the binary, and offers no override directory.
-// For Anthropic models the built-in tool descriptions are rendered into the
-// system prompt, so a sentence there that contradicts APPEND_SYSTEM.md (the
-// `task` tool's "Omit `agent` only for default ...; NEVER specify it.") can
-// only be changed by rewriting the system prompt text.
+// WHY THIS EXISTS. SYSTEM_TEMPLATE.md owns the base workflow. Built-in and
+// plugin tool descriptions are still rendered dynamically into toolInventory
+// and xdevDocs; with inlineToolDescriptors on, this extension rewrites those
+// descriptions in place instead of repeating their instructions in the base
+// template or APPEND_SYSTEM.md. Custom tools edit their own descriptions.
 //
 // ORDER. `before_agent_start` handlers run one extension after another in
 // load order, each receiving the prompt the previous one returned. Load order
@@ -21,13 +20,15 @@
 // load it with the native batch, and the config entry would be dropped as a
 // duplicate path.
 //
-// FILE. `system-prompt-replace.json` beside this module, resolved through
-// import.meta.dir (including named profiles):
+// FILE. The `system-prompt-replace` section of omomp.* in the agent directory
+// (profile-aware); a project's `.omp/omomp.*` is not read here:
 //
-//   { "replacements": [
-//       { "literal": "exact text", "replace": "new text" },
-//       { "regex": "JS regex source", "replace": "new text, $1 allowed" }
-//   ] }
+//   system-prompt-replace:
+//     replacements:
+//       - literal: "exact text"
+//         replace: "new text"
+//       - regex: "JS regex source"
+//         replace: "new text, $1 allowed"
 //
 // Each rule sets exactly one of `literal` / `regex`, plus `replace`. A literal
 // replaces every occurrence verbatim (no `$` handling). A regex is compiled
@@ -49,18 +50,16 @@
 // `task` tool description. The prompt is never blocked.
 // ============================================================================
 
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { type ExtensionAPI, z } from "@oh-my-pi/pi-coding-agent";
 import { errorText } from "../../extensions/_shared/errors.ts";
-
-const FILE_NAME = "system-prompt-replace.json";
+import { defineOmompSection, loadOmompSection } from "../../extensions/_shared/omomp.ts";
 
 // Keep validation sequential so the first failure retains the original reason.
 const objectSchema = z.record(z.string(), z.unknown()).refine((value) => !Array.isArray(value));
 const replacementsSchema = z.array(z.unknown());
 const replacementSchema = z.string();
 const matcherSchema = z.string().min(1);
+const omompSection = defineOmompSection(import.meta.dir, z.object({ replacements: replacementsSchema }).strict());
 
 type Matcher = { readonly kind: "literal"; readonly text: string } | { readonly kind: "regex"; readonly pattern: RegExp };
 
@@ -122,24 +121,10 @@ function parseRule(value: unknown, index: number): RuleParse {
 	};
 }
 
-function parseFile(source: string): Parsed {
-	let json: unknown;
-	try {
-		json = JSON.parse(source);
-	} catch (error) {
-		return { kind: "invalid", reason: `invalid JSON: ${errorText(error)}` };
-	}
-	const object = objectSchema.safeParse(json);
-	if (!object.success) {
-		return { kind: "invalid", reason: "top level must be an object" };
-	}
-	const record = object.data;
-	const unknownKey = Object.keys(record).find((key) => key !== "replacements");
-	if (unknownKey !== undefined) return { kind: "invalid", reason: `unknown key \`${unknownKey}\`` };
-	const replacements = replacementsSchema.safeParse(record.replacements);
-	if (!replacements.success) return { kind: "invalid", reason: "`replacements` must be an array" };
+/** Rules are validated one by one so the first failure keeps its own reason. */
+function parseRules(replacements: readonly unknown[]): Parsed {
 	const rules: Rule[] = [];
-	for (const [index, value] of replacements.data.entries()) {
+	for (const [index, value] of replacements.entries()) {
 		const parsed = parseRule(value, index);
 		if (parsed.kind === "invalid") return parsed;
 		rules.push(parsed.rule);
@@ -148,29 +133,32 @@ function parseFile(source: string): Parsed {
 }
 
 export default function systemPromptReplace(pi: ExtensionAPI): void {
-	/** Last parse failure already logged, so a broken file warns once per reason. */
+	/** Last invalid-section reason already logged, so a broken section warns once per reason. */
 	let warnedReason: string | null = null;
 
-	pi.on("before_agent_start", async (event, ctx) => {
+	pi.on("before_agent_start", (event, ctx) => {
 		try {
-			const file = join(import.meta.dir, FILE_NAME);
-			let source: string;
-			try {
-				source = await readFile(file, "utf8");
-			} catch (error) {
-				if (error !== null && typeof error === "object" && "code" in error && error.code === "ENOENT") return;
-				pi.logger.warn(`system-prompt-replace: cannot read ${file}: ${errorText(error)}`);
+			const loaded = loadOmompSection(omompSection, null);
+			if (loaded.kind === "none") {
+				const [problem] = loaded.skipped;
+				if (problem === undefined) return;
+				const reason = `${problem.path}: ${problem.reason}`;
+				if (warnedReason !== reason) {
+					warnedReason = reason;
+					pi.logger.warn(`system-prompt-replace: ${reason}; not replacing`);
+				}
 				return;
 			}
-			const parsed = parseFile(source);
+			const parsed = parseRules(loaded.value.replacements);
 			if (parsed.kind === "invalid") {
 				if (warnedReason !== parsed.reason) {
 					warnedReason = parsed.reason;
-					pi.logger.warn(`system-prompt-replace: ${file}: ${parsed.reason}; not replacing`);
+					pi.logger.warn(`system-prompt-replace: ${loaded.path}: ${parsed.reason}; not replacing`);
 				}
 				return;
 			}
 			warnedReason = null;
+			const sourcePath = loaded.path;
 
 			let blocks = event.systemPrompt;
 			let changed = false;
@@ -199,7 +187,7 @@ export default function systemPromptReplace(pi: ExtensionAPI): void {
 					changed = true;
 				} else if (ctx.agent.kind === "main" && !reportedMisses.has(rule.label)) {
 					reportedMisses.add(rule.label);
-					const notice = `system-prompt-replace: ${rule.label} found no target in the system prompt; update ${file}`;
+					const notice = `system-prompt-replace: ${rule.label} found no target in the system prompt; update ${sourcePath}`;
 					pi.logger.warn(notice);
 					if (ctx.hasUI) ctx.ui.notify(notice, "warning");
 					else process.stderr.write(`${notice}\n`);

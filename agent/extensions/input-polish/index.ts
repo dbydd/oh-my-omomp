@@ -15,9 +15,9 @@
 //
 // Polishing uses a dedicated in-memory helper: configured model (thinking per
 // its `:effort` suffix, off by default), NO tools, empty system prompt, no MCP/LSP/
-// extensions. Config lives beside this module at `input-polish/input-polish.json`:
-// the caller's cwd copy wins; invalid or missing copies fall through, and only
-// when neither is valid is the extension inert.
+// extensions. Config is the `input-polish` section of omomp.*: the project's
+// `.omp/` copy wins over the agent-dir copy; a missing or invalid section leaves
+// the extension inert.
 //
 // Drafts that start with `/`, `!` or `$` (slash command, bash, python) and empty
 // drafts are not polished: the chord falls through to the host untouched.
@@ -29,26 +29,28 @@
 import { stripVTControlCharacters } from "node:util";
 import { type ExtensionAPI, type ExtensionContext, z } from "@oh-my-pi/pi-coding-agent";
 import { type Component, isKeyRelease, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@oh-my-pi/pi-tui";
-import { loadJsonConfig } from "../_shared/config.ts";
 import { errorText } from "../_shared/errors.ts";
 import { runHelperPrompt } from "../_shared/helper-session.ts";
 import { findModel, type Model, splitLevel, type ThinkingLevel } from "../_shared/models.ts";
+import { defineOmompSection, loadOmompSection } from "../_shared/omomp.ts";
 
-// --- config (standalone input-polish.json) ----------------------------------
+// --- config (`input-polish` section of omomp.yml) -----------------------------
 
 const configSchema = z.object({
 	/** Model spec (`provider/id`, bare id, or role alias), optionally with a `:effort` thinking suffix. No suffix means thinking off. */
 	model: z.string().min(1),
 	/** Chord that starts a polish. Ctrl+Enter is what a Windows keyboard sends; Alt+Enter is Option+Enter on macOS. */
 	key: z.enum(["ctrl+enter", "alt+enter"]).default("ctrl+enter"),
-	/** What the rewrite should do. Lives only in input-polish.json; the fidelity rules are always appended by the extension. */
+	/** What the rewrite should do. The fidelity rules are always appended by the extension. */
 	instruction: z.string().min(1),
 });
+
+const omompSection = defineOmompSection(import.meta.dir, configSchema);
 
 type PolishConfig = z.infer<typeof configSchema>;
 
 function loadConfig(cwd: string): PolishConfig | null {
-	const loaded = loadJsonConfig("input-polish.json", configSchema, [cwd, import.meta.dir]);
+	const loaded = loadOmompSection(omompSection, cwd);
 	switch (loaded.kind) {
 		case "found":
 			return loaded.value;
@@ -274,7 +276,7 @@ export default function inputPolish(pi: ExtensionAPI): void {
 		if (ctx.mode !== "tui" || ctx.agent.kind !== "main") return;
 		const cfg = loadConfig(ctx.cwd);
 		if (!cfg) {
-			pi.logger.info("input-polish: no input-polish.json found — inert");
+			pi.logger.info("input-polish: no input-polish section in omomp.* found — inert");
 			return;
 		}
 		pi.logger.info(`input-polish: active (key=${cfg.key}, model=${cfg.model})`);
