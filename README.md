@@ -124,6 +124,16 @@ The skill covers when to use it, the confidence threshold, and the guard rules a
 |Decision helper|`agent/skills/computer-use-decider/scripts/decider.js`|
 |Machine location|`~/.omp/agent/skills/computer-use-decider/`|
 
+### writing-style
+
+`writing-style` governs every piece of prose the agent writes or revises: replies, reports, plans, documentation, UI copy, comments, commit messages, reviews, translations, and skills. It fixes the sentence rules (complete sentences, evidence next to each conclusion), the report shape, the research-and-analysis register (evidence first, no procedure announcements, the delete test), claim calibration, AI-tone removal, revision discipline, and the ASD-STE100 controlled-language rules in `references/asd-ste100.md` for skills and procedures.
+
+|What|Where|
+|---|---|
+|Skill instructions|`agent/skills/writing-style/SKILL.md`|
+|Controlled-language rule set|`agent/skills/writing-style/references/asd-ste100.md`|
+|Machine location|`~/.omp/agent/skills/writing-style/`|
+
 ## Local extensions
 
 The extensions in `agent/extensions/` and `agent/extensions-last/` patch defects in OMP and plugins, or add behavior constraints, context recovery, dispatch checks and similar features. Each extension is one directory; `<name>/` below means `agent/extensions/<name>/`; the config, templates and state files an extension reads and writes are all in its own directory.

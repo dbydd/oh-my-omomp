@@ -124,6 +124,16 @@ skill 正文写明适用场景、置信度阈值，以及针对页面变化和�
 |决策 helper|`agent/skills/computer-use-decider/scripts/decider.js`|
 |本机位置|`~/.omp/agent/skills/computer-use-decider/`|
 
+### writing-style
+
+`writing-style` 管 agent 写或改的每一段文字：回复、报告、计划、文档、界面文案、注释、提交信息、评审、翻译和 skill。它定句子规则（完整句子、结论旁边给出证据）、报告结构、研究与分析文体（结论先行、不宣布流程、删句测试）、论断标定、去 AI 腔、修订纪律，以及 `references/asd-ste100.md` 里给 skill 和流程用的 ASD-STE100 受控语言规则。
+
+|内容|位置|
+|---|---|
+|Skill 说明|`agent/skills/writing-style/SKILL.md`|
+|受控语言规则|`agent/skills/writing-style/references/asd-ste100.md`|
+|本机位置|`~/.omp/agent/skills/writing-style/`|
+
 ## 本地扩展
 
 `agent/extensions/` 和 `agent/extensions-last/` 里的扩展修补 OMP 和插件的缺陷，或补充行为约束、上下文恢复、派发检查等能力。每个扩展一个目录，下文的 `<名字>/` 指 `agent/extensions/<名字>/`；扩展读写的配置、模板和状态文件都在它自己的目录里。
