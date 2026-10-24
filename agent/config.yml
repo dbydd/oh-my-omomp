@@ -36,6 +36,7 @@ task:
     {}
   isolation:
     enabled: true
+    merge: branch
   enableLsp: false
   enableEffort: true
   maxConcurrency: 64
@@ -56,6 +57,7 @@ compaction:
     - handoff
     - shake
   thresholdTokens: 500000
+  asyncEnabled: false
 codexResets:
   autoRedeem: "no"
 lsp:
