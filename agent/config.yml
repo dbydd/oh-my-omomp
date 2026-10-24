@@ -14,6 +14,8 @@ modelRoles:
   default: magpie/group/fusion-hierarchical
 dev:
   autoqaConsent: denied
+disabledExtensions:
+  - extension-module:response-reading-coverage
 composer:
   shape: band
 github:

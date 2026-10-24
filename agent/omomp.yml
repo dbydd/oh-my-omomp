@@ -5,7 +5,7 @@
 tool-policy-nag:
   detector: heuristic
   form:
-    prompt: 你为什么不遵守 system prompt。
+    prompt: 你为什么不遵守system prompt，反思自己以后继续。
     afterHits: 3
     maxNags: 3
   risk:
