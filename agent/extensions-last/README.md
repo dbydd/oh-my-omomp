@@ -21,6 +21,4 @@ Step 6 still runs after the extensions here; autoresearch rewrites the system pr
 
 There is no ordering inside `extensions/`: the order is whatever the native glob walk returns, not directory-name order. A directory from here placed in `extensions/` would load in step 1, and the `config.yml` entry pointing at the same path would be dropped as a duplicate.
 
-In light mode, `config-light.yml` overrides `extensions` with an empty list, excluding the extensions here; `omp-light` then passes the entries of the machine's `config.yml` that are not under `extensions-last/` (such as `~/.claude`) back with `-e`.
-
-This file and `README.zh-CN.md` are never loaded and never synced: the repo → machine updater (automatic update at startup and `/update-omp`) and `/sync-omp-config` sync only the `*.ts` in extension directories and the structured `omomp.yml`, whose `system-prompt-replace` section is repo-owned.
+This file and `README.zh-CN.md` are never loaded: omp reads `index.ts`, and the copy set in the root README copies the directory as it is.

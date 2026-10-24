@@ -61,11 +61,9 @@ These constraints do not assume that the model follows the system prompt reliabl
 
 Every successful todo change is captured by `ctx-tasklog`; `ctx` replays those events into the final task state, giving a short work record that does not depend on the model summarizing itself. After the main session compacts, `ctx-tool` injects that record, together with the context tree, into the new context.
 
-**Treat an off-contract tool call as a signal of overall drift.** `tool-policy-nag` detects whether the model bypasses the built-in tools; it only reminds and never blocks a command. The intent lane judges through OMP's JUDGE role which tool should have been used; the risk lane is deterministic and flags calls whose outcome cannot be read off the command line. The config repository disables the whole extension on this machine (`disabledExtensions: extension-module:tool-policy-nag`), keeping the code shipped for other machines.
+**Treat an off-contract tool call as a signal of overall drift.** `tool-policy-nag` detects whether the model bypasses the built-in tools; it only reminds and never blocks a command. `detector` picks one tool lane: `heuristic` runs a local command parser and sends at most `maxNags` reminders per context once hits pass `afterHits`, and turns OMP's bash interceptor off while it is active; `jev` asks OMP's JUDGE role one question per call. The `risk` lane is deterministic and flags calls whose outcome cannot be read off the command line. This machine disables the whole extension (`disabledExtensions: extension-module:tool-policy-nag`), keeping the code shipped for machines that want it.
 
 **Use a watchdog for independent runtime review.** `watchdog-agent` reads the context automatically as a third-party observer and injects reminders by rule; options declared in a watchdog file route to OMP's native JUDGE backend.
-
-**Judge every turn and correct directly.** `turn-judge` judges each main-session turn through OMP's native JUDGE; when the matching option's confidence reaches its threshold it types the preset prompt, otherwise it only shows the verdict.
 
 **Let advisors see the user's own words.** The mentor and discussants know only what the spawning agent tells them, so they advise along that retelling and become echo amplifiers. `user-prompt-inject` injects the prompts the user wrote in the root session into every model call they make, so they check the other agent's plan against the user's goals and constraints.
 
@@ -135,24 +133,23 @@ The extensions in `agent/extensions/` and `agent/extensions-last/` patch defects
 |[tool-policy-nag](#tool-policy-nag)|Reminds when shell/eval stands in for a built-in tool; intent lane via native JUDGE, risk lane deterministic|
 |[watchdog-agent](#watchdog-agent)|Third-party reviewer delivered to chosen targets|
 |[user-prompt-inject](#user-prompt-inject)|Injects the user's own words into chosen subagents through templates|
-|[turn-judge](#turn-judge)|Judges each main-session turn with native JUDGE; types a preset prompt past the threshold, otherwise shows the verdict|
-|[child-memory-warning](#child-memory-warning)|Warns the main UI and agent when a macOS descendant exceeds 4 GiB physical footprint, including previously observed surviving orphans|
+|[child-memory-warning](#child-memory-warning)|Warns the main UI and agent when a macOS descendant exceeds the configured physical footprint, including previously observed surviving orphans|
 |[repo-rules](#repo-rules)|Also reads repo-level rule directories such as `.claude/rules`|
 |`tern-tool`|Registers the `tern` tool with the session required on every call|
 |[append-system-model](#append-system-model)|Appends system-prompt text by model / provider regex|
-|[system-prompt-replace](#system-prompt-replace)|Runs last among path-loaded extensions and replaces system-prompt text by JSON rules, used to rewrite built-in tool descriptions|
+|[system-prompt-replace](#system-prompt-replace)|Runs last among path-loaded extensions and replaces system-prompt text by `omomp.yml` rules, used to rewrite built-in tool descriptions|
 |[fork-task](#fork-task)|Registers `fork_task`: spawns a subagent carrying a copy of the current conversation|
 |[isolation-nudge](#isolation-nudge)|Blocks once when several writers share a directory|
 |[task-split-check](#task-split-check)|Blocks multi-topic dispatches and dispatches that cap report length|
 |[task-completion-judge](#task-completion-judge)|Reviews completion once before a worker delivers|
 |[ctx-tool](#ctx-tool)|Registers the read-only `ctx` tool; after compaction it forces the `ctx` overview and current task record in|
 |[ctx-tasklog](#ctx-tasklog)|Captures successful todo / goal changes as the record `ctx` derives from|
-|[response-reading-coverage](#response-reading-coverage)|Reports low/medium/high source-reading follow-up against a historical baseline|
 |[doc-polish](#doc-polish)|`polish_doc` / `/polish-doc`: polishes documents without changing their meaning|
 |[bro](#bro)|`/bro`: rewrites a reply, document or web page into an easy explanation|
-|[input-polish](#input-polish)|`Ctrl+Enter` polishes the input-box draft; Enter sends after the overlay preview, Esc cancels|
 |[tool-description-restore](#tool-description-restore)|Restores tool descriptions stripped by the `openai-completions` wire on magpie|
 |[wt-tool](#wt-tool)|Registers `wt` / `wt_remove`: the main agent invokes the human `/wt` to enter a new worktree, or after a check and confirmation removes the worktree it is in and returns to the main checkout|
+|[harness-restart](#harness-restart)|Registers `harness_restart`: the main agent queues the human `/restart` for the end of the turn|
+|[model-compaction](#model-compaction)|Chooses the compaction trigger per model by regex rules in the machine-local `model-compaction` section|
 |[commandcode-model-spec](#commandcode-model-spec)|Fixes the auth failure when `--model` names a commandcode model|
 
 `agent/rules/tern-session-required.md` is a native rules-carrier file: it gates bash calls of the `tern` CLI through the judge and teaches the session-required usage for when the `tern` tool is unavailable.
@@ -175,7 +172,7 @@ No `.ts` sits directly under `extensions/` or `extensions-last/`. Extensions do 
 |---|---|
 |`errors.ts`|`errorText`: turns an exception into text|
 |`messages.ts`|`textOf`, `lastAssistantText`: take the text blocks of a message|
-|`config.ts`|`loadJsonConfig(file name, schema, [ctx.cwd, import.meta.dir])`: a copy under cwd wins, invalid copies are skipped and listed in `skipped`|
+|`omomp.ts`|`defineOmompSection(import.meta.dir, schema)` binds an extension to its `omomp.*` section; `loadOmompSection(section, cwd)` reads the project copy first and the agent-dir copy second, reporting invalid copies in `skipped`; `writeOmompSection` writes one back|
 |`models.ts`|`resolveModelChain`, `findModel`, `splitLevel`: parse `provider/id[:level]` and comma-separated candidate chains; they only look up the model list and send no request|
 |`helper-session.ts`|`runHelperPrompt`: one model call in an in-memory helper session; never throws, always passes `taskDepth: 1`|
 |`judge.ts`|`openNativeJudge`: chooses the concrete JUDGE model with the current session's config and OMP's role resolver; only the native judgment API is usable, and credentials come from the host|
@@ -201,24 +198,24 @@ Code conventions, enforced by `bun run check` (Biome and `tsc --noEmit`):
 
 ### Behavior constraints
 
-`turn-judge`, the intent lane of `tool-policy-nag` and the option backend of `watchdog-agent` share OMP's **JUDGE model role** instead of each setting its own provider/model. Configure JUDGE once; these features join automatically when the role's first available candidate is a native judgment API model. Role resolution follows OMP's candidate order and defaults, and credentials come from OMP.
+The `jev` detector of `tool-policy-nag` and the option backend of `watchdog-agent` share OMP's **JUDGE model role** instead of each setting its own provider/model. Configure JUDGE once; these features join automatically when the role's first available candidate is a native judgment API model. Role resolution follows OMP's candidate order and defaults, and credentials come from OMP.
 
 When the role resolves to a model without the native backend, the related judgments run through that model with prompt-based parsing; a failed request produces no reminder and no fallback switch. Every trigger re-reads the current session's role config.
 
 #### tool-policy-nag
 
-`tool-policy-nag/` acts on the main session only. At the `tool_call` stage it checks watched calls; it only reminds and never blocks a command. Three lanes each handle a **different** concern, switched separately by `tool-policy-nag.json` in the same directory, and they can all be on at once:
+`tool-policy-nag/` acts on the main session only. At the `tool_call` stage it checks watched calls; it only reminds and never blocks a command. The `tool-policy-nag` section of `omomp.yml` picks one tool lane with `detector` and enables the independent `risk` lane:
 
-- `form` — string detection: a command parser mechanically counts how many operations in this call should have used a built-in tool.
-- `intent` — intent detection: hands the whole call to the native JUDGE and asks which built-in tool should have done the work. It answers a **tool-routing** question.
+- `heuristic` — string detection: `shell-parser.ts` splits the line, `shell-command.ts` resolves each command through wrappers to the program it runs, `shell-programs.ts` judges each program, and `heuristic.ts` applies the pipeline policy. It counts how many operations in this call should have used a built-in tool.
+- `jev` — intent detection: hands the whole call to the native JUDGE and asks which built-in tool should have done the work. It answers a **tool-routing** question.
 - `risk` — risk detection: decides deterministically whether **what the call does can be read off this one line**. When a command is long, involves many external programs and has a writing step, its outcome cannot be inferred from the command alone.
 
 - **Watched calls**: `bash` / `bash_bg` commands; `exec_command` commands; commands written through `write` to `xd://bash`, `xd://bash_bg` or `xd://exec_command`; `eval` Python / JS code (the risk lane looks only at shell commands).
-- **Config** `tool-policy-nag.json`: `form: {"detector": "heuristic"}` turns the string lane on, `intent: {"threshold": 0.5}` declares the intent lane (the repository's value; the lane runs once the native backend is available), `risk: {"minCommands": 4, "minChars": 600, "minPrograms": 3}` turns the risk lane on (the repository's values), and `null` turns a lane off. The file under cwd wins over the one beside the extension; it is re-read on every watched call.
-- **The two tool lanes send at most one reminder per call.** When the intent lane is declared, valid, enabled and native JUDGE is available, it owns the reminder while `form` still counts and logs; otherwise `form` sends the generic reminder. The risk lane runs before that resolution and is not bound by this rule.
+- **Config** (section `tool-policy-nag` of `omomp.*`): `detector: heuristic` needs `form: {prompt, afterHits, maxNags}`; `detector: jev` needs `intent: {threshold}` and may carry a `form` block used only while the intent lane cannot run. `risk: {minCommands: 4, minChars: 600, minPrograms: 3}` enables the risk lane (the repository's values); `risk: null` or a missing block turns it off. The project's `.omp/omomp.*` copy wins over the agent-dir copy; it is re-read on every watched call.
+- **Under `heuristic` the extension turns OMP's `bashInterceptor.enabled` off at runtime** for the main session (subagents read the settings through), whatever `config.yml` says, and clears the override when the detector changes or the session shuts down. Under `jev` the interceptor follows config, and while it is on, `bash` calls are skipped by every lane because the interceptor already refuses routing violations before they run.
 - **This machine runs it disabled**: `config.yml` lists `extension-module:tool-policy-nag` in `disabledExtensions`. The code and config stay in the repository for machines that want it.
 
-The form lane's shell violation classes, the eval violation regexes, the cadence (first three violations recorded, then one steer per violating call up to three per context, capped until the next compaction) and the state key `mouriya.omp.tool-policy-nag.state` follow the heuristic in `heuristic.ts`. The intent lane sends one `choice` question per watched call with its 12 options (`list`, `read`, `search`, `edit`, `write`, `move`, `eval`, `ast`, `pty`, `shell`, `mixed`, `none`) defined in `INTENT-policy.md`; each `rubric` carries positive examples and counterexamples drawn from real false-positive classes. The risk lane fires when a call has at least `minCommands` segments or `minChars` characters, involves at least `minPrograms` distinct programs after dropping shell plumbing, and includes a write; a read-only command is the intent lane's business.
+The heuristic lane's per-program analyzers, the pipeline policy, the eval violation regexes, the cadence (hits recorded silently until `afterHits`, then one steer per violating call up to `maxNags` per context, re-armed by a compaction, `/clear` or a branch summary) and the state key `dbydd.omp.tool-policy-nag.state` follow `heuristic.ts` and `shell-programs.ts`. The intent lane sends one `choice` question per watched call with its options (`list`, `read`, `search`, `edit`, `write`, `move`, `eval`, `ast`, `pty`, `shell`, `mixed`, `none`) defined in `INTENT-policy.md`; each `rubric` carries positive examples and counterexamples drawn from real false-positive classes. The risk lane fires when a call has at least `minCommands` segments or `minChars` characters, involves at least `minPrograms` distinct programs after dropping shell plumbing, and includes a write; a read-only command is the intent lane's business.
 
 #### watchdog-agent
 
@@ -254,25 +251,11 @@ Judgment options are declared with flat keys (`option.<label>`, `option.<label>.
 
 **Frontmatter**: `target` (required; agent names or `*`), `name` (defaults to the label), `enabled`. The body is a template over `user_prompt`, the array of user prompts in time order: `{{user_prompt[0]}}` the first, `{{user_prompt[-1]}}` the latest, `{{user_prompt[3:e]}}` a slice with `e` meaning the end. Any other placeholder form skips the whole file with a warning.
 
-The repository's `PROMPT-INJECT-user-goal.md` targets `mentor:default`, `discuss:steady` and `discuss:divergent`, injects every user prompt with `{{user_prompt[0:e]}}`, and tells them to treat the user's own words as authoritative.
+The repository's `PROMPT-INJECT-user-goal.md` targets every subagent (`*`), injects every user prompt with `{{user_prompt[0:e]}}`, and tells each one to judge its advisee against those requests rather than against its restatement of them.
 
 **Prompt source**: from the subagent it follows `ctx.agent.parentId` up the agent registry to the main session and reads its current branch's `role: "user"`, `attribution: "user"`, non-`synthetic` messages in order, text blocks only; an empty message (only an image, for example) takes no position. Input is read after the `input` hook and command expansion. Messages this repository's extensions inject are all marked `agent` for this reason.
 
 **Timing**: templates are read when the subagent session starts; on every `context` event it re-reads the root session and puts one request-only developer message at the very front. The message is not written into the session. A malformed file is skipped with a warning; a missing main session injects nothing. Both fail open.
-
-#### turn-judge
-
-After every main-session turn, `turn-judge/` judges that turn through OMP's native JUDGE according to `TURN-JUDGE-<label>.md`, one question per file. When an option with a prompt reaches its confidence threshold, that prompt is typed as a user message; otherwise an info notification shows the verdict.
-
-**Frontmatter** (keys case-insensitive): `name`, `enabled`, `maxChars` (default 30000), `option.<label>`, `option.<label>.prompt`, `option.<label>.threshold` (required with a prompt, in (0, 1]). Labels may be Chinese but may not contain `.` or whitespace. The body is the question, handed to JUDGE as is. Fewer than two options, a prompt for an undeclared option, or a missing threshold skips the file.
-
-The repository's `TURN-JUDGE-甩锅.md` asks "模型是不是在甩锅？" (is the model passing the buck?), options `是`/`否`; when `是` reaches probability 0.5 it types the preset nudge to finish the work.
-
-**A turn**: an assistant message with text that the model ended itself (`stopReason: "stop"`) in the main session. JUDGE receives `{ 过去的记录: [{角色, 内容}], 本轮回复 }`: the record is user inputs (`attribution: "user"`, not `synthetic`) and assistant text in time order, whole entries dropped from the oldest past `maxChars`; the reply is the last message's text, untruncated. Among triggering options the most probable prompt is sent with `attribution: "agent"`; every other file shows one merged info notification per turn. A turn caused by a prompt is judged too, with no limit. Files are re-read at the end of every turn.
-
-#### lang-nag
-
-`lang-nag/` acts on the main session only. After a main-agent turn, it takes the last paragraph (first 200 characters) of the last reply with body text and asks a model in a helper session whether it is in the target language; if not, it prepends `instruction` to the user's next input. It never changes a reply already sent. Config `lang-nag.json` requires `model`, `language` and `instruction`; the file under cwd wins, and the file belongs to the machine. Automatic continuations, failed judgments and an unavailable model produce no reminder.
 
 #### repo-rules
 
@@ -286,28 +269,19 @@ The repository's `TURN-JUDGE-甩锅.md` asks "模型是不是在甩锅？" (is t
 
 `extensions-last/system-prompt-replace/` replaces text in the system prompt. OMP's built-in prompt templates (tool descriptions included) are bundled into the program; this repository turns on `inlineToolDescriptors`, so built-in tool descriptions are part of the system prompt, and sentences that conflict with `agent/AGENTS.md` can only be fixed by rewriting that text.
 
-**Rules file**: `system-prompt-replace.json` in the same directory; each rule has exactly one of `literal` or `regex`, plus `replace`. `literal` replaces every occurrence; `regex` gets `g` automatically and interprets `$1`. Rules apply in file order to every system-prompt block. A missing file replaces nothing; a format error replaces nothing and warns. When a rule's target appears nowhere in the main session's system prompt, the rule warns once per process.
+**Rules**: the `system-prompt-replace` section of `omomp.*` (agent dir only; no project copy is read). Each rule has exactly one of `literal` or `regex`, plus `replace`. `literal` replaces every occurrence; `regex` gets `g` automatically and interprets `$1`. Rules apply in file order to every system-prompt block. A missing section replaces nothing; a format error replaces nothing and warns. When a rule's target appears nowhere in the main session's system prompt, the rule warns once per process. The section is read for every prompt, so an edit applies to the next one.
 
-The repository's rules rewrite built-in and plugin tool descriptions: the `task` tool's agent-selection sentence ("Always set `agent` explicitly; never rely on the default."), the engineering rule about rerunning checks, the missing verb in the compiled-code rule, a paragraph appended to the `eval` tool description refusing file investigation through eval, two paragraphs inserted after the opening sentence of `exec_command` (file investigation refusal; interactive work through `tty: true` with early-polling guidance), and a paragraph appended after the `xd://` device-call instruction. Rules about how to use one tool go into that tool's description rather than the appendix: subagents do not receive `AGENTS.md` but do see tool descriptions.
+The repository's rules rewrite built-in and plugin tool descriptions: the `task` tool's agent-selection sentence ("Always set `agent` explicitly; never rely on the default."), the engineering rule about rerunning checks, the missing verb in the compiled-code rule, a paragraph appended to the `eval` tool description refusing file investigation through eval, and a paragraph appended after the `xd://` device-call instruction. Rules about how to use one tool go into that tool's description rather than the appendix: subagents do not receive `AGENTS.md` but do see tool descriptions.
 
 **Running last**: `before_agent_start` runs serially in extension load order. The load order is native discovery → hooks → plugin extensions → `-e` arguments → `config.yml`'s `extensions` in list order → OMP's built-in inline extensions. The extension therefore sits in `extensions-last/` outside `extensions/` and is written as the last (currently only) entry of `config.yml`'s `extensions`. There is no ordering inside `extensions/`; a definite order is only available through the `extensions` list.
-
-### Source reading coverage
-
-#### response-reading-coverage
-
-`response-reading-coverage/` observes native `grep`, `glob`, `find` and `read` calls in the main session and reports a **low / medium / high** source-reading follow-up level relative to a frozen historical baseline of main replies with similar returned-search width. It does not measure comprehension, citation accuracy or answer quality. This machine disables it (`disabledExtensions: extension-module:response-reading-coverage`); the code stays here for other machines.
-
-- `S` is the union of file identities returned by searches in one reply window; `R` counts successful reads whose invocation follows a search returning that identity, deduplicated across the window. Reads invoked before a search, direct reads of other known paths, directory listings and failed reads give no credit.
-- A successful empty search adds no evidence and creates no scoring group; no returned files means **not applicable**, not low. Failed or ambiguous observations mean **incomplete**.
-- The baseline is a frozen integer table fitted offline from 1,283 reconstructed reply windows (calibration interval ending 2026-10-15): within each returned-search-width stratum, the weighted empirical one-third and two-thirds quantiles of `R` define the low and high boundaries. Runtime uses the table, never a live refit.
-- Reports are written as session custom entries; the main session gets one info notification with the level, and children send a displayable message to the root main. The extension has no config and no model calls.
 
 ### Local process resources
 
 #### child-memory-warning
 
-`child-memory-warning/` samples the interactive OMP process's descendants on macOS every 250 ms. It reads `proc_pid_rusage`'s **phys_footprint**, including compressed and swapped-out memory accounting, not RSS. A footprint strictly greater than 4 GiB produces one main-UI warning and one agent-attributed message to the main agent. It only warns; it never sends a signal.
+`child-memory-warning/` samples the interactive OMP process's descendants on macOS every 2 s. It reads `proc_pid_rusage`'s **phys_footprint**, including compressed and swapped-out memory accounting, not RSS. A footprint above the configured threshold produces one main-UI warning and one agent-attributed message to the main agent. It only warns; it never sends a signal, and it makes no model call.
+
+**Config** (section `child-memory-warning` of `omomp.*`): `thresholdGiB` is any positive number, shipped as `4`. The main session cwd's `.omp/omomp.*` copy wins over the agent-dir copy and is re-read every scan, so a change applies without a restart. Without a valid section tracking continues but alerts pause, and each new problem warns once.
 
 - **Ownership**: PID plus kernel start time identifies a process; the process table is validated twice before ancestry or group membership is used. Previously observed descendants remain owned after PPID becomes 1. A group is registered only after its descendant leader is observed.
 - **Lifetime**: the first main session owns the managed timer and native handle for the process; main-session switching refreshes the delivery context without resetting ownership. Monitoring ends when the owning main session ends.
@@ -331,11 +305,11 @@ Implementation: the caller's session is forked into `$TMPDIR/omp-fork-task/<uuid
 
 #### task-split-check
 
-`task-split-check/` uses a model at the `tool_call` stage to check each dispatch item of `task` / `fork_task`, and blocks the whole call when any item fails. `split` judges items for `task:low` / `task:free` / `task:mid` on whether they stuff several topics into one agent (topics, not file counts); `report-limit` checks every `task:*` item on whether it caps the worker's report length (caps in words, characters, tokens or a "brief report"; setting the length of a deliverable does not count). One merged model request answers line by line; a 25-second abort signal bounds it; verdicts are cached in memory keyed by check plus prompt hash; an unavailable model, a failed request or a timeout passes the checks (fail-open), an unparseable answer passes only that check.
+`task-split-check/` uses a model at the `tool_call` stage to check each dispatch item of `task` / `fork_task`, and blocks the whole call when any item fails. `split` judges items for the leaf and mid-tier lanes (`labor`, `engineer`, `theorist`, `philosopher`, `fusion-worker`, `fusion-deepthink`) on whether they stuff several topics into one agent (topics, not file counts); `report-limit` checks every dispatched item on whether it caps the worker's report length (caps in words, characters, tokens or a "brief report"; setting the length of a deliverable does not count). One merged model request answers line by line; a 25-second abort signal bounds it; verdicts are cached in memory keyed by check plus prompt hash; an unavailable model, a failed request or a timeout passes the checks (fail-open), an unparseable answer passes only that check. The model is the `model` of the `task-split-check` section of `omomp.*`.
 
 #### task-completion-judge
 
-`task-completion-judge/` intercepts the delivering `yield` in `task:low`, `task:mid` and `task:free` sessions and first has a model judge whether the slice is really done. Evidence: the assignment (the `task` prompt of the last `session_init`), the shared background, the worker's own todo goal, its last 50 tool calls and results, and the submission. The goal is only the worker's restatement; a narrowed scope or a measure never exercised judges `NOT_DONE`. On `NOT_DONE` it blocks the yield once and asks the worker to finish and verify; on `DONE` it re-reads the todo projection and also blocks once while pending or in_progress items remain. Each kind of bounce happens at most once. A passing delivery gets `completion_judge` attached. Model unavailability, request failures and timeouts let the yield through without annotation (fail-open); when the todo plugin does not answer, it logs a warning and fails open.
+`task-completion-judge/` intercepts the delivering `yield` in the lane sessions it judges (`labor`, `engineer`, `theorist`, `philosopher`, `fusion-worker`, `fusion-deepthink`, `fusion-hierarchical`, `fusion-flattened`) and first has a model judge whether the slice is really done. Evidence: the assignment (the `task` prompt of the last `session_init`), the shared background, the worker's own todo goal, the newest tool calls and results that fit a 64k-token judge window, and the submission. The goal is only the worker's restatement; a narrowed scope or a measure never exercised judges `NOT_DONE`. On `NOT_DONE` it blocks the yield once and asks the worker to finish and verify; on `DONE` it re-reads the todo projection and also blocks once while pending or in_progress items remain. Each kind of bounce happens at most once. A passing delivery gets `completion_judge` attached. Model unavailability, request failures and timeouts let the yield through without annotation (fail-open); when the todo plugin does not answer, it logs a warning and fails open. The judge model is the `model` of the `task-completion-judge` section of `omomp.*`.
 
 ### Context recovery
 
@@ -360,7 +334,7 @@ After every successful `todo` / `goal` change, `ctx-tasklog/` appends the local 
 
 `doc-polish/` registers the `polish_doc` tool and the `/polish-doc <path…>` command, which restructure and polish `.md` / `.txt` without changing their meaning. It does not modify the source file; it writes the review to `/tmp/doc-polish/<timestamp>-<file name>/`: `review.md` (groups of "before / after / comment"), a copy of the original and the split index `split.json`.
 
-**Three subagents**: split (reads the original, writes the split index with line ranges and a glossary), polish (no tools, batched by body text of at most 5000 code points, returns polished text and glossary changes), check (no tools, judges group by group whether the meaning is preserved). Model precedence: tool parameters > `doc-polish.json` > the current session model; the repository's config sets split and polish models and concurrency 8. A missing model in the available list errors immediately without writing anything; a failed request retries up to 3 times; unparseable polish output keeps the original and is flagged. When the model calls it, the review path comes back as the tool result; when a person runs `/polish-doc`, the same content is handed to the main agent as new input with hard requirements attached: handle it personally, read every review in full.
+**Three subagents**: split (reads the original, writes the split index with line ranges and a glossary), polish (no tools, batched by body text of at most 5000 code points, returns polished text and glossary changes), check (no tools, judges group by group whether the meaning is preserved). Model precedence: tool parameters > the machine-local `doc-polish` section of `omomp.*` > the current session model. A missing model in the available list errors immediately without writing anything; a failed request retries up to 3 times; unparseable polish output keeps the original and is flagged. When the model calls it, the review path comes back as the tool result; when a person runs `/polish-doc`, the same content is handed to the main agent as new input with hard requirements attached: handle it personally, read every review in full.
 
 #### bro
 
@@ -378,10 +352,6 @@ After every successful `todo` / `goal` change, `ctx-tasklog/` appends the local 
 
 In the overlay, up/down keys scroll; once complete, `C` copies to the clipboard and `R` regenerates; `Esc` closes. Settings live in `bro-settings.json` beside the extension (machine-owned, created on load if missing); the custom prompt `bro-prompt.md` must contain `{{response}}` exactly once and fully replaces the built-in mode prompts when valid. Helper sessions load no extensions.
 
-#### input-polish
-
-`input-polish/` acts only on the main session's interactive TUI. Pressing the configured chord (default `Ctrl+Enter`) in the input box instead of Enter polishes the draft with a model. The polished text is not written into the input box; it streams into an overlay, and `Enter` replaces the draft and submits through the usual path, `Esc` aborts. Blank drafts and drafts starting with `/`, `!` or `$` pass through untouched. The rewrite must keep the original language, code, paths, identifiers and `[Paste #N …]` / `[Image #N …]` placeholders; a mismatched rewrite is treated as a failure and not applied. Config `input-polish.json` requires `model` and `instruction`; `key` may be `ctrl+enter` (default, needs a terminal that distinguishes it from Enter) or `alt+enter`. Helper sessions pass `taskDepth: 1`.
-
 #### tool-description-restore
 
 `tool-description-restore/` restores tool descriptions on the `magpie` provider's `openai-completions` wire: when the provider returns function tools without descriptions, it refills them from the session's registered tools at `before_provider_request`. It changes nothing for other providers or APIs.
@@ -398,6 +368,16 @@ In the overlay, up/down keys scroll; once complete, `C` copies to the clipboard 
 - **`wt_remove`**: deletes the linked worktree the session is in and moves the session to the main checkout, keeping the branch. Two calls required: the first is a read-only check (verdict `SAFE`/`UNSAFE`/`BLOCKED`, what deletion would lose, unreachable commits, blockers, a `confirm` value that is a deterministic hash of the worktree state); the second re-checks and refuses when the value differs or a blocker remains, then runs the human `/move`, verifies the cwd, and force-deletes the worktree through OMP's VCS interface. The hand-back names the exact stage where it stopped.
 - **Getting the TUI instance**: the extension API does not expose InteractiveMode; within the one synchronous `ctx.ui.setEditorComponent` call the extension swaps the prototype method for a function that only records `this`, then restores it immediately.
 
+### Harness control
+
+#### harness-restart
+
+`harness-restart/` registers `harness_restart` in the interactive TUI's main session: it queues the human `/restart` (the same launch flags, the session resumed from disk) instead of reimplementing it. `/restart` refuses while streaming and a tool call always runs while streaming, so the call only queues; once the turn truly ends and the session is idle, the extension runs it. Before restarting it appends a durable custom session entry, and on the next `session_start` injects "restart completed: <reason>" as an attributed user message, so the restarted session knows why it restarted. Session switch and shutdown drop a pending request.
+
+#### model-compaction
+
+`model-compaction/` lets ordered regex rules pick the compaction trigger per model and hands the result to OMP's native `compaction.modelThresholds`; OMP itself still decides and compacts. Config is the `model-compaction` section of `omomp.*` in the agent directory (machine-local; no project copy is read): `rules: [{provider?, model?, thresholdTokens}]`, where `provider` and `model` are unanchored JavaScript regexes and the first matching rule wins. Without a valid section nothing changes. The repository ships no rules.
+
 ### Compatibility fixes
 
 #### commandcode-model-spec
@@ -412,7 +392,7 @@ A machine is set up by copying the managed files and installing the plugins; the
 mkdir -p "$HOME/.omp/agent" "$HOME/.pi/agent"
 # omp context and config
 cp agent/AGENTS.md agent/RULES.md agent/PERSONALITY.md agent/config.yml \
-  agent/thinking-translator.json "$HOME/.omp/agent/"
+  agent/omomp.yml agent/thinking-translator.json "$HOME/.omp/agent/"
 cp -a agent/agents agent/rules agent/skills agent/extensions agent/extensions-last "$HOME/.omp/agent/"
 # pi side (see pi/README.md; hindsight.jsonc needs a merge, see there)
 cp pi/AGENTS.md pi/APPEND_SYSTEM.md "$HOME/.pi/agent/"
@@ -422,7 +402,7 @@ cp -a pi/agents "$HOME/.pi/agent/"
 
 Notes:
 
-- The copy set overwrites whole files. Machine-local fields of `config.yml` (for example `compaction.thresholdTokens`, `theme`, the machine's own `disabledExtensions` additions) and machine entries of `extensions` are replaced; merge them back after copying on a machine with an existing config.
+- The copy set overwrites whole files. Machine-local fields of `config.yml` (for example `compaction.thresholdTokens`, `theme`, the machine's own `disabledExtensions` additions) and machine entries of `extensions` are replaced; merge them back after copying on a machine with an existing config. `omomp.yml` is overwritten whole, so the machine-local `doc-polish` and `model-compaction` sections must be merged into the repository's copy rather than kept beside it.
 - `~/.pi/agent/hindsight.json` exists and wins over a `.jsonc` beside it; merge the repository's `hindsight.jsonc` into the loaded file instead of copying it.
 - The `pi-hindsight` plugin is installed by the script rather than linked to a checkout, so the machine runs a pushed state; re-run `./install-plugins.sh` after a hindsight merge.
 - `models.yml`, `agent.db`, sessions, caches and logs stay machine-only. The machine's `~/.pi/agent/STATE.md` and `~/.omp/agent/STATE.md` carry dated records.
@@ -448,8 +428,8 @@ Nothing is pinned: GitHub URLs track the default branch, and rerunning the scrip
 - **Adding a machine-owned file inside an extension directory is the default**: only the `.ts` modules and the shipped templates and configs listed in [Repository contents](#repository-contents) belong to the repository; the copy set above is the boundary.
 - **Writing extension code**: run `bun install` first and `bun run check` before delivering; conventions in [Layout and development conventions](#layout-and-development-conventions). A newly introduced `@oh-my-pi/*` subpath must be loaded for real once from a directory without `node_modules`.
 - **Helper sessions an extension creates must pass `taskDepth: 1`.** One-shot model calls go through `runHelperPrompt` in `_shared/helper-session.ts`, which already passes it; the only extension creating a session itself is `fork-task`'s shake, which passes it too. Without it the SDK treats the session as a main session, and `dispose()` tears down the global `AgentLifecycleManager`, turning every idle subagent into `Unknown agent`. Extensions that only call `completeSimple` (`task-split-check`, `task-completion-judge`) create no session.
-- **After an OMP upgrade**, re-verify in a real TUI: [fork-task](#fork-task), [user-prompt-inject](#user-prompt-inject), [turn-judge](#turn-judge), [task-completion-judge](#task-completion-judge), [ctx-tool](#ctx-tool) (including post-compact injection), [ctx-tasklog](#ctx-tasklog), [bro](#bro) and [wt-tool](#wt-tool) — they depend on OMP internals (registry, session entries, hooks, host projections, the TUI and worktree dispatchers). The todo-more plugin's implementation updates happen in its own repository; this repository verifies the read protocol and consumer results.
-- **After an OMP upgrade**, if a `system-prompt-replace: … found no target` warning appears when the main session starts a model turn, update `system-prompt-replace.json` to the new template text; when upstream deleted the sentence a rule rewrites, delete the rule. Also confirm the extension load order [system-prompt-replace](#system-prompt-replace) relies on has not changed.
+- **After an OMP upgrade**, re-verify in a real TUI: [fork-task](#fork-task), [user-prompt-inject](#user-prompt-inject), [task-completion-judge](#task-completion-judge), [ctx-tool](#ctx-tool) (including post-compact injection), [ctx-tasklog](#ctx-tasklog), [bro](#bro), [wt-tool](#wt-tool) and [harness-restart](#harness-restart) — they depend on OMP internals (registry, session entries, hooks, host projections, the TUI and worktree dispatchers). The todo-more plugin's implementation updates happen in its own repository; this repository verifies the read protocol and consumer results.
+- **After an OMP upgrade**, if a `system-prompt-replace: … found no target` warning appears when the main session starts a model turn, update the `system-prompt-replace` section of `omomp.yml` to the new template text; when upstream deleted the sentence a rule rewrites, delete the rule. Also confirm the extension load order [system-prompt-replace](#system-prompt-replace) relies on has not changed.
 - **Extensions that inject user messages set `attribution: "agent"`.** Otherwise it defaults to `user`, and [user-prompt-inject](#user-prompt-inject) injects them as the user's own words.
 - **Before changing agent definitions** read `agent/agents/README.txt`; notes in that directory use `.txt`, never `.md`.
 - **pi-side records** live in `pi/README.md` of this repository; dated records stay in the machines' `STATE.md` files.

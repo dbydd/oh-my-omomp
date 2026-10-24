@@ -112,7 +112,8 @@ const CHECKS: readonly Check[] = [
 		id: "report-limit",
 		tools: { task: true, fork_task: true },
 		mainSessionOnly: false,
-		covers: (agent) => agent === undefined || agent.startsWith("task:"),
+		// Every dispatched worker: this fork's lanes are named (labor, engineer, …), not `task:*`.
+		covers: () => true,
 		question: [
 			"Does the dispatch limit the length of the report the worker returns: a cap on words, characters, lines, tokens, sentences, bullets or paragraphs, or an instruction to keep the report or answer short, brief or within some size?",
 			"For this question both the shared context and the assignment count: a length limit in either one applies to this worker.",

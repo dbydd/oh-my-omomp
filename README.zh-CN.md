@@ -61,11 +61,9 @@ Oh My Pi（OMP）本机配置中可以审查、可迁移的部分，为重型编
 
 每次成功的 todo 修改都会被 `ctx-tasklog` 捕获；`ctx` 按这些事件重放任务的最终状态，形成不依赖模型自行总结的简短行事记录。主会话发生 compact 后，`ctx-tool` 会把这份记录连同 context 树注入新 context。
 
-**把偏离契约的工具调用当作整体偏离的信号。** `tool-policy-nag` 检测模型是否绕开内置工具，只提醒，不拦截命令。intent 通道通过 OMP 的 JUDGE 角色判断该用哪个工具；risk 通道是确定性的，标记结果无法从命令本身看出来的调用。本机在 `disabledExtensions` 里禁用了整个扩展（`extension-module:tool-policy-nag`），代码保留给其他机器。
+**把偏离契约的工具调用当作整体偏离的信号。** `tool-policy-nag` 检测模型是否绕开内置工具，只提醒，不拦截命令。`detector` 在两条工具通道里选一条：`heuristic` 跑本地命令解析器，hits 超过 `afterHits` 后每个 context 最多发 `maxNags` 条提醒，并在生效期间关掉 OMP 的 bash 拦截器；`jev` 每个调用问一次 OMP 的 JUDGE 角色。risk 通道是确定性的，标记结果无法从命令本身看出来的调用。本机在 `disabledExtensions` 里禁用了整个扩展（`extension-module:tool-policy-nag`），代码保留给需要的机器。
 
 **用 watchdog 做独立的运行时审阅。** `watchdog-agent` 作为第三方观察者自动读取 context，按规则注入提醒；watchdog 文件里声明的选项路由到 OMP 的原生 JUDGE 后端。
-
-**逐轮判定并直接纠正。** `turn-judge` 每轮通过 OMP 的原生 JUDGE 判断主会话的这一轮；对应选项的置信度达到阈值就直接输入预设 prompt，否则只显示判定结果。
 
 **让顾问看到用户原话。** mentor 和 discussant 只知道派它的 agent 告诉它的东西，只能顺着转述给意见，成了回声放大器。`user-prompt-inject` 把根会话里用户自己写的 prompt 注入它们的每次模型调用，让它们拿用户的目标和约束去核对对方的计划。
 
@@ -135,24 +133,23 @@ skill 正文写明适用场景、置信度阈值，以及针对页面变化和�
 |[tool-policy-nag](#tool-policy-nag)|发现用 shell/eval 代替内置工具时提醒；intent 通道走原生 JUDGE，risk 通道确定性判断|
 |[watchdog-agent](#watchdog-agent)|按目标投放的第三方审查者|
 |[user-prompt-inject](#user-prompt-inject)|按模板把用户原话注入指定的 subagent|
-|[turn-judge](#turn-judge)|主会话每轮用原生 JUDGE 判断，达到阈值就输入预设 prompt，否则显示判定|
-|[child-memory-warning](#child-memory-warning)|macOS 后代进程物理 footprint 超过 4 GiB 时通知主 UI 和 agent，包括此前已观察到的存活孤儿|
+|[child-memory-warning](#child-memory-warning)|macOS 后代进程物理 footprint 超过配置的阈值时通知主 UI 和 agent，包括此前已观察到的存活孤儿|
 |[repo-rules](#repo-rules)|补读 `.claude/rules` 等 repo 级 rule 目录|
 |`tern-tool`|注册 `tern` 工具，每次调用都必须写明 session|
 |[append-system-model](#append-system-model)|按模型 / 提供商正则追加系统提示词|
-|[system-prompt-replace](#system-prompt-replace)|在按路径加载的扩展里最后执行，按 JSON 规则替换 system prompt 文字，用来改写内置工具说明|
+|[system-prompt-replace](#system-prompt-replace)|在按路径加载的扩展里最后执行，按 `omomp.yml` 规则替换 system prompt 文字，用来改写内置工具说明|
 |[fork-task](#fork-task)|注册 `fork_task`：带着当前对话副本派 subagent|
 |[isolation-nudge](#isolation-nudge)|多个写入者共用目录时拦一次|
 |[task-split-check](#task-split-check)|拦下多主题派发和限制汇报长度的派发|
 |[task-completion-judge](#task-completion-judge)|worker 交付前审一次完成度|
 |[ctx-tool](#ctx-tool)|注册只读 `ctx` 工具；compact 后强制注入 `ctx` 概览和当前任务记录|
 |[ctx-tasklog](#ctx-tasklog)|捕获成功的 todo / goal 修改，形成 `ctx` 的派生记录|
-|[response-reading-coverage](#response-reading-coverage)|以历史基准返回来源阅读跟进的低／中／高|
 |[doc-polish](#doc-polish)|`polish_doc` / `/polish-doc`：不改原意地润色文档|
 |[bro](#bro)|`/bro`：把回复、文档或网页改写成易懂的解释|
-|[input-polish](#input-polish)|`Ctrl+Enter` 润色输入框草稿，overlay 预览后回车发送、Esc 取消|
 |[tool-description-restore](#tool-description-restore)|恢复 magpie 的 `openai-completions` wire 丢掉的工具说明|
 |[wt-tool](#wt-tool)|注册 `wt` / `wt_remove`：主 agent 调用人用的 `/wt` 进入新 worktree，或检查、确认后删掉所在 worktree 回到主 checkout|
+|[harness-restart](#harness-restart)|注册 `harness_restart`：主 agent 把人的 `/restart` 排到本轮结束时执行|
+|[model-compaction](#model-compaction)|用正则规则按模型决定压缩触发点，规则写在机器专属的 `model-compaction` 段|
 |[commandcode-model-spec](#commandcode-model-spec)|修复 `--model` 指定 commandcode 模型时的认证失败|
 
 `agent/rules/tern-session-required.md` 是原生 rules 载体的规则文件：用 judge 拦截 `tern` CLI 的 bash 调用，并教会在 `tern` 工具不可用时的 session 必填用法。
@@ -175,7 +172,7 @@ omp 从 `~/.omp/agent/extensions/` 往下只找一层：直接放的 `*.ts`、`<
 |---|---|
 |`errors.ts`|`errorText`：异常转成文字|
 |`messages.ts`|`textOf`、`lastAssistantText`：取消息里的文字块|
-|`config.ts`|`loadJsonConfig(文件名, schema, [ctx.cwd, import.meta.dir])`：cwd 下的副本优先，无效的副本跳过并记进 `skipped`|
+|`omomp.ts`|`defineOmompSection(import.meta.dir, schema)` 把扩展绑到自己的 `omomp.*` 段；`loadOmompSection(section, cwd)` 先读项目副本、再读 agent 目录副本，无效副本记进 `skipped`；`writeOmompSection` 写回一段|
 |`models.ts`|`resolveModelChain`、`findModel`、`splitLevel`：解析 `provider/id[:level]` 和逗号分隔的候选链，只查模型列表，不发请求|
 |`helper-session.ts`|`runHelperPrompt`：在内存辅助会话里做一次模型调用，不抛异常，固定传 `taskDepth: 1`|
 |`judge.ts`|`openNativeJudge`：用当前会话的配置和 OMP 角色解析器选择 JUDGE 的具体模型，仅原生 judgment API 可用，凭据由宿主提供|
@@ -201,24 +198,24 @@ omp 从 `~/.omp/agent/extensions/` 往下只找一层：直接放的 `*.ts`、`<
 
 ### 行为约束
 
-`turn-judge`、`tool-policy-nag` 的 intent 通道、`watchdog-agent` 的选项判定后端共用 OMP 的 **JUDGE 模型角色**，不各自设置 provider/model。只需配置 JUDGE 一次；该角色首选可用候选是原生 judgment API 模型时，这些功能自动参与。角色解析沿用 OMP 的候选顺序与默认值，凭据也从 OMP 取得。
+`tool-policy-nag` 的 `jev` 通道和 `watchdog-agent` 的选项判定后端共用 OMP 的 **JUDGE 模型角色**，不各自设置 provider/model。只需配置 JUDGE 一次；该角色首选可用候选是原生 judgment API 模型时，这些功能自动参与。角色解析沿用 OMP 的候选顺序与默认值，凭据也从 OMP 取得。
 
 角色解析出的模型没有原生后端时，相关判定用该模型做提示词解析；请求失败不提醒，也不切换后端。每次触发重新取当前会话的角色配置。
 
 #### tool-policy-nag
 
-`tool-policy-nag/` 只作用于主会话。它在 `tool_call` 阶段检查被监视的调用，只提醒，不拦截命令。三条通道各管一件**不同**的事，由同目录的 `tool-policy-nag.json` 分别开关，可以同时开着：
+`tool-policy-nag/` 只作用于主会话。它在 `tool_call` 阶段检查被监视的调用，只提醒，不拦截命令。`omomp.yml` 的 `tool-policy-nag` 段用 `detector` 选一条工具通道，并独立开关 `risk` 通道：
 
-- `form` — 字符串检测：命令解析器机械地数这次调用里有几个操作本该用内置工具。
-- `intent` — 意图检测：把这次调用整体交给原生 JUDGE，问它这件事该用哪个内置工具。回答的是**工具路由**问题。
+- `heuristic` — 字符串检测：`shell-parser.ts` 拆行，`shell-command.ts` 穿过包装器解析到真正运行的程序，`shell-programs.ts` 逐程序判定，`heuristic.ts` 应用管道策略。它数这次调用里有几个操作本该用内置工具。
+- `jev` — 意图检测：把这次调用整体交给原生 JUDGE，问它这件事该用哪个内置工具。回答的是**工具路由**问题。
 - `risk` — 风险检测：确定性判断这次调用**能不能从这一行看出它会做什么**。命令又长、牵涉的外部程序又多、还有会写入的步骤时，结果没法只从命令本身推出来。
 
 - **检查的调用**：`bash` / `bash_bg` 的命令；`exec_command` 的命令；经 `write` 写到 `xd://bash`、`xd://bash_bg`、`xd://exec_command` 的命令；`eval` 的 Python / JS 代码（risk 通道只看 shell 命令）。
-- **配置** `tool-policy-nag.json`：`form: {"detector": "heuristic"}` 打开字符串通道；`intent: {"threshold": 0.5}` 声明意图通道（仓库的值，原生后端可用后自动运行）；`risk: {"minCommands": 4, "minChars": 600, "minPrograms": 3}` 打开风险通道（仓库的值）；`null` 关掉一条通道。cwd 下的文件优先于扩展目录旁的文件；每次检查调用时重读。
-- **两条工具通道一次调用只发一条提醒。** `intent` 已声明、有效、启用且原生 JUDGE 可用时由它负责提醒，`form` 照常计数和记日志；不满足这些条件时由 `form` 发通用提醒。risk 通道在这个解析之前运行，不受这条约束。
+- **配置**（`omomp.*` 的 `tool-policy-nag` 段）：`detector: heuristic` 需要 `form: {prompt, afterHits, maxNags}`；`detector: jev` 需要 `intent: {threshold}`，可带一个只在 intent 通道跑不了时使用的 `form` 块。`risk: {minCommands: 4, minChars: 600, minPrograms: 3}` 打开风险通道（仓库的值）；`risk: null` 或整块缺失则关闭。项目的 `.omp/omomp.*` 副本优先于 agent 目录副本；每次被检查的调用都重读。
+- **`heuristic` 下扩展会在运行时把 OMP 的 `bashInterceptor.enabled` 关掉**（主会话生效，subagent 读到的是同一份设置），不管 `config.yml` 怎么写；detector 改变或会话关闭时清除这个覆盖。`jev` 下拦截器跟随配置，开着时所有通道都跳过 `bash` 调用，因为拦截器已经在运行前拒绝了路由违规。
 - **本机禁用该扩展**：`config.yml` 把 `extension-module:tool-policy-nag` 列在 `disabledExtensions`。代码和配置留在仓库给需要的机器。
 
-form 通道的 shell 违规分类、eval 违规正则、节奏（前三次只记录，之后每次违规调用一条 steer，每个 context 最多三条，发满停到下次 compaction）和状态键 `mouriya.omp.tool-policy-nag.state` 见 `heuristic.ts` 的实现。intent 通道每个被检查的调用发一次 `choice` 问题，12 个选项（`list`、`read`、`search`、`edit`、`write`、`move`、`eval`、`ast`、`pty`、`shell`、`mixed`、`none`）的判据在同目录 `INTENT-policy.md`；每条 `rubric` 带正面例子和取自实际误报类的反例。risk 通道在调用至少有 `minCommands` 段或 `minChars` 字符、去掉 shell 管道件后牵涉至少 `minPrograms` 个不同程序、且包含写入时触发；只读的命令归 intent 通道管。
+heuristic 通道的逐程序分析器、管道策略、eval 违规正则、节奏（hits 先静默累计到 `afterHits`，之后每次违规调用一条 steer，每个 context 最多 `maxNags` 条，遇到 compaction、`/clear` 或分支摘要重新计数）和状态键 `dbydd.omp.tool-policy-nag.state` 见 `heuristic.ts` 与 `shell-programs.ts`。intent 通道每个被检查的调用发一次 `choice` 问题，选项（`list`、`read`、`search`、`edit`、`write`、`move`、`eval`、`ast`、`pty`、`shell`、`mixed`、`none`）的判据在同目录 `INTENT-policy.md`；每条 `rubric` 带正面例子和取自实际误报类的反例。risk 通道在调用至少有 `minCommands` 段或 `minChars` 字符、去掉 shell 管道件后牵涉至少 `minPrograms` 个不同程序、且包含写入时触发；只读的命令归 intent 通道管。
 
 #### watchdog-agent
 
@@ -254,25 +251,11 @@ form 通道的 shell 违规分类、eval 违规正则、节奏（前三次只记
 
 **frontmatter**：`target`（必填；agent 名或 `*`）、`name`（缺省取标签）、`enabled`。正文是关于 `user_prompt`（按时间顺序的用户 prompt 数组）的模板：`{{user_prompt[0]}}` 第一条、`{{user_prompt[-1]}}` 最新一条、`{{user_prompt[3:e]}}` 切片且 `e` 表示结尾。其他占位符写法让整个文件跳过并记 warning。
 
-仓库的 `PROMPT-INJECT-user-goal.md` 投给 `mentor:default`、`discuss:steady`、`discuss:divergent`，用 `{{user_prompt[0:e]}}` 注入全部用户 prompt，并要求它们以用户原话为准。
+仓库的 `PROMPT-INJECT-user-goal.md` 投给所有 subagent（`*`），用 `{{user_prompt[0:e]}}` 注入全部用户 prompt，要求它们拿这些请求去核对对方，而不是核对对方的复述。
 
 **prompt 来源**：从本 subagent 沿 `ctx.agent.parentId` 在 agent registry 里往上找到主会话，按顺序读它当前分支上 `role: "user"`、`attribution: "user"`、非 `synthetic` 的消息，只取文本块；取完为空的消息（比如只有图片）不占位置。输入在 `input` 钩子和命令展开之后读取。本仓库扩展注入的消息因此都标 `agent`。
 
 **时机**：模板在 subagent 会话开始时读取；每次 `context` 事件重新读根会话，在消息最前面加一条只用于本次请求的 developer 消息。这条消息不写进会话。文件格式错误时跳过并记 warning；找不到主会话时不注入。都失败放行。
-
-#### turn-judge
-
-主会话每一轮结束后，`turn-judge/` 按 `TURN-JUDGE-<标签>.md` 通过 OMP 的原生 JUDGE 判断这一轮，每个文件问一个问题。带 prompt 的选项置信度达到阈值时，把 prompt 直接作为一条用户消息输入；否则弹 info 显示判定结果。
-
-**frontmatter**（键不区分大小写）：`name`、`enabled`、`maxChars`（默认 30000）、`option.<标签>`、`option.<标签>.prompt`、`option.<标签>.threshold`（写了 prompt 就必填，取 (0, 1]）。标签可以用中文，不能含 `.` 或空白。正文是问题，原样交给 JUDGE。少于两个选项、给未声明选项写 prompt、threshold 缺失，都会让文件被跳过。
-
-仓库的 `TURN-JUDGE-甩锅.md` 问“模型是不是在甩锅？”，选项 `是`/`否`；`是` 的概率达到 0.5 时输入预设的提醒，让它接着做完该做的事。
-
-**一轮**：主会话里模型自己结束（`stopReason: "stop"`）、有文字的 assistant 消息。JUDGE 收到 `{ 过去的记录: [{角色, 内容}], 本轮回复 }`：记录是按时间顺序的用户输入（`attribution: "user"`、非 `synthetic`）和 assistant 文字，超过 `maxChars` 从最早整条丢掉；回复是最后那条消息的文字，不截断。触发的选项里取概率最高的 prompt，以 `attribution: "agent"` 发出；其余文件每轮合并成一条 info。prompt 引起的那轮照样判，没有上限。文件每轮结束时重读。
-
-#### lang-nag
-
-`lang-nag/` 只作用于主会话。主 agent 一轮结束后，取最后一条有正文的回复的最后一段（前 200 个字符），用辅助会话问模型这段是不是目标语言；判定为否，就在用户下一条输入前面加上 `instruction`。它不改已经发出的回复。配置 `lang-nag.json` 要求 `model`、`language`、`instruction`；cwd 下的文件优先，文件属于本机。自动续写的轮次、判定失败、模型不可用都不提醒。
 
 #### repo-rules
 
@@ -286,28 +269,19 @@ form 通道的 shell 违规分类、eval 违规正则、节奏（前三次只记
 
 `extensions-last/system-prompt-replace/` 对 system prompt 做文字替换。OMP 内置的提示词模板（包括工具说明）打包在程序里；本仓库打开了 `inlineToolDescriptors`，内置工具的说明拼在 system prompt 里，和 `agent/AGENTS.md` 冲突的句子只能靠改写这段文字修正。
 
-**规则文件**：同目录的 `system-prompt-replace.json`；每条规则 `literal`、`regex` 二选一，再加 `replace`。`literal` 替换所有出现处；`regex` 自动加 `g`，按 `String.prototype.replace` 解释 `$1`。规则按文件顺序依次作用于每个 system prompt 块。文件缺失时不替换；格式错误时不替换并记 warning。某条规则的目标在主会话 system prompt 里一处都找不到时，该规则每个进程警告一次。
+**规则**：`omomp.*` 的 `system-prompt-replace` 段（只读 agent 目录，不读项目副本）。每条规则 `literal`、`regex` 二选一，再加 `replace`。`literal` 替换所有出现处；`regex` 自动加 `g`，按 `String.prototype.replace` 解释 `$1`。规则按文件顺序依次作用于每个 system prompt 块。段缺失时不替换；格式错误时不替换并记 warning。某条规则的目标在主会话 system prompt 里一处都找不到时，该规则每个进程警告一次。每条 prompt 重新读这一段，改完下一条 prompt 生效。
 
-仓库的规则改写内置和插件工具说明：`task` 工具选 agent 的那句（“Always set \`agent\` explicitly; never rely on the default.”）、engineering 里关于重跑检查的规则、编译代码规则缺失的谓语、`eval` 工具说明末尾追加的“拒绝用 eval 调查文件”段落、`exec_command` 开头句之后插入的两段（拒绝文件调查；交互操作走 `tty: true` 与轮询指引），以及 `xd://` 设备调用说明之后追加的段落。关于某个工具怎么用的规则优先写进该工具的说明：subagent 收不到 `AGENTS.md`，但能看到工具说明。
+仓库的规则改写内置和插件工具说明：`task` 工具选 agent 的那句（“Always set \`agent\` explicitly; never rely on the default.”）、engineering 里关于重跑检查的规则、编译代码规则缺失的谓语、`eval` 工具说明末尾追加的“拒绝用 eval 调查文件”段落，以及 `xd://` 设备调用说明之后追加的段落。关于某个工具怎么用的规则优先写进该工具的说明：subagent 收不到 `AGENTS.md`，但能看到工具说明。
 
 **最后执行**：`before_agent_start` 按扩展加载顺序串行执行。加载顺序是原生发现 → hooks → 插件扩展 → `-e` 参数 → `config.yml` 的 `extensions`（按列表顺序）→ OMP 内置 inline 扩展。因此本扩展放在 `extensions/` 之外的 `extensions-last/`，并写成 `config.yml` 的 `extensions` 最后一项（当前也是唯一一项）。`extensions/` 目录内部没有排序；需要确定顺序只能靠 `extensions` 列表。
-
-### 来源阅读充实度
-
-#### response-reading-coverage
-
-`response-reading-coverage/` 观察主会话的原生 `grep`、`glob`、`find`、`read` 调用，相对一个冻结的历史基准（相近已返回搜索规模的主回复）返回来源阅读跟进的**低／中／高**等级。它不衡量理解深度、引用准确性或答案质量。本机禁用它（`disabledExtensions: extension-module:response-reading-coverage`）；代码保留给其他机器。
-
-- `S` 是一个回复窗口内搜索返回文件身份的并集；`R` 只计调用顺序上位于返回该身份的搜索之后、成功 read 的来源，整个窗口去重。先 read 后搜索、直接读取其他已知路径、目录列表和失败 read 都不给 credit。
-- 成功的空搜索不增加证据、不创建评分组；没有返回文件时为**不适用**，不算低档。失败或有歧义的观测为**统计不完整**。
-- 基准是从 1,283 个重建回复窗口离线拟合的冻结整数表（校准区间止于 2026-10-15）：在每个返回搜索宽度层内，`R` 的加权经验三分位定出低、高边界。运行时只用这张表，不实时重拟合。
-- 报告写成 session custom entry；主会话收到一条只显示等级的 info，子 agent 向根主会话发可显示消息。扩展没有配置，也不发模型调用。
 
 ### 本地进程资源
 
 #### child-memory-warning
 
-`child-memory-warning/` 在 macOS 上每 250 ms 采样交互式 OMP 进程的后代。内存读 `proc_pid_rusage` 的 **phys_footprint**（包括压缩与换出内存的计账），不读 RSS。footprint 严格大于 4 GiB 时，主 UI 收到一条 warning，主 agent 收到一条归因为 agent 的消息。它只告警，不发信号。
+`child-memory-warning/` 在 macOS 上每 2 s 采样交互式 OMP 进程的后代。内存读 `proc_pid_rusage` 的 **phys_footprint**（包括压缩与换出内存的计账），不读 RSS。footprint 超过配置的阈值时，主 UI 收到一条 warning，主 agent 收到一条归因为 agent 的消息。它只告警，不发信号，也不发任何模型调用。
+
+**配置**（`omomp.*` 的 `child-memory-warning` 段）：`thresholdGiB` 取任意正数，仓库发的是 `4`。主会话 cwd 下的 `.omp/omomp.*` 副本优先于 agent 目录副本，每次扫描重读，改完不用重启。没有有效段时继续跟踪但暂停告警，每个新问题只警告一次。
 
 - **归属**：PID 加内核启动时间标识进程；进程表经两遍核对后才参与祖先与进程组归属判断。已观察到的后代在 PPID 变为 1 后仍保留归属。只有观察到属于本 OMP 的后代组长后才登记进程组。
 - **生命周期**：首个主会话拥有该进程的 managed timer 和 native handle；主会话切换只刷新投递 context，不清空归属。owner 主会话结束时监控结束。
@@ -331,11 +305,11 @@ form 通道的 shell 违规分类、eval 违规正则、节奏（前三次只记
 
 #### task-split-check
 
-`task-split-check/` 在 `tool_call` 阶段用模型检查 `task` / `fork_task` 的每个派发项，有一项不合格就拦下整次调用。`split` 对派给 `task:low` / `task:free` / `task:mid` 的项判断是否把多个主题塞给一个 agent（看主题，不看文件数）；`report-limit` 对所有 `task:*` 项检查是否限制 worker 汇报的长度（字数、字符、token 上限或“简短汇报”；给交付物定长度不算）。同一项的检查合并成一次模型请求，逐行回答；25 秒中止信号封顶；判定按检查加 prompt 哈希缓存在内存；模型不可用、请求失败或超时时放行（fail-open），单个回答解析不了只放行那一项。
+`task-split-check/` 在 `tool_call` 阶段用模型检查 `task` / `fork_task` 的每个派发项，有一项不合格就拦下整次调用。`split` 对派给叶子与中档 lane（`labor`、`engineer`、`theorist`、`philosopher`、`fusion-worker`、`fusion-deepthink`）的项判断是否把多个主题塞给一个 agent（看主题，不看文件数）；`report-limit` 对每个派发项检查是否限制 worker 汇报的长度（字数、字符、token 上限或“简短汇报”；给交付物定长度不算）。同一项的检查合并成一次模型请求，逐行回答；25 秒中止信号封顶；判定按检查加 prompt 哈希缓存在内存；模型不可用、请求失败或超时时放行（fail-open），单个回答解析不了只放行那一项。模型取 `omomp.*` 的 `task-split-check` 段的 `model`。
 
 #### task-completion-judge
 
-`task-completion-judge/` 在 `task:low`、`task:mid`、`task:free` 的会话里拦截交付用的 `yield`，先让模型判断切片是否真的做完。依据：派工单（最后一条 `session_init` 的 `task` prompt）、system prompt 里的共享背景、worker 自己 todo 的 goal、它最近 50 次工具调用及结果、这次提交的内容。goal 只是 worker 的复述；缩小了范围或衡量方法没做过都判 `NOT_DONE`。判 `NOT_DONE` 时拦下这次 `yield` 一次，要求继续做完并验证；判 `DONE` 后重读 todo 投影，仍有 pending / in_progress 项时也拦一次。两种退回各最多一次。放行的交付附上 `completion_judge`。模型不可用、请求失败和超时直接放行不附注（fail-open）；todo 插件不回答时记 warning 并放行。
+`task-completion-judge/` 在它判定的 lane 会话里拦截交付用的 `yield`（`labor`、`engineer`、`theorist`、`philosopher`、`fusion-worker`、`fusion-deepthink`、`fusion-hierarchical`、`fusion-flattened`），先让模型判断切片是否真的做完。依据：派工单（最后一条 `session_init` 的 `task` prompt）、共享背景、worker 自己 todo 的 goal、能装进 64k token judge 窗口的最新工具调用及结果、这次提交的内容。goal 只是 worker 的复述；缩小了范围或衡量方法没做过都判 `NOT_DONE`。判 `NOT_DONE` 时拦下这次 `yield` 一次，要求继续做完并验证；判 `DONE` 后重读 todo 投影，仍有 pending / in_progress 项时也拦一次。两种退回各最多一次。放行的交付附上 `completion_judge`。模型不可用、请求失败和超时直接放行不附注（fail-open）；todo 插件不回答时记 warning 并放行。judge 模型取 `omomp.*` 的 `task-completion-judge` 段的 `model`。
 
 ### Context 恢复
 
@@ -360,7 +334,7 @@ form 通道的 shell 违规分类、eval 违规正则、节奏（前三次只记
 
 `doc-polish/` 注册 `polish_doc` 工具和 `/polish-doc <path…>` 命令，在不改原意的前提下重排、润色 `.md` / `.txt`。它不改源文件，而是把评审写到 `/tmp/doc-polish/<时间戳>-<文件名>/`：`review.md`（逐组“改之前 / 改之后 / 点评”）、原文副本和切分索引 `split.json`。
 
-**三个子代理**：拆分（自己读原文，写出带起止行号的切分索引和词表）、润色（无工具，按正文不超过 5000 码点分批，返回润色文本和词表变更）、校验（无工具，逐组判断语义是否保持）。模型优先级：工具参数 > `doc-polish.json` > 当前会话模型；仓库配置设了拆分、润色模型和并发 8。所选模型不在可用列表里时立即报错、什么都不写；请求失败最多重试 3 次；润色输出解析不了时该批保留原文并在评审里标出。模型调用时评审路径作为工具结果返回；人调用 `/polish-doc` 时同样内容作为新输入交给主 agent，并附带硬性要求：必须亲自处理、每份评审完整读完。
+**三个子代理**：拆分（自己读原文，写出带起止行号的切分索引和词表）、润色（无工具，按正文不超过 5000 码点分批，返回润色文本和词表变更）、校验（无工具，逐组判断语义是否保持）。模型优先级：工具参数 > 机器专属的 `omomp.*` `doc-polish` 段 > 当前会话模型。所选模型不在可用列表里时立即报错、什么都不写；请求失败最多重试 3 次；润色输出解析不了时该批保留原文并在评审里标出。模型调用时评审路径作为工具结果返回；人调用 `/polish-doc` 时同样内容作为新输入交给主 agent，并附带硬性要求：必须亲自处理、每份评审完整读完。
 
 #### bro
 
@@ -378,10 +352,6 @@ form 通道的 shell 违规分类、eval 违规正则、节奏（前三次只记
 
 overlay 里上下键滚动；解释完整生成后 `C` 复制到剪贴板、`R` 重新生成，`Esc` 关闭。设置在扩展目录旁的 `bro-settings.json`（属于本机，加载时不存在就创建）；自定义 prompt `bro-prompt.md` 必须恰好包含一次 `{{response}}`，有效时完全替代内置模式 prompt。辅助会话不加载扩展。
 
-#### input-polish
-
-`input-polish/` 只作用于主会话的交互式 TUI。在输入框按配置的组合键（默认 `Ctrl+Enter`）代替回车，就用模型润色草稿。润色结果不写进输入框，而是在 overlay 里流式显示；`Enter` 用润色稿替换草稿并走原有提交路径，`Esc` 中止。空白草稿和以 `/`、`!`、`$` 开头的草稿原样通过。改写必须保留原语言、代码、路径、标识符和 `[Paste #N …]`、`[Image #N …]` 占位符；对不上的改写按失败处理、不应用。配置 `input-polish.json` 要求 `model` 和 `instruction`；`key` 可选 `ctrl+enter`（默认，需要终端能区分它和回车）或 `alt+enter`。辅助会话传 `taskDepth: 1`。
-
 #### tool-description-restore
 
 `tool-description-restore/` 恢复 magpie provider 的 `openai-completions` wire 丢掉的工具说明：provider 返回的 function tools 缺 description 时，它在 `before_provider_request` 用会话已注册工具的说明补上。对其他 provider 和 API 不做任何事。
@@ -398,6 +368,16 @@ overlay 里上下键滚动；解释完整生成后 `C` 复制到剪贴板、`R` 
 - **`wt_remove`**：删掉会话所在的 linked worktree，把会话移到主 checkout，分支一律保留。必须调用两次：第一次是只读检查（判定 `SAFE`/`UNSAFE`/`BLOCKED`、删除会永久丢掉什么、到不了的提交、阻塞项、一个由 worktree 状态确定性哈希得到的 `confirm` 值）；第二次重新检查，值不一致或有阻塞就拒绝，然后执行人的 `/move`、确认 cwd、经 OMP 的 VCS 接口强制删除 worktree。回传写明停在哪一步。
 - **拿到 TUI 实例**：扩展 API 不暴露 InteractiveMode；在 `ctx.ui.setEditorComponent` 那一次同步调用里，把原型方法换成只记录 `this` 的函数，调用完立即恢复。
 
+### 运行控制
+
+#### harness-restart
+
+`harness-restart/` 在交互式 TUI 主会话里注册 `harness_restart`：它把人的 `/restart`（同样的启动参数、从磁盘恢复会话）排进队列，而不是自己重写一遍。`/restart` 在流式输出期间拒绝执行，而工具调用总在流式期间发生，所以这次调用只登记请求；一轮真正结束、会话空闲后才执行。重启前它追加一条持久的 custom session entry，下一次 `session_start` 把“restart completed: <原因>”作为归因为 agent 的用户消息注入，重启后的会话因此知道为什么重启。会话切换和关闭会丢掉待执行的请求。
+
+#### model-compaction
+
+`model-compaction/` 让有序正则规则按模型决定压缩触发点，再把结果交给 OMP 原生的 `compaction.modelThresholds`；是否压缩、怎么压缩仍由 OMP 决定。配置是 agent 目录下 `omomp.*` 的 `model-compaction` 段（机器专属，不读项目副本）：`rules: [{provider?, model?, thresholdTokens}]`，`provider` 与 `model` 是不加锚点的 JavaScript 正则，按文件顺序第一条匹配的规则生效。没有有效段时什么都不改。仓库不带任何规则。
+
 ### 兼容性修复
 
 #### commandcode-model-spec
@@ -412,7 +392,7 @@ overlay 里上下键滚动；解释完整生成后 `C` 复制到剪贴板、`R` 
 mkdir -p "$HOME/.omp/agent" "$HOME/.pi/agent"
 # omp 上下文与配置
 cp agent/AGENTS.md agent/RULES.md agent/PERSONALITY.md agent/config.yml \
-  agent/thinking-translator.json "$HOME/.omp/agent/"
+  agent/omomp.yml agent/thinking-translator.json "$HOME/.omp/agent/"
 cp -a agent/agents agent/rules agent/skills agent/extensions agent/extensions-last "$HOME/.omp/agent/"
 # pi 侧（见 pi/README.md；hindsight.jsonc 需要合并，见那里）
 cp pi/AGENTS.md pi/APPEND_SYSTEM.md "$HOME/.pi/agent/"
@@ -422,7 +402,7 @@ cp -a pi/agents "$HOME/.pi/agent/"
 
 说明：
 
-- 这组拷贝整体覆盖文件。已有配置的机器上，`config.yml` 的本机字段（如 `compaction.thresholdTokens`、`theme`、本机自己加的 `disabledExtensions` 条目）和 `extensions` 的本机条目会被覆盖；拷贝后要把它们合并回去。
+- 这组拷贝整体覆盖文件。已有配置的机器上，`config.yml` 的本机字段（如 `compaction.thresholdTokens`、`theme`、本机自己加的 `disabledExtensions` 条目）和 `extensions` 的本机条目会被覆盖；拷贝后要把它们合并回去。`omomp.yml` 也是整文件覆盖，所以机器专属的 `doc-polish`、`model-compaction` 段要合并进仓库那份，而不是留在旁边。
 - `~/.pi/agent/hindsight.json` 已存在时优先于旁边的 `.jsonc`；把仓库的 `hindsight.jsonc` 合并进实际加载的那个文件，不要直接拷。
 - `pi-hindsight` 插件由脚本安装而不链接到 checkout，这样本机跑的是已推送的状态；hindsight 合并后重跑 `./install-plugins.sh`。
 - `models.yml`、`agent.db`、会话、缓存和日志只属于本机。本机的 `~/.pi/agent/STATE.md` 和 `~/.omp/agent/STATE.md` 放带日期的记录。
@@ -448,8 +428,8 @@ cp -a pi/agents "$HOME/.pi/agent/"
 - **扩展目录里新加的文件默认属于本机**：只有 `.ts` 模块和[仓库内容](#仓库内容)列出的自带模板与配置归仓库；上面的拷贝集就是边界。
 - **写扩展代码**：先 `bun install`，交付前 `bun run check`，规范见[目录结构与开发规范](#目录结构与开发规范)。新引入的 `@oh-my-pi/*` 子路径要在没有 `node_modules` 的目录里真实加载一次。
 - **扩展建的辅助会话必须传 `taskDepth: 1`。** 一次性的模型调用统一走 `_shared/helper-session.ts` 的 `runHelperPrompt`，它已经传了；自己建会话的只有 `fork-task` 的 shake，也传了。不传的话 SDK 把它当主会话，`dispose()` 时会销毁全局 `AgentLifecycleManager`，所有空闲 subagent 变成 `Unknown agent`。只调用 `completeSimple` 的扩展（`task-split-check`、`task-completion-judge`）不建会话，不涉及这条。
-- **升级 OMP 后**，在真实 TUI 里重新验证：[fork-task](#fork-task)、[user-prompt-inject](#user-prompt-inject)、[turn-judge](#turn-judge)、[task-completion-judge](#task-completion-judge)、[ctx-tool](#ctx-tool)（含 compact 后注入）、[ctx-tasklog](#ctx-tasklog)、[bro](#bro) 和 [wt-tool](#wt-tool)——它们依赖 OMP 内部实现（registry、会话条目、钩子、宿主投影、TUI 与 worktree 分发器）。todo-more 插件的实现更新在自己的仓库完成；本仓库验证只读协议与消费者结果。
-- **升级 OMP 后**，主会话开始模型回合时如果弹出 `system-prompt-replace: … found no target` 警告，就按新的模板文字改 `system-prompt-replace.json`；上游删掉了规则要改写的那句话时，删掉这条规则。同时确认 [system-prompt-replace](#system-prompt-replace) 依赖的扩展加载顺序没变。
+- **升级 OMP 后**，在真实 TUI 里重新验证：[fork-task](#fork-task)、[user-prompt-inject](#user-prompt-inject)、[task-completion-judge](#task-completion-judge)、[ctx-tool](#ctx-tool)（含 compact 后注入）、[ctx-tasklog](#ctx-tasklog)、[bro](#bro)、[wt-tool](#wt-tool) 和 [harness-restart](#harness-restart)——它们依赖 OMP 内部实现（registry、会话条目、钩子、宿主投影、TUI 与 worktree 分发器）。todo-more 插件的实现更新在自己的仓库完成；本仓库验证只读协议与消费者结果。
+- **升级 OMP 后**，主会话开始模型回合时如果弹出 `system-prompt-replace: … found no target` 警告，就按新的模板文字改 `omomp.yml` 的 `system-prompt-replace` 段；上游删掉了规则要改写的那句话时，删掉这条规则。同时确认 [system-prompt-replace](#system-prompt-replace) 依赖的扩展加载顺序没变。
 - **注入用户消息的扩展写 `attribution: "agent"`。** 否则默认是 `user`，[user-prompt-inject](#user-prompt-inject) 会把它们当成用户原话。
 - **改 agent 定义前**先读 `agent/agents/README.txt`；那个目录里的笔记用 `.txt`，不用 `.md`。
 - **pi 侧的记录**在本仓库的 `pi/README.md`；带日期的记录留在各机器的 `STATE.md` 里。

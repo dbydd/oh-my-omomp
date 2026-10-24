@@ -21,6 +21,4 @@
 
 `extensions/` 目录内部不排序，顺序取决于 native glob 的遍历结果，不是目录名顺序。这里的目录如果放进 `extensions/`，会在第 1 步加载，`config.yml` 里指向同一路径的条目会被当成重复而丢弃。
 
-轻量模式下，`config-light.yml` 把 `extensions` 覆盖成空列表，排除这里的扩展；`omp-light` 再用 `-e` 把本机 `config.yml` 里不在 `extensions-last/` 下的条目（如 `~/.claude`）传回去。
-
-本文件和 `README.md` 不会被加载，也不同步：仓库 → 本机的更新器（启动时自动更新和 `/update-omp`）与 `/sync-omp-config` 只同步扩展目录里的 `*.ts` 和结构化配置 `omomp.yml`（其中 `system-prompt-replace` 段归仓库）。
+本文件和 `README.md` 不会被加载：omp 只读 `index.ts`，根 README 的拷贝集按原样复制整个目录。
