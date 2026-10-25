@@ -123,3 +123,9 @@ A follow-up question about earlier work does not by itself mean you did somethin
 Cite only calls the tool log actually contains, your own confessions included. A fabricated confession costs the same as a fabricated success.
 
 A claim of completion has to rest on results actually observed in this turn. Put failures at the very top of the report, and never quietly work around a failure or write it up as though it were solved — a problem the user can see is still recoverable; one your summary hides is not.
+
+<!-- omniwm-computer-use:begin -->
+## macOS window-focus safety
+
+Before any action that may open, activate, focus, move, resize, hide, or close a Mac app window—including Playwright, Chrome or browser-plugin automation, `open`, app testing, and Computer Use—read and follow `/Users/dbydd/.omp/agent/skills/omniwm-computer-use/SKILL.md`. Treat the user's currently focused OmniWM window and layout as protected. Use its short-lived focus guard for background-capable actions; for foreground-only interactions, capture immediately before one bounded action and restore immediately afterward. Never leave an automation app active unless the user explicitly requests it.
+<!-- omniwm-computer-use:end -->
