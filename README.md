@@ -23,7 +23,7 @@ The reviewable, portable part of an Oh My Pi (OMP) machine configuration, tuned 
 |`agent/thinking-translator.json`|Config of the `omp-thinking-translator` plugin|`~/.omp/agent/thinking-translator.json`|
 |`agent/agents/`|Subagent lane definitions (`*.md`); `README.txt` records verified pitfalls|`~/.omp/agent/agents/`|
 |`agent/rules/`|Rule files for the native rules carrier (for example `tern-session-required.md`)|`~/.omp/agent/rules/`|
-|`agent/skills/`|Portable OMP skills, one directory per skill with `SKILL.md` at its root; currently [computer-use-decider](#computer-use-decider)|`~/.omp/agent/skills/`|
+|`agent/skills/`|Portable OMP skills, including [ui-control](#ui-control) and writing-style|`~/.omp/agent/skills/`|
 |`agent/extensions/`|Local extensions, one directory each; see [Local extensions](#local-extensions)|`~/.omp/agent/extensions/`|
 |`agent/extensions-last/system-prompt-replace/`|The extension that must run last, loaded explicitly as the only `extensions` entry of `config.yml`|`~/.omp/agent/extensions-last/`|
 |`pi/`|The pi-side configuration; see `pi/README.md`|`~/.pi/agent/`|
@@ -112,17 +112,18 @@ Subagent lanes mirror magpie's routers; a lane name is a label and the `model:` 
 
 `agent/skills/` holds portable OMP skills; each directory carries one skill whose root is `SKILL.md`. Copy the directory into `~/.omp/agent/skills/` to install it; skill discovery picks it up on the next session. Skills there run in the main session and subagents alike, and none of them reads or writes a config file.
 
-### computer-use-decider
+### ui-control
 
-`computer-use-decider` speeds up browser and desktop UI work that repeats the same control selection. The agent keeps the goal, the text to type, execution, and verification; a decision call through OMP's JUDGE route picks one observed action per step: build candidates from a `browser` `observe()` or a `computer` AX tree, let the judge choose action and target in one call, execute through the existing element handles, and re-observe. Low confidence, an `inspect` choice, or a failed call hands the step back to the agent.
+`ui-control` is the single entry point for browser and desktop UI work. It merges the former `computer-use-decider` skill with the OmniWM window-focus safety rules: the agent keeps the goal, the text to type, execution, and verification, while a decision call through OMP's JUDGE route picks each observed action. `driveLoop` runs the whole observe-decide-act cycle inside one `computer.run` or `tab.run` scope and hands back on completion, low confidence, a stuck state, or the step budget; `chooseUiAction` runs one decision for surfaces the agent steps through itself.
 
-The skill covers when to use it, the confidence threshold, and the guard rules against page changes and stale targets. The bundled helper `scripts/decider.js` builds candidates and runs the one decision call; it sends no input and opens nothing by itself.
+The skill covers when to use each mode, the confidence threshold, and the guard rules against page changes and stale targets. The bundled helper `scripts/decider.js` builds candidates and runs the decision calls; it sends no input and opens nothing by itself. `references/windows.md` carries the OmniWM focus-guard workflow with the bundled `focus-guard.sh` and `focus-window.sh`.
 
 |What|Where|
 |---|---|
-|Skill instructions|`agent/skills/computer-use-decider/SKILL.md`|
-|Decision helper|`agent/skills/computer-use-decider/scripts/decider.js`|
-|Machine location|`~/.omp/agent/skills/computer-use-decider/`|
+|Skill instructions|`agent/skills/ui-control/SKILL.md`|
+|Decision helper|`agent/skills/ui-control/scripts/decider.js`|
+|Window-safety reference|`agent/skills/ui-control/references/windows.md`|
+|Machine location|`~/.omp/agent/skills/ui-control/`|
 
 ### writing-style
 

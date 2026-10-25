@@ -23,7 +23,7 @@ Oh My Pi（OMP）本机配置中可以审查、可迁移的部分，为重型编
 |`agent/thinking-translator.json`|`omp-thinking-translator` 插件的配置|`~/.omp/agent/thinking-translator.json`|
 |`agent/agents/`|subagent lane 定义（`*.md`）；`README.txt` 记录实测陷阱|`~/.omp/agent/agents/`|
 |`agent/rules/`|原生 rules 载体的规则文件（如 `tern-session-required.md`）|`~/.omp/agent/rules/`|
-|`agent/skills/`|可移植 OMP skill，每个 skill 一个目录、根上是 `SKILL.md`；目前有 [computer-use-decider](#computer-use-decider)|`~/.omp/agent/skills/`|
+|`agent/skills/`|可移植 OMP skill，包括 [ui-control](#ui-control) 和 writing-style|`~/.omp/agent/skills/`|
 |`agent/extensions/`|本地扩展，每个扩展一个目录；见[本地扩展](#本地扩展)|`~/.omp/agent/extensions/`|
 |`agent/extensions-last/system-prompt-replace/`|必须最后运行的扩展，作为 `config.yml` 里唯一的 `extensions` 条目按路径加载|`~/.omp/agent/extensions-last/`|
 |`pi/`|pi 侧配置；见 `pi/README.md`|`~/.pi/agent/`|
@@ -112,17 +112,18 @@ subagent lane 对应 magpie 的 router；lane 名是标签，定义里的 `model
 
 `agent/skills/` 存放可移植的 OMP skill；每个目录一个 skill，根上是 `SKILL.md`。把目录拷进 `~/.omp/agent/skills/` 即安装，下一次会话被 skill 发现机制读取。这里的 skill 在主会话和 subagent 里都可用，都不读写配置文件。
 
-### computer-use-decider
+### ui-control
 
-`computer-use-decider` 为重复做同类控件选择的浏览器和桌面操作提速。agent 保留目标、要输入的文字、执行与核验；通过 OMP 的 JUDGE 路由做一次决策调用，每步只选一个已观察到的动作：从 `browser` 的 `observe()` 或 `computer` 的 AX 树构造候选，让决策模型在一次调用里同时选出动作和目标，用现有元素句柄执行，再重新观察。置信度低、选择 `inspect`、或调用失败时，该步交回 agent。
+`ui-control` 将桌面和浏览器操作统一到一个入口，合并了原 computer-use-decider 与 OmniWM 窗口保护流程。主模型给出目标、输入文字、允许的动作和完成条件，JUDGE 路由负责选择已观察到的控件。`driveLoop` 在一次 `computer.run` 或 `tab.run` 内连续观察、决策和执行；低置信度、状态变化、动作越界或步数用尽时交回主模型。`chooseUiAction` 保留单步决策入口。
 
-skill 正文写明适用场景、置信度阈值，以及针对页面变化和目标失效的防护规则。随附的 `scripts/decider.js` 负责构造候选和发起那次决策调用；它自己不发任何输入，也不打开任何东西。
+`scripts/decider.js` 负责候选构造和循环，通过调用方提供的执行器操作现有元素句柄。`references/windows.md` 与 `focus-guard.sh`、`focus-window.sh` 负责 macOS 焦点、窗口身份与布局保护。主模型核验最终结果。
 
 |内容|位置|
 |---|---|
-|Skill 说明|`agent/skills/computer-use-decider/SKILL.md`|
-|决策 helper|`agent/skills/computer-use-decider/scripts/decider.js`|
-|本机位置|`~/.omp/agent/skills/computer-use-decider/`|
+|Skill 说明|`agent/skills/ui-control/SKILL.md`|
+|决策 helper|`agent/skills/ui-control/scripts/decider.js`|
+|窗口保护|`agent/skills/ui-control/references/windows.md`|
+|本机位置|`~/.omp/agent/skills/ui-control/`|
 
 ### writing-style
 

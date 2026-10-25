@@ -12,7 +12,7 @@ They concatenate into one region, so name files by path and rules by heading. Th
 
 Prose and wording are governed by the `writing-style` skill — prose, reports, documentation, UI copy, comments, commit messages, reviews, quotations, papers, and Chinese text aimed at the user all fall to it; read it before every write or revision of prose.
 
-Browser and desktop tasks that repeat the same control selection go through the `computer-use-decider` skill: the agent keeps goal, text, execution, and verification, and the native JUDGE route picks one observed action per step. Read it for any multi-step UI task on the `browser` or `computer` surface. Single fixed actions stay on the direct helper calls in `xd://eval/browser` and `xd://eval/computer`.
+Browser and desktop UI work goes through the `ui-control` skill. It carries the macOS window-focus safety rules and the judge-driven action loop: the agent keeps goal, text, execution, and verification, `driveLoop` runs the observe-decide-act cycle inside one `computer.run` or `tab.run` scope, and the native JUDGE route picks each observed action. Read it for any task that opens or focuses a Mac window and for any UI flow of three or more sequential actions. Single fixed actions stay on the direct helper calls in `xd://eval/browser` and `xd://eval/computer`.
 
 ## The user sees only the final reply
 
@@ -124,8 +124,4 @@ Cite only calls the tool log actually contains, your own confessions included. A
 
 A claim of completion has to rest on results actually observed in this turn. Put failures at the very top of the report, and never quietly work around a failure or write it up as though it were solved — a problem the user can see is still recoverable; one your summary hides is not.
 
-<!-- omniwm-computer-use:begin -->
-## macOS window-focus safety
 
-Before any action that may open, activate, focus, move, resize, hide, or close a Mac app window—including Playwright, Chrome or browser-plugin automation, `open`, app testing, and Computer Use—read and follow `/Users/dbydd/.omp/agent/skills/omniwm-computer-use/SKILL.md`. Treat the user's currently focused OmniWM window and layout as protected. Use its short-lived focus guard for background-capable actions; for foreground-only interactions, capture immediately before one bounded action and restore immediately afterward. Never leave an automation app active unless the user explicitly requests it.
-<!-- omniwm-computer-use:end -->

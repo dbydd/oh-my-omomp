@@ -6,6 +6,4 @@ export function isPlainObject(value) {
 	return proto === Object.prototype || proto === null;
 }
 
-export function isFinite(value) {
-	return typeof value === "number" && Number.isFinite(value);
-}
+
