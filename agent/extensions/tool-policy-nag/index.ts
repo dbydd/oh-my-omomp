@@ -14,7 +14,7 @@
  *   program it runs, `shell-programs.ts` judges each program, `heuristic.ts`
  *   applies pipeline policy): counts every operation a built-in tool covers
  *   whose output reaches the agent, and once the hits exceed `form.afterHits` sends `form.prompt`
- *   as a steer, at most `form.maxNags` times per context, then goes quiet until a boundary that
+ *   as an aside, at most `form.maxNags` times per context, then goes quiet until a boundary that
  *   replaces the context (compaction, `/clear`, a branch summary). Branch and
  *   tree navigation rebuild the branch's own state; it does not reset it. No
  *   JUDGE request is made and `INTENT-*.md` is not read.
@@ -176,7 +176,11 @@ function heuristicCheck(
 	});
 	commit(detectorArmed ? { kind: "watching", hits, nagsSent } : { kind: "exhausted", hits, nagsSent });
 	if (!deliver) return;
-	pi.sendMessage(nagMessage(form.prompt), { deliverAs: "steer" });
+	// An aside is a custom message injected at the next step boundary. The steer
+	// queue is the human-interjection channel: a custom message delivered there
+	// reaches the model as a user turn, which is what made this reminder read as
+	// the user scolding the model.
+	pi.sendMessage(nagMessage(form.prompt), ctx.isIdle() ? { triggerTurn: true } : { deliverAs: "aside" });
 	ctx.ui.notify(
 		`Shell policy nag ${nagsSent}/${form.maxNags} sent for hit #${hits} (${programs.join(", ")}) — detector ${
 			detectorArmed ? "still armed" : "exhausted until compaction"
