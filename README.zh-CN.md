@@ -423,9 +423,11 @@ cp -a pi/agents "$HOME/.pi/agent/"
 `install-plugins.sh` 声明插件列表并逐项 `omp install`。GitHub 条目全部指向本用户自己的 fork；从上游安装会覆盖定制。
 
 - GitHub fork：`dbydd/omp-todo-more`（decider 门控的停止提醒、subagent todo 安装）、`dbydd/omp-thinking-translator`、`dbydd/pi-hindsight`（子模块的已推送状态）。
-- npm：`pi-intercom`。
+- 本地 checkout：`omp-onlyne`，Onlyne v3 的 OMP 集成，从 `~/Documents/progs/onlyne/packages/omp-onlyne` 链接进来，这样本机跑的是那边正在开发的代码而不是已发布的副本。`omp install <dir>` 是链接而不是拷贝；在那个 checkout 里 `bun run devinstall` 做的是同一个链接。
 
 所有插件都不钉版本：GitHub URL 跟随默认分支，重跑脚本可能升级插件。结果写进 `~/.omp/plugins/`。脚本需要联网，会下载并加载第三方代码。hindsight 合并后重跑它，让子模块的推送状态生效。
+
+Onlyne 的节点配置按项目存放，在 `<project>/.onlyne/config.toml`：region、节点 id、绑定地址，以及身份密钥存在哪里。`/onlyne init` 写第一份并启动节点，在那之前不需要任何文件。本仓库不带 Onlyne 配置并忽略 `.onlyne/`，因为项目级身份密钥不能提交。
 
 `./plugin-audit.sh` 只读：从 fork 点基准提交 `9658fe6f` 起收集 `install-plugins.sh` 里出现过的插件，归一后与 `omp plugin list` 对比，报告缺失（安装）、卸载候选（脚本已移除、本机还装着）、保留（从未登记）和已同步。它只读已提交的版本，改了插件列表要先提交再跑 audit。
 

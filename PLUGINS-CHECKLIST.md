@@ -1,7 +1,7 @@
 # 上游 install-plugins.sh 的 10 个插件：逐个是什么、本机要不要
 
 > 每条来自各插件自己的 README（2026-10-14 读的 HEAD），不是猜的。
-> `本机判定` 列写：本机（magpie 网关 + 当前 `~/.omp/plugins/` 已装 `pi-intercom` / `@luxusai/pi-hindsight` / `omp-thinking-translator`）拿它干什么用。
+> `本机判定` 列写：本机（magpie 网关 + 当前 `~/.omp/plugins/` 已装 `omp-onlyne` / `@dbydd/pi-hindsight-s1enhanced` / `omp-todo-more` / `omp-thinking-translator`）拿它干什么用。
 > 你要装/不装，直接改 `- [ ]`。
 
 ## 总览
@@ -11,7 +11,7 @@
 | 1 | `omp-unified-exec` | 给 omp 加**常驻 shell 会话**：命令不是一次跑完就死，而是开一个 session，之后 `write_stdin` 往里写、轮询读、发 Ctrl-C/方向键；PTY 模式走 headless 终端模拟器，输出是"当前屏幕"而不是所有重绘的累加 | **装**（你已定） |
 | 2 | `omp-todo-more` | 富信息 Todo：替代原生 `todo`，每条任务带 explanation，列表带 goal（objective/measure/doneWhen），保留阶段、提醒、`task:*` 子会话行为 | **装**（你已定） |
 | 3 | `omp-thinking-translator` | 把可见的 assistant thinking 块**只用于显示**地翻译成另一种语言；译文只活在扩展内存里，不进 session 文件、不进下一次请求、不进 compaction | 本机已装 v0.9.1，但 `enabled: false`。上游 `thinking-translator.json` 的四个模型全不可达 → 要么改模型后启用，要么不装 |
-| 4 | `pi-intercom` | 跨会话通信：给另一个 pi 会话发消息、派活、共享上下文 | 本机已装 0.13.0 且 enabled。**已在用，别动** |
+| 4 | `pi-intercom` | 跨会话通信：给另一个 pi 会话发消息、派活、共享上下文 | omp 侧已卸载，改由 `omp-onlyne` 承担（`msg` + `onlyne://`）。pi 侧仍用 intercom：onlyne 没有 pi 集成包 |
 | 5 | `@luxusai/pi-hindsight` | 记忆后端：recall/reflect/retain，本机 config.yml `memory.backend: hindsight` | 本机已装 0.13.0 且 enabled。**已在用，别动**（它不在上游 install-plugins.sh 里，是本机自己加的） |
 | 6 | `pi-commandcode-provider` | 把 Command Code API（commandcode.ai）注册成一个 provider | magpie 已聚合，无第二凭据源。**不装** → 连带 `commandcode-model-spec` 扩展一起删 |
 | 7 | `pi-bansos` | 免费模型 provider：一个 `bansos` provider，上游是 OpenCode Zen + KiloCode 网关，全部模型免费 | magpie 的 81 个模型已含 `opencode-zen/*-free` 十几个免费档。**不装**（除非你要用 magpie 列表之外的特定免费模型） |

@@ -23,8 +23,10 @@ plugins=(
   'https://github.com/dbydd/omp-thinking-translator'
   # dbydd/pi-hindsight: our fork, and the only upstream now.
   'https://github.com/dbydd/pi-hindsight'
-  # npm plugin, no fork needed: no local customizations.
-  'pi-intercom'
+  # dbydd/onlyne: Onlyne v3's OMP integration, linked from its working checkout
+  # instead of installed from npm, so the machine runs the code being developed
+  # there. `bun run devinstall` in that checkout performs the same link.
+  '/Users/dbydd/Documents/progs/onlyne/packages/omp-onlyne'
 )
 
 for plugin in "${plugins[@]}"; do

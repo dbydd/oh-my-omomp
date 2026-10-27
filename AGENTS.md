@@ -225,12 +225,13 @@ that passes and the touched extension has been exercised in a real omp session.
 - **Dev tooling:** `bun install` fetches Biome, TypeScript and the omp host
   packages for types only. `bun.lock` is not committed.
 - **Plugins:** installed by `omp install` into `~/.omp/plugins/`; machine state,
-  never copied into this repository. Every entry points at this user's fork or
-  at npm `pi-intercom`.
+  never copied into this repository. Entries point at this user's fork, at npm,
+  or at the local Onlyne checkout, which `omp install` links instead of copying.
 - **Never commit:** `.gitignore` covers `agent/*.db*`, `agent/*.lock`,
   `agent/models.yml*`, `agent/commandcode-models.json`,
   `agent/{sessions,terminal-sessions,blobs,cache}/`, `plugins/node_modules/`,
-  `node_modules/`, `bun.lock`, `.omp/hindsight/`, `**/*.db`, `**/logs/`, `/.pi`.
+  `node_modules/`, `bun.lock`, `.omp/hindsight/`, `.onlyne/`, `**/*.db`,
+  `**/logs/`, `/.pi`.
 - **Do not overwrite app-managed files:** files marked
   `// @orca-managed-pi-extension` or `marker: _otty` belong to their apps.
 

@@ -423,9 +423,11 @@ Notes:
 `install-plugins.sh` declares the plugin list and runs `omp install` for each entry. Every GitHub entry points at this user's own fork; an install from upstream would overwrite the customizations.
 
 - GitHub forks: `dbydd/omp-todo-more` (decider-gated stop reminders, subagent todo install), `dbydd/omp-thinking-translator`, `dbydd/pi-hindsight` (the submodule's pushed state).
-- npm: `pi-intercom`.
+- Local checkout: `omp-onlyne`, the Onlyne v3 integration, linked from `~/Documents/progs/onlyne/packages/omp-onlyne` so the machine runs the code under development there rather than a published copy. `omp install <dir>` links instead of copying, and `bun run devinstall` in that checkout performs the same link.
 
 Nothing is pinned: GitHub URLs track the default branch, and rerunning the script may upgrade plugins. The result goes into `~/.omp/plugins/`. The script needs the network and downloads and loads third-party code. Re-run it after a hindsight merge to pick up the submodule's pushed state.
+
+Onlyne keeps its node configuration per project, at `<project>/.onlyne/config.toml`: the region, the node id, the bind address, and where the identity key lives. `/onlyne init` writes the first one and starts the node, and no file is required before that. This repository ships no Onlyne config and ignores `.onlyne/`, because a project-scoped identity key must never be committed.
 
 `./plugin-audit.sh` is read-only: it collects every plugin that appeared in `install-plugins.sh` since the fork-point base commit `9658fe6f`, compares the normalized names with `omp plugin list` and reports missing (install), uninstall candidates (removed from the script, still installed), kept (never declared) and in-sync. It reads only committed versions, so commit a changed plugin list before running the audit.
 
