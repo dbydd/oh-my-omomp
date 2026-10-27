@@ -74,7 +74,7 @@ Resolve conflicts by the fork's decisions, not upstream's:
 |`agent/skills/`|Portable skills, one directory each with `SKILL.md`|
 |`agent/extensions/`|Local extensions, one directory each; `_shared/` is not an extension|
 |`agent/extensions-last/`|Extensions that must load last; `system-prompt-replace/` is the only `config.yml` `extensions` entry|
-|`pi/`|pi-side configuration; `pi-hindsight/` is a submodule of the plugin's fork|
+|`pi/`|pi-side configuration; `pi-hindsight/` is the submodule of `dbydd/pi-hindsight-s1enhanced`|
 |`install-plugins.sh`, `plugin-audit.sh`|Plugin list, and the read-only drift report against it|
 
 ## Development commands
@@ -214,8 +214,9 @@ that passes and the touched extension has been exercised in a real omp session.
 - `agent/thinking-translator.json` — the plugin's chain; the repository copy is
   `enabled: false`.
 - `pi/` — `AGENTS.md`, `APPEND_SYSTEM.md`, `agents/` (seven definitions),
-  `hindsight.jsonc`; `pi-hindsight/` is the submodule the plugin is installed
-  from.
+  `hindsight.jsonc`; `pi-hindsight/` is the submodule of
+  `dbydd/pi-hindsight-s1enhanced`, and the plugin itself installs from npm as
+  `@dbydd/pi-hindsight-s1enhanced`.
 
 ## Runtime and tooling
 

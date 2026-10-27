@@ -27,7 +27,7 @@ The reviewable, portable part of an Oh My Pi (OMP) machine configuration, tuned 
 |`agent/extensions/`|Local extensions, one directory each; see [Local extensions](#local-extensions)|`~/.omp/agent/extensions/`|
 |`agent/extensions-last/system-prompt-replace/`|The extension that must run last, loaded explicitly as the only `extensions` entry of `config.yml`|`~/.omp/agent/extensions-last/`|
 |`pi/`|The pi-side configuration; see `pi/README.md`|`~/.pi/agent/`|
-|`pi-hindsight/`|Git submodule: the pi-hindsight fork source|Installed as the `pi-hindsight` plugin|
+|`pi-hindsight/`|Git submodule: the `dbydd/pi-hindsight-s1enhanced` source|The plugin installs from npm as `@dbydd/pi-hindsight-s1enhanced`|
 |`install-plugins.sh`|Declares the plugin list and runs `omp install` for each entry|—|
 |`plugin-audit.sh`|Read-only drift check: script history since the fork point versus `omp plugin list`|—|
 |`package.json`, `biome.json`, `tsconfig.json`|Dev tooling: `bun run check` runs Biome and `tsc --noEmit` over `agent/**/*.ts` and `pi-hindsight` is type-checked in its own repository|—|
@@ -415,14 +415,15 @@ Notes:
 
 - The copy set overwrites whole files. Machine-local fields of `config.yml` (for example `compaction.thresholdTokens`, `theme`, the machine's own `disabledExtensions` additions) and machine entries of `extensions` are replaced; merge them back after copying on a machine with an existing config. `omomp.yml` is overwritten whole, so the machine-local `doc-polish` and `model-compaction` sections must be merged into the repository's copy rather than kept beside it.
 - `~/.pi/agent/hindsight.json` exists and wins over a `.jsonc` beside it; merge the repository's `hindsight.jsonc` into the loaded file instead of copying it.
-- The `pi-hindsight` plugin is installed by the script rather than linked to a checkout, so the machine runs a pushed state; re-run `./install-plugins.sh` after a hindsight merge.
+- The `pi-hindsight` plugin is installed from npm as `@dbydd/pi-hindsight-s1enhanced`, not linked to a checkout, so the machine runs a published release; publish a new version and re-run `./install-plugins.sh` after a change.
 - `models.yml`, `agent.db`, sessions, caches and logs stay machine-only. The machine's `~/.pi/agent/STATE.md` and `~/.omp/agent/STATE.md` carry dated records.
 
 ### Plugins
 
 `install-plugins.sh` declares the plugin list and runs `omp install` for each entry. Every GitHub entry points at this user's own fork; an install from upstream would overwrite the customizations.
 
-- GitHub forks: `dbydd/omp-todo-more` (decider-gated stop reminders, subagent todo install), `dbydd/omp-thinking-translator`, `dbydd/pi-hindsight` (the submodule's pushed state).
+- GitHub forks: `dbydd/omp-todo-more` (decider-gated stop reminders, subagent todo install), `dbydd/omp-thinking-translator`.
+- npm: `@dbydd/pi-hindsight-s1enhanced`, the memory backend. `@luxusai/pi-hindsight` is no longer installed: that line stopped updating.
 - Local checkout: `omp-onlyne`, the Onlyne v3 integration, linked from `~/Documents/progs/onlyne/packages/omp-onlyne` so the machine runs the code under development there rather than a published copy. `omp install <dir>` links instead of copying, and `bun run devinstall` in that checkout performs the same link.
 
 Nothing is pinned: GitHub URLs track the default branch, and rerunning the script may upgrade plugins. The result goes into `~/.omp/plugins/`. The script needs the network and downloads and loads third-party code. Re-run it after a hindsight merge to pick up the submodule's pushed state.

@@ -1,4 +1,4 @@
 [submodule "pi-hindsight"]
 	path = pi-hindsight
-	url = https://github.com/dbydd/pi-hindsight.git
+	url = https://github.com/dbydd/pi-hindsight-s1enhanced.git
 	branch = main

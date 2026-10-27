@@ -27,7 +27,7 @@ Oh My Pi（OMP）本机配置中可以审查、可迁移的部分，为重型编
 |`agent/extensions/`|本地扩展，每个扩展一个目录；见[本地扩展](#本地扩展)|`~/.omp/agent/extensions/`|
 |`agent/extensions-last/system-prompt-replace/`|必须最后运行的扩展，作为 `config.yml` 里唯一的 `extensions` 条目按路径加载|`~/.omp/agent/extensions-last/`|
 |`pi/`|pi 侧配置；见 `pi/README.md`|`~/.pi/agent/`|
-|`pi-hindsight/`|git 子模块：pi-hindsight fork 源码|作为 `pi-hindsight` 插件安装|
+|`pi-hindsight/`|git 子模块：`dbydd/pi-hindsight-s1enhanced` 源码|插件本身从 npm 装 `@dbydd/pi-hindsight-s1enhanced`|
 |`install-plugins.sh`|声明插件列表并逐项 `omp install`|—|
 |`plugin-audit.sh`|只读漂移检查：fork 点以来的脚本历史对比 `omp plugin list`|—|
 |`package.json`、`biome.json`、`tsconfig.json`|开发工具：`bun run check` 对 `agent/**/*.ts` 跑 Biome 和 `tsc --noEmit`；`pi-hindsight` 在自己的仓库里做类型检查|—|
@@ -415,14 +415,15 @@ cp -a pi/agents "$HOME/.pi/agent/"
 
 - 这组拷贝整体覆盖文件。已有配置的机器上，`config.yml` 的本机字段（如 `compaction.thresholdTokens`、`theme`、本机自己加的 `disabledExtensions` 条目）和 `extensions` 的本机条目会被覆盖；拷贝后要把它们合并回去。`omomp.yml` 也是整文件覆盖，所以机器专属的 `doc-polish`、`model-compaction` 段要合并进仓库那份，而不是留在旁边。
 - `~/.pi/agent/hindsight.json` 已存在时优先于旁边的 `.jsonc`；把仓库的 `hindsight.jsonc` 合并进实际加载的那个文件，不要直接拷。
-- `pi-hindsight` 插件由脚本安装而不链接到 checkout，这样本机跑的是已推送的状态；hindsight 合并后重跑 `./install-plugins.sh`。
+- `pi-hindsight` 插件从 npm 装 `@dbydd/pi-hindsight-s1enhanced`，不链接到 checkout，这样本机跑的是已发布的版本；改动后发布新版本再重跑 `./install-plugins.sh`。
 - `models.yml`、`agent.db`、会话、缓存和日志只属于本机。本机的 `~/.pi/agent/STATE.md` 和 `~/.omp/agent/STATE.md` 放带日期的记录。
 
 ### 插件
 
 `install-plugins.sh` 声明插件列表并逐项 `omp install`。GitHub 条目全部指向本用户自己的 fork；从上游安装会覆盖定制。
 
-- GitHub fork：`dbydd/omp-todo-more`（decider 门控的停止提醒、subagent todo 安装）、`dbydd/omp-thinking-translator`、`dbydd/pi-hindsight`（子模块的已推送状态）。
+- GitHub fork：`dbydd/omp-todo-more`（decider 门控的停止提醒、subagent todo 安装）、`dbydd/omp-thinking-translator`。
+- npm：`@dbydd/pi-hindsight-s1enhanced`，记忆后端。`@luxusai/pi-hindsight` 不再安装：那条线已停更。
 - 本地 checkout：`omp-onlyne`，Onlyne v3 的 OMP 集成，从 `~/Documents/progs/onlyne/packages/omp-onlyne` 链接进来，这样本机跑的是那边正在开发的代码而不是已发布的副本。`omp install <dir>` 是链接而不是拷贝；在那个 checkout 里 `bun run devinstall` 做的是同一个链接。
 
 所有插件都不钉版本：GitHub URL 跟随默认分支，重跑脚本可能升级插件。结果写进 `~/.omp/plugins/`。脚本需要联网，会下载并加载第三方代码。hindsight 合并后重跑它，让子模块的推送状态生效。
